@@ -31,19 +31,33 @@ def get_provider_name() -> str:
 
 
 def _build_prompt(state: AgentState) -> str:
-    history_lines = []
+    # Conversation history from prior turns in this session
+    conv_history = state.get("conversation_history", [])
+    conv_lines = []
+    for turn in conv_history[-10:]:  # keep most recent 10 turns to stay within context limits
+        conv_lines.append(f"Q: {turn['question']}\nA: {turn['answer']}")
+    conv_text = "\n\n".join(conv_lines) if conv_lines else ""
+
+    # ReAct action history within the current turn
+    action_lines = []
     for entry in state.get("action_history", []):
         prefix = "Error" if entry.get("is_error") else "Result"
-        history_lines.append(f"Action: {entry['action']}\n{prefix}: {entry['result']}")
+        action_lines.append(f"Action: {entry['action']}\n{prefix}: {entry['result']}")
 
-    history_text = "\n\n".join(history_lines) if history_lines else "None yet."
+    history_text = "\n\n".join(action_lines) if action_lines else "None yet."
+
+    prior_context = (
+        f"Previous conversation in this session:\n{conv_text}\n\n"
+        if conv_text else ""
+    )
 
     return (
         f"<node:plan>\n"
         f"You are a data analysis assistant. Answer the user's question by writing pandas expressions.\n"
         f"The DataFrame is available as `df`.\n\n"
-        f"Question: {state['question']}\n\n"
-        f"Action history:\n{history_text}\n\n"
+        f"{prior_context}"
+        f"Current question: {state['question']}\n\n"
+        f"Action history (this turn):\n{history_text}\n\n"
         f"Instructions:\n"
         f"- If you can now answer definitively, respond with: FINAL ANSWER: <your answer>\n"
         f"- Otherwise respond with ONLY a single pandas expression (no explanation, no markdown).\n"

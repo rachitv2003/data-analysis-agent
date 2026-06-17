@@ -15,100 +15,151 @@
 <div class="card">
   <h2>2. Ask a question</h2>
   <label for="dataset-select">Dataset</label>
-  <select id="dataset-select">
+  <select id="dataset-select" onchange="onDatasetChange()">
     <option value="">— select a dataset —</option>
     {% for ds in datasets %}
     <option value="{{ ds.dataset_id }}">{{ ds.filename }} ({{ ds.row_count }} rows)</option>
     {% endfor %}
   </select>
 
+  <!-- Conversation thread -->
+  <div id="conversation" style="display:none; margin-bottom:16px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+      <span style="font-size:13px; font-weight:600; color:#1e3a5f;">Conversation</span>
+      <button onclick="newConversation()" style="background:#6b7280; font-size:12px; padding:4px 10px;">New conversation</button>
+    </div>
+    <div id="thread"></div>
+  </div>
+
   <label for="question">Your question</label>
   <textarea id="question" placeholder="e.g. What is the average revenue by region?"></textarea>
 
   <button id="ask-btn" onclick="askQuestion()">Ask</button>
   <div id="ask-status"></div>
-  <div id="answer-box" class="answer-box" style="display:none"></div>
 </div>
 
+<style>
+  .turn { border-left: 3px solid #bfdbfe; padding: 10px 14px; margin-bottom: 10px; background:#f8fafc; border-radius: 0 6px 6px 0; }
+  .turn .q { font-size:13px; color:#555; margin-bottom:4px; }
+  .turn .q strong { color:#1e40af; }
+  .turn .a { font-size:14px; line-height:1.6; white-space:pre-wrap; word-break:break-word; }
+  .turn .meta { font-size:11px; color:#9ca3af; margin-top:4px; }
+</style>
+
 <script>
-async function uploadFile() {
-  const fileInput = document.getElementById("csv-file");
-  const status = document.getElementById("upload-status");
-  const info = document.getElementById("dataset-info");
-  const btn = document.getElementById("upload-btn");
+  let currentSessionId = null;
 
-  if (!fileInput.files.length) {
-    status.innerHTML = '<span class="error">Please select a file first.</span>';
-    return;
+  function onDatasetChange() {
+    newConversation();
   }
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span>Uploading...';
-  status.innerHTML = "";
-  info.innerHTML = "";
 
-  const fd = new FormData();
-  fd.append("file", fileInput.files[0]);
+  function newConversation() {
+    currentSessionId = null;
+    document.getElementById("thread").innerHTML = "";
+    document.getElementById("conversation").style.display = "none";
+    document.getElementById("ask-status").innerHTML = "";
+  }
 
-  try {
-    const resp = await fetch("/upload", { method: "POST", body: fd });
-    const body = await resp.json();
-    if (!resp.ok) {
-      status.innerHTML = `<span class="error">Error: ${body.detail?.message || resp.statusText}</span>`;
-    } else {
-      const ds = body.data;
-      status.innerHTML = `<span class="success">Uploaded successfully!</span>`;
-      info.innerHTML = `<strong>${ds.filename}</strong> — ${ds.row_count} rows, ${ds.col_count} columns<br>
-        <span class="col-list">Columns: ${ds.columns.join(", ")}</span>`;
+  function appendTurn(question, answer, iterCount) {
+    const thread = document.getElementById("thread");
+    const div = document.createElement("div");
+    div.className = "turn";
+    div.innerHTML = `
+      <div class="q"><strong>Q:</strong> ${escHtml(question)}</div>
+      <div class="a">${escHtml(answer)}</div>
+      <div class="meta">${iterCount} iteration(s)</div>`;
+    thread.appendChild(div);
+    document.getElementById("conversation").style.display = "block";
+  }
 
-      // Add to dropdown and select it
-      const sel = document.getElementById("dataset-select");
-      const opt = new Option(`${ds.filename} (${ds.row_count} rows)`, ds.dataset_id, true, true);
-      sel.add(opt, 1);
+  function escHtml(s) {
+    return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  }
+
+  async function uploadFile() {
+    const fileInput = document.getElementById("csv-file");
+    const status = document.getElementById("upload-status");
+    const info = document.getElementById("dataset-info");
+    const btn = document.getElementById("upload-btn");
+
+    if (!fileInput.files.length) {
+      status.innerHTML = '<span class="error">Please select a file first.</span>';
+      return;
     }
-  } catch(e) {
-    status.innerHTML = `<span class="error">Network error: ${e.message}</span>`;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "Upload";
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Uploading...';
+    status.innerHTML = "";
+    info.innerHTML = "";
+
+    const fd = new FormData();
+    fd.append("file", fileInput.files[0]);
+
+    try {
+      const resp = await fetch("/upload", { method: "POST", body: fd });
+      const body = await resp.json();
+      if (!resp.ok) {
+        status.innerHTML = `<span class="error">Error: ${body.detail?.message || resp.statusText}</span>`;
+      } else {
+        const ds = body.data;
+        status.innerHTML = `<span class="success">Uploaded successfully!</span>`;
+        info.innerHTML = `<strong>${ds.filename}</strong> — ${ds.row_count} rows, ${ds.col_count} columns<br>
+          <span class="col-list">Columns: ${ds.columns.join(", ")}</span>`;
+        const sel = document.getElementById("dataset-select");
+        const opt = new Option(`${ds.filename} (${ds.row_count} rows)`, ds.dataset_id, true, true);
+        sel.add(opt, 1);
+        newConversation();
+      }
+    } catch(e) {
+      status.innerHTML = `<span class="error">Network error: ${e.message}</span>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Upload";
+    }
   }
-}
 
-async function askQuestion() {
-  const datasetId = document.getElementById("dataset-select").value;
-  const question = document.getElementById("question").value.trim();
-  const status = document.getElementById("ask-status");
-  const answerBox = document.getElementById("answer-box");
-  const btn = document.getElementById("ask-btn");
+  async function askQuestion() {
+    const datasetId = document.getElementById("dataset-select").value;
+    const questionEl = document.getElementById("question");
+    const question = questionEl.value.trim();
+    const status = document.getElementById("ask-status");
+    const btn = document.getElementById("ask-btn");
 
-  if (!datasetId) { status.innerHTML = '<span class="error">Please select a dataset.</span>'; return; }
-  if (!question) { status.innerHTML = '<span class="error">Please enter a question.</span>'; return; }
+    if (!datasetId) { status.innerHTML = '<span class="error">Please select a dataset.</span>'; return; }
+    if (!question) { status.innerHTML = '<span class="error">Please enter a question.</span>'; return; }
 
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span>Thinking...';
-  status.innerHTML = "";
-  answerBox.style.display = "none";
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Thinking...';
+    status.innerHTML = "";
 
-  try {
-    const resp = await fetch("/ask", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({ dataset_id: datasetId, question }),
+    try {
+      const resp = await fetch("/ask", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ dataset_id: datasetId, question, session_id: currentSessionId }),
+      });
+      const body = await resp.json();
+      if (!resp.ok) {
+        status.innerHTML = `<span class="error">Error: ${body.detail?.message || resp.statusText}</span>`;
+      } else {
+        const r = body.data;
+        currentSessionId = r.session_id;
+        appendTurn(question, r.answer || "(no answer returned)", r.iteration_count);
+        questionEl.value = "";
+        status.innerHTML = "";
+      }
+    } catch(e) {
+      status.innerHTML = `<span class="error">Network error: ${e.message}</span>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Ask";
+    }
+  }
+
+  // Allow Ctrl+Enter to submit
+  document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("question").addEventListener("keydown", e => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) askQuestion();
     });
-    const body = await resp.json();
-    if (!resp.ok) {
-      status.innerHTML = `<span class="error">Error: ${body.detail?.message || resp.statusText}</span>`;
-    } else {
-      const r = body.data;
-      answerBox.style.display = "block";
-      answerBox.textContent = r.answer || "(no answer returned)";
-      status.innerHTML = `<span class="success">Completed in ${r.iteration_count} iteration(s)</span>`;
-    }
-  } catch(e) {
-    status.innerHTML = `<span class="error">Network error: ${e.message}</span>`;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "Ask";
-  }
-}
+  });
 </script>
 {% endblock %}

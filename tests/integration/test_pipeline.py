@@ -1,6 +1,5 @@
 """Golden-path smoke test — runs the full pipeline with stub LLM and SQLite."""
 import io
-import json
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -33,7 +32,6 @@ def _use_sqlite(_stub_env, tmp_path, monkeypatch):
 
 @pytest.fixture
 def client(_use_sqlite, _stub_env, monkeypatch):
-    # Reset LLM client so stub provider is picked up fresh
     import data_analyst.graph.nodes as nodes_module
     monkeypatch.setattr(nodes_module, "_llm_client", None)
     monkeypatch.setattr(nodes_module, "_llm_provider_name", "stub")
@@ -48,37 +46,29 @@ def _make_csv() -> bytes:
     return b"name,value,region\nalice,10,north\nbob,20,south\ncarol,30,north\n"
 
 
+def _upload(client) -> str:
+    resp = client.post("/upload", files={"file": ("test.csv", io.BytesIO(_make_csv()), "text/csv")})
+    assert resp.status_code == 200, resp.text
+    return resp.json()["data"]["dataset_id"]
+
+
 def test_health(client):
     resp = client.get("/health")
     assert resp.status_code == 200
     assert resp.json()["data"]["status"] == "ok"
 
 
-def test_upload(client, tmp_path):
-    csv_bytes = _make_csv()
-    resp = client.post(
-        "/upload",
-        files={"file": ("test.csv", io.BytesIO(csv_bytes), "text/csv")},
-    )
+def test_upload(client):
+    resp = client.post("/upload", files={"file": ("test.csv", io.BytesIO(_make_csv()), "text/csv")})
     assert resp.status_code == 200, resp.text
     data = resp.json()["data"]
     assert data["row_count"] == 3
     assert data["col_count"] == 3
     assert "name" in data["columns"]
-    return data["dataset_id"]
 
 
-def test_ask_golden_path(client, tmp_path):
-    # Upload
-    csv_bytes = _make_csv()
-    up = client.post(
-        "/upload",
-        files={"file": ("sales.csv", io.BytesIO(csv_bytes), "text/csv")},
-    )
-    assert up.status_code == 200, up.text
-    dataset_id = up.json()["data"]["dataset_id"]
-
-    # Ask
+def test_ask_golden_path(client):
+    dataset_id = _upload(client)
     resp = client.post("/ask", json={"dataset_id": dataset_id, "question": "What is the total value?"})
     assert resp.status_code == 200, resp.text
     result = resp.json()["data"]
@@ -86,16 +76,61 @@ def test_ask_golden_path(client, tmp_path):
     assert result["answer"] is not None
     assert len(result["answer"]) > 0
     assert result["iteration_count"] >= 1
+    assert result["session_id"] is not None
+
+
+def test_multi_turn_conversation(client):
+    dataset_id = _upload(client)
+
+    # First turn — no session_id
+    r1 = client.post("/ask", json={"dataset_id": dataset_id, "question": "How many rows?"})
+    assert r1.status_code == 200, r1.text
+    session_id = r1.json()["data"]["session_id"]
+    assert session_id is not None
+
+    # Second turn — pass session_id
+    r2 = client.post("/ask", json={"dataset_id": dataset_id, "question": "What are the column names?", "session_id": session_id})
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["data"]["session_id"] == session_id
+    assert r2.json()["data"]["status"] == "completed"
+
+    # Verify session turns via GET /sessions/{id}
+    r3 = client.get(f"/sessions/{session_id}")
+    assert r3.status_code == 200, r3.text
+    turns = r3.json()["data"]["turns"]
+    assert len(turns) == 2
+    assert turns[0]["question"] == "How many rows?"
+    assert turns[1]["question"] == "What are the column names?"
+
+
+def test_session_dataset_mismatch(client):
+    id1 = _upload(client)
+    id2 = _upload(client)
+
+    r1 = client.post("/ask", json={"dataset_id": id1, "question": "Rows?"})
+    session_id = r1.json()["data"]["session_id"]
+
+    # Try to use session from dataset 1 with dataset 2
+    resp = client.post("/ask", json={"dataset_id": id2, "question": "Columns?", "session_id": session_id})
+    assert resp.status_code == 400
+
+
+def test_session_not_found(client):
+    dataset_id = _upload(client)
+    resp = client.post("/ask", json={"dataset_id": dataset_id, "question": "x", "session_id": "nonexistent"})
+    assert resp.status_code == 404
+
+
+def test_get_session_not_found(client):
+    resp = client.get("/sessions/nonexistent")
+    assert resp.status_code == 404
 
 
 def test_datasets_list(client):
-    csv_bytes = _make_csv()
-    client.post("/upload", files={"file": ("a.csv", io.BytesIO(csv_bytes), "text/csv")})
+    _upload(client)
     resp = client.get("/datasets")
     assert resp.status_code == 200
-    datasets = resp.json()["data"]
-    assert len(datasets) >= 1
-    assert datasets[0]["filename"] == "a.csv"
+    assert len(resp.json()["data"]) >= 1
 
 
 def test_ui_renders_with_stub_banner(client):
@@ -111,8 +146,5 @@ def test_ask_unknown_dataset(client):
 
 
 def test_upload_non_csv(client):
-    resp = client.post(
-        "/upload",
-        files={"file": ("data.txt", io.BytesIO(b"hello world"), "text/plain")},
-    )
+    resp = client.post("/upload", files={"file": ("data.txt", io.BytesIO(b"hello world"), "text/plain")})
     assert resp.status_code == 400

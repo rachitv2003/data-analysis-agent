@@ -13,6 +13,7 @@ router = APIRouter()
 class AskRequest(BaseModel):
     dataset_id: str
     question: str
+    session_id: str | None = None
 
 
 @router.post("/ask")
@@ -27,7 +28,13 @@ def ask_question(
     if dataset is None:
         raise api_error("dataset_not_found", f"Dataset {body.dataset_id} not found.", 404)
 
-    run_id = run_agent(body.dataset_id, body.question)
+    try:
+        run_id, session_id = run_agent(body.dataset_id, body.question, body.session_id)
+    except ValueError as exc:
+        msg = str(exc)
+        if "not found" in msg:
+            raise api_error("session_not_found", msg, 404)
+        raise api_error("session_error", msg, 400)
 
     run = session.get(QueryRunRow, run_id)
     if run is None:
@@ -35,6 +42,7 @@ def ask_question(
 
     return ok({
         "run_id": run.id,
+        "session_id": session_id,
         "answer": run.answer,
         "iteration_count": run.iteration_count,
         "status": run.status,

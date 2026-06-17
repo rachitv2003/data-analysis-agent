@@ -31,11 +31,25 @@ class DatasetRow(Base):
     )
 
 
+class ConversationSessionRow(Base):
+    __tablename__ = "conversation_sessions"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=_uuid)
+    dataset_id: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+
 class QueryRunRow(Base):
     __tablename__ = "query_runs"
 
     id: Mapped[str] = mapped_column(Text, primary_key=True, default=_uuid)
     dataset_id: Mapped[str] = mapped_column(Text, nullable=False)
+    session_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     question: Mapped[str] = mapped_column(Text, nullable=False)
     answer: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
