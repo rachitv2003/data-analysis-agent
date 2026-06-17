@@ -121,6 +121,33 @@ def plan_action(state: AgentState) -> AgentState:
         return {**state, "error": str(exc), "status": "failed"}
 
 
+_MAX_ROWS = 100
+_MAX_COLS = 20
+
+
+def _result_to_str(result) -> str:
+    """Serialise a pandas result to a Markdown table (up to 100 rows / 20 cols) or plain string."""
+    try:
+        if isinstance(result, pd.DataFrame):
+            total_rows, total_cols = len(result), len(result.columns)
+            truncated = result.iloc[:_MAX_ROWS, :_MAX_COLS]
+            md = truncated.to_markdown(index=True)
+            notes = []
+            if total_rows > _MAX_ROWS:
+                notes.append(f"showing {_MAX_ROWS} of {total_rows} rows")
+            if total_cols > _MAX_COLS:
+                notes.append(f"showing {_MAX_COLS} of {total_cols} columns")
+            return md + (f"\n\n_({', '.join(notes)})_" if notes else "")
+        if isinstance(result, pd.Series):
+            total = len(result)
+            md = result.head(_MAX_ROWS).to_markdown()
+            note = f"\n\n_(showing {_MAX_ROWS} of {total} rows)_" if total > _MAX_ROWS else ""
+            return md + note
+    except Exception:
+        pass
+    return str(result)
+
+
 def execute_action(state: AgentState) -> AgentState:
     run_id = state["run_id"]
     expression = state.get("llm_response", "").strip()
@@ -131,8 +158,14 @@ def execute_action(state: AgentState) -> AgentState:
 
     history = list(state.get("action_history", []))
     try:
-        result = eval(expression, {"df": df, "pd": pd})  # noqa: S307
-        result_str = str(result)
+        with pd.option_context(
+            "display.max_rows", _MAX_ROWS,
+            "display.max_columns", _MAX_COLS,
+            "display.width", None,
+            "display.max_colwidth", 100,
+        ):
+            result = eval(expression, {"df": df, "pd": pd})  # noqa: S307
+        result_str = _result_to_str(result)
         logger.info("execute_action.ok", run_id=run_id, expr_preview=expression[:60])
         history.append({"action": expression, "result": result_str, "is_error": False})
         return {**state, "action_history": history}

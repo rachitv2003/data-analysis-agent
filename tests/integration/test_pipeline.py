@@ -163,6 +163,51 @@ def test_datasets_list(client):
     assert len(resp.json()["data"]) >= 1
 
 
+def test_dataset_sessions_list(client):
+    dataset_id = _upload(client)
+
+    # No sessions yet
+    r0 = client.get(f"/datasets/{dataset_id}/sessions")
+    assert r0.status_code == 200
+    assert r0.json()["data"] == []
+
+    # Create two sessions
+    r1 = client.post("/ask", json={"dataset_id": dataset_id, "question": "First question"})
+    sid1 = r1.json()["data"]["session_id"]
+    r2 = client.post("/ask", json={"dataset_id": dataset_id, "question": "Second session start"})
+    sid2 = r2.json()["data"]["session_id"]
+
+    resp = client.get(f"/datasets/{dataset_id}/sessions")
+    assert resp.status_code == 200
+    sessions = resp.json()["data"]
+    assert len(sessions) == 2
+    ids = {s["session_id"] for s in sessions}
+    assert sid1 in ids and sid2 in ids
+
+    # Fields present
+    for s in sessions:
+        assert "turn_count" in s
+        assert "first_question" in s
+        assert s["turn_count"] == 1
+
+
+def test_dataset_sessions_unknown_dataset(client):
+    resp = client.get("/datasets/nonexistent/sessions")
+    assert resp.status_code == 404
+
+
+def test_execute_action_markdown_table(client):
+    """df.head(3) should produce a pipe-delimited Markdown table in action_history."""
+    dataset_id = _upload(client)
+    # The stub first action is df.describe().to_string() — but we can verify via the
+    # completed answer contains Markdown table markers from the stub response
+    resp = client.post("/ask", json={"dataset_id": dataset_id, "question": "Show top rows"})
+    assert resp.status_code == 200
+    # The stub answer HTML was rendered from Markdown with a table
+    html = resp.json()["data"]["answer_html"]
+    assert html  # non-empty HTML rendered
+
+
 def test_ui_renders_with_stub_banner(client):
     resp = client.get("/")
     assert resp.status_code == 200

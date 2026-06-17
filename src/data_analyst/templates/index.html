@@ -22,23 +22,49 @@
     {% endfor %}
   </select>
 
+  <!-- Session list -->
+  <div id="session-panel" style="display:none; margin-bottom:16px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+      <span style="font-size:12px; font-weight:600; color:#6b7280; text-transform:uppercase; letter-spacing:.05em;">Sessions</span>
+      <button onclick="startNewSession()" id="new-session-btn" style="background:#1e40af; font-size:12px; padding:4px 10px;">+ New session</button>
+    </div>
+    <div id="session-list"></div>
+  </div>
+
   <!-- Conversation thread -->
   <div id="conversation" style="display:none; margin-bottom:16px;">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-      <span style="font-size:13px; font-weight:600; color:#1e3a5f;">Conversation</span>
-      <button onclick="newConversation()" style="background:#6b7280; font-size:12px; padding:4px 10px;">New conversation</button>
-    </div>
+    <div style="font-size:12px; font-weight:600; color:#6b7280; text-transform:uppercase; letter-spacing:.05em; margin-bottom:8px;">Conversation</div>
     <div id="thread"></div>
   </div>
 
   <label for="question">Your question</label>
-  <textarea id="question" placeholder="e.g. What is the average revenue by region?"></textarea>
+  <textarea id="question" placeholder="e.g. What is the average rating by year?"></textarea>
 
   <button id="ask-btn" onclick="askQuestion()">Ask</button>
   <div id="ask-status"></div>
 </div>
 
 <style>
+  /* session list */
+  .session-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 8px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    border: 1px solid #e5e7eb;
+    margin-bottom: 6px;
+    background: #fff;
+    transition: background .12s;
+  }
+  .session-item:hover  { background: #eff6ff; border-color: #bfdbfe; }
+  .session-item.active { background: #eff6ff; border-color: #3b82f6; border-left: 3px solid #3b82f6; }
+  .session-label { font-size: 13px; color: #1f2937; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .session-meta  { font-size: 11px; color: #9ca3af; white-space: nowrap; margin-left: 12px; flex-shrink: 0; }
+  .session-empty { font-size: 13px; color: #9ca3af; padding: 8px 0; font-style: italic; }
+
+  /* conversation turns */
   .turn {
     border-left: 3px solid #bfdbfe;
     padding: 10px 14px;
@@ -46,61 +72,99 @@
     background: #f8fafc;
     border-radius: 0 6px 6px 0;
   }
-  .turn.failed {
-    border-left-color: #fca5a5;
-    background: #fff7f7;
-  }
-  .turn-q {
-    font-size: 13px;
-    color: #1e40af;
-    font-weight: 600;
-    margin-bottom: 6px;
-  }
-  .answer-body {
-    font-size: 14px;
-    line-height: 1.65;
-    color: #1f2937;
-  }
+  .turn.failed { border-left-color: #fca5a5; background: #fff7f7; }
+  .turn-q { font-size: 13px; color: #1e40af; font-weight: 600; margin-bottom: 6px; }
+  .answer-body { font-size: 14px; line-height: 1.65; color: #1f2937; }
   .answer-body p  { margin: 0 0 8px; }
   .answer-body ul,
   .answer-body ol { margin: 0 0 8px; padding-left: 20px; }
   .answer-body li { margin-bottom: 3px; }
-  .answer-body table {
-    border-collapse: collapse;
-    margin: 8px 0;
-    font-size: 13px;
-    width: auto;
-  }
+  .answer-body table { border-collapse: collapse; margin: 8px 0; font-size: 13px; width: auto; max-width: 100%; overflow-x: auto; display: block; }
   .answer-body th,
-  .answer-body td {
-    border: 1px solid #d1d5db;
-    padding: 5px 10px;
-    text-align: left;
-  }
+  .answer-body td { border: 1px solid #d1d5db; padding: 5px 10px; text-align: left; white-space: nowrap; }
   .answer-body th { background: #eff6ff; font-weight: 600; color: #1e3a5f; }
   .answer-body strong { color: #1e3a5f; }
   .answer-body code { background: #f3f4f6; padding: 1px 4px; border-radius: 3px; font-size: 12px; }
   .answer-body pre  { background: #f3f4f6; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 12px; }
-  .turn-meta {
-    font-size: 11px;
-    color: #9ca3af;
-    margin-top: 6px;
-  }
+  .answer-body em   { color: #6b7280; }
+  .turn-meta { font-size: 11px; color: #9ca3af; margin-top: 6px; }
 </style>
 
 <script>
   let currentSessionId = null;
+  let currentDatasetId = null;
 
-  function onDatasetChange() {
-    newConversation();
+  // ── helpers ──────────────────────────────────────────────────────────────────
+
+  function escHtml(s) {
+    return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   }
 
-  function newConversation() {
+  function relTime(isoStr) {
+    const diff = Math.floor((Date.now() - new Date(isoStr)) / 1000);
+    if (diff < 60) return "just now";
+    if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;
+    return `${Math.floor(diff/86400)}d ago`;
+  }
+
+  // ── session list ─────────────────────────────────────────────────────────────
+
+  async function loadSessionList() {
+    if (!currentDatasetId) return;
+    const list = document.getElementById("session-list");
+    try {
+      const resp = await fetch(`/datasets/${currentDatasetId}/sessions`);
+      const body = await resp.json();
+      if (!resp.ok) { list.innerHTML = ""; return; }
+      const sessions = body.data;
+      document.getElementById("session-panel").style.display = "block";
+      if (!sessions.length) {
+        list.innerHTML = '<div class="session-empty">No previous conversations. Ask a question to start one.</div>';
+        return;
+      }
+      list.innerHTML = sessions.map(s => `
+        <div class="session-item${s.session_id === currentSessionId ? " active" : ""}"
+             onclick="resumeSession('${s.session_id}')">
+          <span class="session-label">${escHtml(s.first_question || "Untitled session")}</span>
+          <span class="session-meta">${s.turn_count} turn${s.turn_count !== 1 ? "s" : ""} &middot; ${relTime(s.updated_at)}</span>
+        </div>`).join("");
+    } catch { list.innerHTML = ""; }
+  }
+
+  async function resumeSession(sessionId) {
+    currentSessionId = sessionId;
+    document.getElementById("thread").innerHTML = "";
+    document.getElementById("conversation").style.display = "none";
+    document.getElementById("ask-status").innerHTML = "";
+
+    try {
+      const resp = await fetch(`/sessions/${sessionId}`);
+      const body = await resp.json();
+      if (!resp.ok) return;
+      for (const turn of body.data.turns) {
+        const html = turn.answer_html || escHtml(turn.answer_markdown || "(no answer)");
+        appendTurn(turn.question, html, turn.iteration_count, turn.tokens_input, turn.tokens_output, turn.status);
+      }
+    } catch { /* silently fail — session turns are non-critical */ }
+
+    // highlight active session
+    document.querySelectorAll(".session-item").forEach(el => el.classList.remove("active"));
+    document.querySelectorAll(".session-item").forEach(el => {
+      if (el.getAttribute("onclick")?.includes(sessionId)) el.classList.add("active");
+    });
+  }
+
+  function startNewSession() {
     currentSessionId = null;
     document.getElementById("thread").innerHTML = "";
     document.getElementById("conversation").style.display = "none";
     document.getElementById("ask-status").innerHTML = "";
+    document.querySelectorAll(".session-item").forEach(el => el.classList.remove("active"));
+    document.getElementById("question").focus();
   }
+
+  // ── conversation thread ───────────────────────────────────────────────────────
 
   function appendTurn(question, answerHtml, iterCount, tokensIn, tokensOut, status) {
     const thread = document.getElementById("thread");
@@ -121,9 +185,15 @@
     div.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 
-  function escHtml(s) {
-    return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  // ── dataset change ────────────────────────────────────────────────────────────
+
+  async function onDatasetChange() {
+    currentDatasetId = document.getElementById("dataset-select").value || null;
+    startNewSession();
+    await loadSessionList();
   }
+
+  // ── upload ────────────────────────────────────────────────────────────────────
 
   async function uploadFile() {
     const fileInput = document.getElementById("csv-file");
@@ -156,7 +226,9 @@
         const sel = document.getElementById("dataset-select");
         const opt = new Option(`${ds.filename} (${ds.row_count} rows)`, ds.dataset_id, true, true);
         sel.add(opt, 1);
-        newConversation();
+        currentDatasetId = ds.dataset_id;
+        startNewSession();
+        await loadSessionList();
       }
     } catch(e) {
       status.innerHTML = `<span class="error">Network error: ${escHtml(e.message)}</span>`;
@@ -166,15 +238,16 @@
     }
   }
 
+  // ── ask ───────────────────────────────────────────────────────────────────────
+
   async function askQuestion() {
-    const datasetId = document.getElementById("dataset-select").value;
     const questionEl = document.getElementById("question");
     const question = questionEl.value.trim();
     const status = document.getElementById("ask-status");
     const btn = document.getElementById("ask-btn");
 
-    if (!datasetId) { status.innerHTML = '<span class="error">Please select a dataset.</span>'; return; }
-    if (!question)  { status.innerHTML = '<span class="error">Please enter a question.</span>'; return; }
+    if (!currentDatasetId) { status.innerHTML = '<span class="error">Please select a dataset.</span>'; return; }
+    if (!question)         { status.innerHTML = '<span class="error">Please enter a question.</span>'; return; }
 
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner"></span>Thinking...';
@@ -184,7 +257,7 @@
       const resp = await fetch("/ask", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({ dataset_id: datasetId, question, session_id: currentSessionId }),
+        body: JSON.stringify({ dataset_id: currentDatasetId, question, session_id: currentSessionId }),
       });
       const body = await resp.json();
       if (!resp.ok) {
@@ -195,6 +268,7 @@
         const html = r.answer_html || escHtml(r.answer_markdown || "(no answer)");
         appendTurn(question, html, r.iteration_count, r.tokens_input, r.tokens_output, r.status);
         questionEl.value = "";
+        await loadSessionList();  // refresh turn count + timestamp
       }
     } catch(e) {
       status.innerHTML = `<span class="error">Network error: ${escHtml(e.message)}</span>`;
@@ -204,10 +278,15 @@
     }
   }
 
+  // ── keyboard shortcut ─────────────────────────────────────────────────────────
+
   document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("question").addEventListener("keydown", e => {
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) askQuestion();
     });
+    // Load sessions if a dataset is pre-selected (e.g. after page refresh)
+    const sel = document.getElementById("dataset-select");
+    if (sel.value) { currentDatasetId = sel.value; loadSessionList(); }
   });
 </script>
 {% endblock %}
