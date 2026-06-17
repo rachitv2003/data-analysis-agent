@@ -1,178 +1,131 @@
-# AI Agent Boilerplate — Spec-Driven, Zero-Shot to Working Agent
+# Data Analysis Agent
 
-This is a boilerplate for building AI agents spec-first. Give it a one-line idea. Walk away with a working, tested, phased agent.
+Upload a CSV, ask questions in plain English, get answers — powered by Google Gemini and a LangGraph ReAct loop.
 
----
-
-## What This Is
-
-A starting point for anyone who wants to build an AI agent without writing boilerplate from scratch. The repo ships with:
-
-- A structured **spec template** covering product vision, architecture, capabilities, data model, API, and UI
-- An **agent-builder** sub-agent that orchestrates the full build lifecycle
-- Sub-agents for spec writing, reviewing, tech design, planning, and auditing
-- Engineering rules baked into the spec so every AI coding session is consistent
-- Phase-gated implementation — minimal working thing first, then iterative expansion
+> **All commands run from the repo root.**
 
 ---
 
-## How to Use This
+## Quick Start
 
-### Step 1 — Clone and configure
+### 1. Install dependencies
 
-```bash
-git clone https://github.com/smallTechOrg/ai-spec-driven-boilerplate.git my-agent
-cd my-agent
+```
+# repo root
+python -m uv sync
+```
+
+### 2. Configure environment
+
+```
+# repo root
 cp .env.example .env
 ```
 
-### Step 2 — Open in Claude Code (or any AI coding assistant)
+Edit `.env` and set `DATA_ANALYST_GEMINI_API_KEY` to your Gemini API key.  
+Leave it blank to run in **stub mode** (a yellow banner appears in the UI, answers are pre-canned).
 
-```bash
-claude
-```
-
-### Step 3 — Kick off the agent builder with your idea
+### 3. Apply database migrations
 
 ```
-/build I want an agent that monitors my Shopify store for low-inventory products and automatically drafts restock emails to suppliers
+# repo root
+python -m uv run alembic upgrade head
+python -m uv run alembic current
 ```
 
-Or just describe your idea naturally — the agent-builder will take it from there.
+`alembic current` must show a revision hash — blank output means the migration was not applied.
+
+### 4. Run the app
+
+```
+# repo root
+python -m uv run python -m data_analyst
+```
+
+Open your browser at **http://localhost:8001**
 
 ---
 
-## What Happens Next (Fully Automated)
+## How it Works
 
-The **agent-builder** orchestrates this sequence:
-
-```
-Your idea
-    ↓
-[spec-writer]     → Asks clarifying questions → Drafts product spec
-    ↓
-[spec-reviewer]   → Checks coherence, flags gaps → Requests revisions
-    ↓
-[spec-writer]     → Iterates until spec is complete
-    ↓
-[tech-designer]   → Proposes tech stack, architecture, data model
-    ↓
-You approve the spec & tech design
-    ↓
-[planner]         → Breaks work into phases (minimal → complete)
-    ↓
-[plan-reviewer]   → Validates plan against spec
-    ↓
-Phase 1: Build the minimal working agent (core loop, no polish)
-    ↓
-[qa-auditor]      → Tests phase 1
-    ↓
-Phase 2, 3, ... : Iterate and expand
-    ↓
-[drift-auditor]   → Ensures code matches spec throughout
-    ↓
-Hand-off to you
-```
-
-**Nothing is skipped.** If a phase fails QA, it stays in that phase until it passes.
+1. **Upload a CSV** — the file is saved to `uploads/` and metadata (rows, columns) is stored in SQLite
+2. **Ask a question** — a LangGraph ReAct loop runs:
+   - Gemini reasons and generates a pandas expression
+   - The expression is executed against your DataFrame
+   - The result is fed back to Gemini iteratively
+   - When Gemini emits `FINAL ANSWER: <text>`, the answer is returned
+3. **Read the answer** — plain-text answer displayed in the browser
 
 ---
 
-## Development Phases (Default Model)
+## Stub Mode
 
-| Phase | What Gets Built |
-|-------|-----------------|
-| 1 | Domain models + data layer |
-| 2 | Core agent loop (no integrations, stubbed tools) |
-| 3 | First real integration (the "happy path" end-to-end) |
-| 4 | Error handling, retries, resilience |
-| 5 | Remaining integrations |
-| 6 | API / CLI surface |
-| 7 | Basic UI (if needed) |
-| 8 | Integration tests |
-| 9 | Observability + logging |
-| 10 | Polish, documentation, hand-off |
+When `DATA_ANALYST_GEMINI_API_KEY` is not set, the app runs in stub mode:
+- A yellow banner is shown on every page
+- The agent runs a `df.describe()` call and returns a canned answer
+- All other functionality (upload, dataset listing) works normally
 
-Each phase ends with a commit and passes QA before the next phase begins.
+To switch to real answers: add your Gemini API key to `.env` and restart the app.
 
 ---
 
-## Repo Layout
+## Running Tests
 
 ```
-.claude/
-  agents/           ← Sub-agents (agent-builder, spec-writer, etc.)
-  commands/         ← Slash commands (/build, /spec-check, /plan)
-.github/
-  copilot-instructions.md  ← Global Copilot instructions (mandatory spec reads)
-  agents/           ← Copilot agent mode definitions (drift-auditor, planner, etc.)
-  prompts/          ← Slash-style Copilot prompts (/plan, /challenge, /spec-check)
-  instructions/     ← Scoped auto-applied rules (code-style, secret-hygiene, etc.)
-spec/
-  product/          ← What your agent does (fill this in or let spec-writer do it)
-  engineering/      ← How AI agents should write code for this project (immutable rules)
-    workflows/      ← Step-by-step procedures for each agent/workflow type
-reports/
-  sessions/         ← Auto-generated session logs from every AI coding session
-CLAUDE.md           ← Entry point for Claude Code
-AGENTS.md           ← Entry point for OpenAI Codex / GitHub Copilot
-.env.example        ← Environment variable template
+# repo root
+python -m uv run pytest
+```
+
+All 14 tests must pass. Tests use SQLite in-memory and the stub LLM — no API key required.
+
+```
+# Unit tests only
+python -m uv run pytest tests/unit/
+
+# Integration tests only
+python -m uv run pytest tests/integration/
 ```
 
 ---
 
-## Manually Editing the Spec
+## Project Layout
 
-If you prefer to write the spec yourself before involving AI:
-
-1. Open `spec/product/01-vision.md` and fill in the placeholders
-2. Work through each file in `spec/product/` in order
-3. Once the spec is complete, run `/plan` to jump straight to the planning phase
-
----
-
-## Rules That AI Agents Follow
-
-Every AI session in this repo follows the rules in `spec/engineering/ai-agents.md`:
-
-- Read the full spec before writing any code
-- Open a session report at `reports/sessions/`
-- Commit every logical unit of work (never accumulate uncommitted changes)
-- One phase at a time — no skipping
-- Write tests before marking a phase complete
-- Update this README whenever the project layout changes
-
----
-
-## FAQ
-
-**Can I use this without Claude Code?**
-Yes. `AGENTS.md` has the same entry point for OpenAI Codex and GitHub Copilot. The sub-agents are plain markdown files.
-
-**What if my agent needs a database?**
-The spec template includes a data model section. The tech-designer sub-agent will recommend the right database for your use case.
-
-**What if I already have a tech stack in mind?**
-Tell the agent-builder upfront: `/build [idea] — use Python + FastAPI + PostgreSQL`. It will skip the tech design Q&A for those decisions.
-
-**What if something breaks?**
-Each phase is resilient by design. The QA auditor will catch failures before the next phase starts. You can always re-run a phase.
+```
+src/data_analyst/
+  api/          ← FastAPI routes (upload, ask, datasets, health, UI)
+  config/       ← Settings via pydantic-settings (env prefix: DATA_ANALYST_)
+  db/           ← SQLAlchemy models + session management
+  domain/       ← Pydantic domain models (Dataset, QueryRun)
+  graph/        ← LangGraph ReAct agent (state, nodes, edges, runner)
+  llm/          ← LLM provider abstraction (Gemini + stub)
+  templates/    ← Jinja2 HTML templates
+  observability/← structlog configuration
+tests/
+  unit/         ← Config, DB model, domain model tests
+  integration/  ← Golden-path smoke tests (upload → ask → answer)
+alembic/        ← Database migrations
+spec/           ← Product and engineering spec
+reports/        ← Session logs
+```
 
 ---
 
-## Test-Branch Workflow
+## Environment Variables
 
-The recommended way to iterate on this boilerplate:
-
-1. Keep `main` as the clean boilerplate — only spec, engineering rules, and agent config.
-2. For each build attempt, create a numbered test branch: `test-1`, `test-2`, etc.
-3. Give the agent-builder a single-line prompt on the test branch. Let it build.
-4. Review and test the result on that branch.
-5. **Never merge the generated application code back to main.** Test branches are disposable.
-6. If a run surfaces a boilerplate improvement (a clearer spec template, a missing rule), cherry-pick or manually apply that fix to `main`.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATA_ANALYST_DATABASE_URL` | `sqlite:///data_analyst.db` | SQLite database path |
+| `DATA_ANALYST_GEMINI_API_KEY` | *(empty)* | Gemini API key — leave blank for stub mode |
+| `DATA_ANALYST_LLM_MODEL` | `gemini-2.5-flash` | Gemini model name |
+| `DATA_ANALYST_MAX_ITERATIONS` | `10` | Max ReAct loop iterations |
+| `DATA_ANALYST_LOG_LEVEL` | `INFO` | Logging level |
+| `PORT` | `8001` | HTTP server port |
 
 ---
 
-## Contributing
+## What's Deferred (Future Phases)
 
-This is a boilerplate, not a framework. Improvements to the spec templates, engineering rules, agent definitions, or workflow specs belong on `main`. Generated application code does not.
+- Visual charts and dashboards
+- Multi-turn conversation history
+- Proactive data insights / auto-profiling
+- Multi-user support / authentication

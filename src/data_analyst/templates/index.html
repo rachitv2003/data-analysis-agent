@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block content %}
+
+<!-- Upload Section -->
+<div class="card">
+  <h2>1. Upload a CSV file</h2>
+  <label for="csv-file">Select file (.csv only)</label>
+  <input type="file" id="csv-file" accept=".csv">
+  <button id="upload-btn" onclick="uploadFile()">Upload</button>
+  <div id="upload-status"></div>
+  <div id="dataset-info" class="dataset-info"></div>
+</div>
+
+<!-- Ask Section -->
+<div class="card">
+  <h2>2. Ask a question</h2>
+  <label for="dataset-select">Dataset</label>
+  <select id="dataset-select">
+    <option value="">— select a dataset —</option>
+    {% for ds in datasets %}
+    <option value="{{ ds.dataset_id }}">{{ ds.filename }} ({{ ds.row_count }} rows)</option>
+    {% endfor %}
+  </select>
+
+  <label for="question">Your question</label>
+  <textarea id="question" placeholder="e.g. What is the average revenue by region?"></textarea>
+
+  <button id="ask-btn" onclick="askQuestion()">Ask</button>
+  <div id="ask-status"></div>
+  <div id="answer-box" class="answer-box" style="display:none"></div>
+</div>
+
+<script>
+async function uploadFile() {
+  const fileInput = document.getElementById("csv-file");
+  const status = document.getElementById("upload-status");
+  const info = document.getElementById("dataset-info");
+  const btn = document.getElementById("upload-btn");
+
+  if (!fileInput.files.length) {
+    status.innerHTML = '<span class="error">Please select a file first.</span>';
+    return;
+  }
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Uploading...';
+  status.innerHTML = "";
+  info.innerHTML = "";
+
+  const fd = new FormData();
+  fd.append("file", fileInput.files[0]);
+
+  try {
+    const resp = await fetch("/upload", { method: "POST", body: fd });
+    const body = await resp.json();
+    if (!resp.ok) {
+      status.innerHTML = `<span class="error">Error: ${body.detail?.message || resp.statusText}</span>`;
+    } else {
+      const ds = body.data;
+      status.innerHTML = `<span class="success">Uploaded successfully!</span>`;
+      info.innerHTML = `<strong>${ds.filename}</strong> — ${ds.row_count} rows, ${ds.col_count} columns<br>
+        <span class="col-list">Columns: ${ds.columns.join(", ")}</span>`;
+
+      // Add to dropdown and select it
+      const sel = document.getElementById("dataset-select");
+      const opt = new Option(`${ds.filename} (${ds.row_count} rows)`, ds.dataset_id, true, true);
+      sel.add(opt, 1);
+    }
+  } catch(e) {
+    status.innerHTML = `<span class="error">Network error: ${e.message}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Upload";
+  }
+}
+
+async function askQuestion() {
+  const datasetId = document.getElementById("dataset-select").value;
+  const question = document.getElementById("question").value.trim();
+  const status = document.getElementById("ask-status");
+  const answerBox = document.getElementById("answer-box");
+  const btn = document.getElementById("ask-btn");
+
+  if (!datasetId) { status.innerHTML = '<span class="error">Please select a dataset.</span>'; return; }
+  if (!question) { status.innerHTML = '<span class="error">Please enter a question.</span>'; return; }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Thinking...';
+  status.innerHTML = "";
+  answerBox.style.display = "none";
+
+  try {
+    const resp = await fetch("/ask", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ dataset_id: datasetId, question }),
+    });
+    const body = await resp.json();
+    if (!resp.ok) {
+      status.innerHTML = `<span class="error">Error: ${body.detail?.message || resp.statusText}</span>`;
+    } else {
+      const r = body.data;
+      answerBox.style.display = "block";
+      answerBox.textContent = r.answer || "(no answer returned)";
+      status.innerHTML = `<span class="success">Completed in ${r.iteration_count} iteration(s)</span>`;
+    }
+  } catch(e) {
+    status.innerHTML = `<span class="error">Network error: ${e.message}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Ask";
+  }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,13 @@
+from typing import TypedDict
+
+
+class AgentState(TypedDict, total=False):
+    run_id: str
+    dataset_id: str
+    question: str
+    action_history: list[dict]   # [{"action": str, "result": str, "is_error": bool}]
+    iteration_count: int
+    llm_response: str            # raw last LLM output — router checks for FINAL ANSWER
+    answer: str | None
+    error: str | None
+    status: str                  # completed | failed
