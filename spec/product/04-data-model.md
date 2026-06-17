@@ -30,11 +30,13 @@ A single question asked against a dataset and the agent's answer.
 | dataset_id      | TEXT FK  | yes      | References datasets.id |
 | session_id      | TEXT FK  | no       | References conversation_sessions.id (null = single-turn) |
 | question        | TEXT     | yes      | User's natural language question |
-| answer          | TEXT     | no       | Agent's final answer (null while running) |
+| answer          | TEXT     | no       | Agent's final answer in Markdown (null while running) — C6 |
 | status          | TEXT     | yes      | pending / running / completed / failed |
 | error_message   | TEXT     | no       | Set on failure |
 | action_history  | TEXT     | no       | JSON array of {action, result, is_error} |
 | iteration_count | INTEGER  | yes      | How many ReAct iterations ran (default 0) |
+| tokens_input    | INTEGER  | yes      | Total prompt tokens sent to LLM across all iterations (default 0) — C7 |
+| tokens_output   | INTEGER  | yes      | Total completion tokens received from LLM (default 0) — C7 |
 | created_at      | DATETIME | yes      | UTC timestamp |
 | updated_at      | DATETIME | yes      | UTC, updated on status change |
 

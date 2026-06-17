@@ -86,8 +86,11 @@ REST. All routes return `{"data": ..., "error": null}` on success or raise HTTP 
   "data": {
     "run_id": "uuid",
     "session_id": "uuid",
-    "answer": "The total revenue by region is: North $1.2M, South $0.8M",
+    "answer_markdown": "The total revenue by region is:\n\n| Region | Revenue |\n|--------|--------|\n| North | **$1.2M** |\n| South | **$0.8M** |",
+    "answer_html": "<p>The total revenue by region is:</p><table>...",
     "iteration_count": 3,
+    "tokens_input": 312,
+    "tokens_output": 87,
     "status": "completed"
   },
   "error": null
