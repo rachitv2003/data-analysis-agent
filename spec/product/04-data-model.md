@@ -20,6 +20,7 @@ Metadata about an uploaded CSV file.
 | columns_json | TEXT     | yes      | JSON array of column names |
 | content_hash | TEXT     | yes      | SHA-256 hex digest of raw file bytes (default '' for pre-C10 rows) — C10 |
 | format       | TEXT     | yes      | File format: csv / tsv / txt / json (default 'csv' for pre-C11 rows) — C11 |
+| context      | TEXT     | no       | User-provided plain-text notes injected into every prompt for this dataset — C12 |
 | created_at   | DATETIME | yes      | UTC timestamp |
 
 ### Entity: QueryRun
@@ -36,9 +37,10 @@ A single question asked against a dataset and the agent's answer.
 | status          | TEXT     | yes      | pending / running / completed / failed |
 | error_message   | TEXT     | no       | Set on failure |
 | action_history  | TEXT     | no       | JSON array of {action, result, is_error} |
-| iteration_count | INTEGER  | yes      | How many ReAct iterations ran (default 0) |
-| tokens_input    | INTEGER  | yes      | Total prompt tokens sent to LLM across all iterations (default 0) — C7 |
-| tokens_output   | INTEGER  | yes      | Total completion tokens received from LLM (default 0) — C7 |
+| iteration_count  | INTEGER  | yes      | How many ReAct iterations ran (default 0) |
+| tokens_input     | INTEGER  | yes      | Total prompt tokens sent to LLM across all iterations (default 0) — C7 |
+| tokens_output    | INTEGER  | yes      | Total completion tokens received from LLM (default 0) — C7 |
+| dataset_ids_json | TEXT     | no       | JSON array of all queried dataset IDs (null for single-dataset runs) — C14 |
 | created_at      | DATETIME | yes      | UTC timestamp |
 | updated_at      | DATETIME | yes      | UTC, updated on status change |
 
