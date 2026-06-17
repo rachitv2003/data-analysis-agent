@@ -1,34 +1,54 @@
 # Data Model
 
-> **Boilerplate status:** Filled in by the tech-designer sub-agent after architecture is approved.
-
----
-
 ## Storage Technology
 
-<!-- FILL IN: What database/storage does this project use and why? -->
+SQLite via SQLAlchemy 2.0. File-based, zero configuration, ships with Python. Sufficient for single-user workloads.
 
 ## Entities
 
-<!-- FILL IN: One section per major entity. -->
+### Entity: Dataset
 
-### Entity: <!-- Name -->
+Metadata about an uploaded CSV file.
 
-<!-- FILL IN: What does this entity represent? -->
+| Field        | Type     | Required | Description |
+|--------------|----------|----------|-------------|
+| id           | TEXT PK  | yes      | UUID |
+| filename     | TEXT     | yes      | Original filename from upload |
+| file_path    | TEXT     | yes      | Absolute path to saved CSV on disk |
+| row_count    | INTEGER  | yes      | Number of data rows |
+| col_count    | INTEGER  | yes      | Number of columns |
+| columns_json | TEXT     | yes      | JSON array of column names |
+| created_at   | DATETIME | yes      | UTC timestamp |
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| id | <!-- type --> | yes | Primary key |
-| <!-- field --> | <!-- type --> | <!-- yes/no --> | <!-- description --> |
+### Entity: QueryRun
+
+A single question asked against a dataset and the agent's answer.
+
+| Field           | Type     | Required | Description |
+|-----------------|----------|----------|-------------|
+| id              | TEXT PK  | yes      | UUID |
+| dataset_id      | TEXT FK  | yes      | References datasets.id |
+| question        | TEXT     | yes      | User's natural language question |
+| answer          | TEXT     | no       | Agent's final answer (null while running) |
+| status          | TEXT     | yes      | pending / running / completed / failed |
+| error_message   | TEXT     | no       | Set on failure |
+| action_history  | TEXT     | no       | JSON array of {action, result, is_error} |
+| iteration_count | INTEGER  | yes      | How many ReAct iterations ran (default 0) |
+| created_at      | DATETIME | yes      | UTC timestamp |
+| updated_at      | DATETIME | yes      | UTC, updated on status change |
 
 ### Relationships
 
-<!-- FILL IN: How do entities relate to each other? -->
+- `QueryRun.dataset_id` → `Dataset.id` (many-to-one)
+- A Dataset can have many QueryRuns
 
 ## Data Lifecycle
 
-<!-- FILL IN: When is data created, updated, and deleted? Is anything time-boxed or archived? -->
+- Datasets persist indefinitely (no TTL in v0.1)
+- QueryRuns persist indefinitely; status transitions: pending → running → completed/failed
+- CSV files on disk remain until manually deleted
 
 ## Sensitive Data
 
-<!-- FILL IN: What fields contain PII or secrets? How are they protected? -->
+- No PII stored in v0.1
+- The uploaded CSV may contain user data — it is stored only on the local filesystem and never sent to any service other than the Gemini API (as context in prompts)

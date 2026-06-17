@@ -1,132 +1,71 @@
 # Tech Stack
 
-> **Boilerplate status:** Filled in by the tech-designer sub-agent after the product spec is approved. The user may override specific choices before the tech-designer is invoked.
->
-> **Recommended defaults** (override any of these if the project calls for something different):
-> - **Backend language:** Python 3.12+ (agent logic, data processing, API server)
-> - **Frontend/tooling language:** Node.js 20+ (UI, build tooling, CLI scripts)
-> - **Database:** SQLite (zero-ops, file-based, ships with Python — upgrade to PostgreSQL only when multi-user concurrency requires it)
-
----
-
 ## Language
 
-<!-- FILL IN: e.g., Python 3.12 / TypeScript 5 / Go 1.22 -->
-<!-- Recommended: Python 3.12 for backend agent logic; Node.js 20 for any frontend/tooling layer -->
+**Python 3.12+**
 
-**Why:** <!-- reason for this choice -->
+**Why:** User requested Python. Best ecosystem for data analysis (pandas), FastAPI, and LangGraph.
 
 ## Agent Framework
 
-<!-- FILL IN: e.g., LangGraph / CrewAI / AutoGen / custom / none -->
+**LangGraph** (StateGraph — ReAct loop)
 
-**Why:** <!-- reason for this choice -->
+**Why:** Native ReAct loop support, clean state management, required by spec Rule 9 for tool-using agents.
 
 ## LLM Provider
 
-<!-- FILL IN: e.g., Anthropic Claude / OpenAI GPT / Google Gemini -->
+**Google Gemini**
 
-**Model:** <!-- specific model, e.g., claude-sonnet-4-6 -->
+**Model:** `gemini-2.5-flash` (configurable via `DATA_ANALYST_LLM_MODEL`)
 
-**Why:** <!-- reason -->
+**Why:** User has a Gemini API key. `gemini-2.5-flash` is the current safe default as of 2026 (see tech-stack rule).
 
-## Backend Framework (if applicable)
+## Backend Framework
 
-<!-- FILL IN: e.g., FastAPI / Express / Django / none -->
-<!-- Recommended: FastAPI (Python) for agent APIs -->
+**FastAPI** — async HTTP server, file upload, Jinja2 templating, auto-generated OpenAPI docs.
 
-## Database (if applicable)
+## Database
 
-<!-- FILL IN: e.g., SQLite / PostgreSQL / Redis / none -->
-<!-- Recommended: SQLite — file-based, zero configuration, built into Python's stdlib. Sufficient for single-user and low-concurrency workloads. Upgrade to PostgreSQL only when multi-user writes or full-text search require it. -->
+**SQLite** via SQLAlchemy 2.0 declarative ORM.
 
-**ORM/ODM:** <!-- e.g., SQLAlchemy 2.0 / Prisma / none -->
-<!-- Recommended: SQLAlchemy 2.0 (Python) — works with both SQLite and PostgreSQL, so upgrades are migration-only -->
+**Why:** User requested SQLite. Zero configuration, file-based, single-user workload.
 
-## Frontend (if applicable)
+**ORM:** SQLAlchemy 2.0 (Mapped types, `DeclarativeBase`)
 
-<!-- FILL IN: e.g., Next.js 15 / React / Vue / none -->
-<!-- Recommended: Node.js 20 + a lightweight framework (e.g. Vite + React) for any browser UI -->
+## Frontend
+
+**Jinja2** server-rendered HTML templates. No JS framework or build step for v0.1.
 
 ## Key Libraries
 
-<!-- FILL IN: List the important libraries and what each does. -->
-
 | Library | Version | Purpose |
 |---------|---------|---------|
-| <!-- name --> | <!-- version --> | <!-- purpose --> |
+| fastapi | >=0.115 | HTTP server + routing |
+| uvicorn | >=0.30 | ASGI server |
+| jinja2 | >=3.1 | Server-rendered HTML templates |
+| python-multipart | >=0.0.9 | File upload parsing |
+| sqlalchemy | >=2.0 | ORM + SQLite driver |
+| alembic | >=1.13 | Database migrations |
+| pydantic-settings | >=2.0 | Settings from env vars |
+| langgraph | >=0.2 | ReAct agent orchestration |
+| google-generativeai | >=0.8 | Gemini API client |
+| pandas | >=2.0 | CSV loading + data operations |
+| structlog | >=24.0 | Structured logging |
 
 ## What to Avoid
 
-<!-- FILL IN: Libraries, patterns, or approaches that are explicitly off-limits and why. -->
+- No SQLite → PostgreSQL migration in v0.1 (out of scope)
+- No async pandas (synchronous is fine for single-user)
+- No React/Next.js frontend (Jinja2 is sufficient for v0.1)
+- No LangChain (use LangGraph + google-generativeai directly)
 
 ## Dependency Management
 
-<!-- FILL IN: e.g., uv + pyproject.toml / npm / pnpm / go modules -->
-<!-- Recommended: uv + pyproject.toml (Python); npm or pnpm (Node.js) -->
+`uv` + `pyproject.toml`
 
----
+## Permanent Rules
 
-## Permanent Rules (apply to all projects, not filled in by tech-designer)
-
-### Default Dev Port
-
-All generated projects **must** use **port 8001** as the default development port (not 8000).
-
-Reason: Port 8000 is commonly occupied by other local services (other FastAPI apps, Django, http.server, etc.). Using 8001 avoids startup failures with no code change needed.
-
-- `__main__.py` must hard-code `port=8001` (not 8000) unless overridden by an env var
-- README must reference `http://localhost:8001`
-- `.env.example` should include `PORT=8001` if the port is configurable
-
-### LLM Model Name Rule
-
-**Always use a current, verified model name — never a deprecated or guessed one.**
-
-- For Google Gemini: use **`gemini-2.0-flash`** as the default (not `gemini-1.5-flash` — deprecated and removed from the API).
-- Model names change. Before hardcoding any model identifier, verify it exists by calling the provider's `ListModels` API or checking current documentation.
-- The model name must be configurable via an env var (e.g. `APPNAME_LLM_MODEL`) so it can be changed without a code deployment.
-- A 404 NOT_FOUND error from the LLM API almost always means the model name is wrong — check the name first before debugging anything else.
-
-Current safe defaults (as of 2026):
-
-| Provider | Default model | Notes |
-|----------|---------------|-------|
-| Google Gemini | `gemini-2.5-flash` | `gemini-2.0-flash` and `gemini-1.5-flash` unavailable for new users |
-| OpenAI | `gpt-4o-mini` | |
-| Anthropic | `claude-3-5-haiku-latest` | |
-
-### DB Driver Rule
-
-The database driver (e.g. `psycopg2-binary` for PostgreSQL, `asyncpg` for async PostgreSQL) **must be declared in the main `[project.dependencies]` block**, never in `[dependency-groups.dev]` or equivalent dev-only groups.
-
-Reason: Alembic migrations run at deploy/setup time, not just in tests. If the driver is dev-only, `alembic upgrade head` fails in any environment that didn't install dev deps.
-
-### Test Environment Rule
-
-**Tests must use the same database driver as production.** If the production DB is PostgreSQL, tests run against PostgreSQL — not SQLite.
-
-- Tests that pass on SQLite but were never run against PostgreSQL are **not a passing gate**.
-- The test database must be set up automatically. Use `conftest.py` to create and tear down the test database. No manual steps.
-- The test database URL is provided via environment variable (e.g. `TEST_DATABASE_URL` or reuse the app's `DATABASE_URL` pointing at a `_test` database). The `conftest.py` session fixture creates all tables before tests run and drops them after.
-- A `.env.test` file (gitignored) or CI environment variable provides the test DB URL. The README must document this.
-
-Example `conftest.py` pattern for PostgreSQL + SQLAlchemy (sync):
-
-```python
-import pytest
-from sqlalchemy import create_engine, text
-from yourapp.db.models import Base
-from yourapp.config.settings import get_settings
-
-@pytest.fixture(scope="session", autouse=True)
-def _setup_test_db():
-    settings = get_settings()
-    engine = create_engine(settings.database_url)
-    Base.metadata.create_all(engine)
-    yield
-    Base.metadata.drop_all(engine)
-    engine.dispose()
-```
-
-The `DATABASE_URL` in `.env` (or `.env.test`) must point at a real PostgreSQL test database before running tests.
+- Default dev port: **8001** (not 8000)
+- All commands prefixed with `uv run`
+- Model name configurable via env var `DATA_ANALYST_LLM_MODEL`
+- `provider=auto`: real Gemini when `GEMINI_API_KEY` set, stub otherwise

@@ -1,50 +1,59 @@
 # Architecture
 
-> **Boilerplate status:** Filled in by the tech-designer sub-agent after the product spec is approved.
-
----
-
 ## System Overview
 
-<!-- FILL IN: One paragraph describing the system at a high level. Who/what interacts with it? -->
-
-## Component Map
-
-<!-- FILL IN: List the major components and what each does. -->
-
 ```
-[Component A]
-    ↓
-[Component B]   ←→   [External Service]
-    ↓
-[Component C]
+Browser
+  │
+  ▼
+FastAPI (port 8001)
+  ├── POST /upload          → saves CSV to disk, creates DatasetRow in SQLite
+  ├── POST /ask             → creates QueryRun, invokes agent, returns answer
+  ├── GET  /datasets        → lists uploaded datasets
+  └── GET  /                → serves the main UI (Jinja2)
+  │
+  ▼
+LangGraph ReAct Agent
+  ├── setup          → loads CSV into pandas DataFrame (keyed by run_id)
+  ├── plan_action    → Gemini reasons: which pandas op to run next, or FINAL ANSWER
+  ├── execute_action → runs the pandas expression, captures result as string
+  ├── handle_error   → appends error to history, routes back to plan_action (retry)
+  └── finalize       → saves answer + history to QueryRun; releases DataFrame
+  │
+  ▼
+SQLite (data_analyst.db)
+  ├── datasets   → id, filename, file_path, row_count, col_count, columns_json, created_at
+  └── query_runs → id, dataset_id, question, answer, status, error_message,
+                   action_history, iteration_count, created_at, updated_at
 ```
 
 ## Layers
 
-<!-- FILL IN: Describe the layers of the system (e.g., API → Agent Loop → Tools → Storage). -->
-
 | Layer | Responsibility |
 |-------|----------------|
-| <!-- layer --> | <!-- responsibility --> |
+| FastAPI routes | HTTP request handling, file upload, response envelope |
+| LangGraph graph | ReAct loop orchestration (setup → plan → execute → loop → finalize) |
+| LLM provider | Wraps Gemini API (or stub); called only from plan_action node |
+| Tools (pandas) | Pure functions that execute pandas expressions against the loaded DataFrame |
+| SQLAlchemy / SQLite | Persist dataset metadata and query run results |
+| Jinja2 templates | Server-rendered HTML — no JS build step |
 
 ## Data Flow
 
-<!-- FILL IN: Walk through the main data flow from trigger to output. -->
-
-1. Trigger: <!-- how does the agent start? (cron, webhook, user input, etc.) -->
-2. <!-- step 2 -->
-3. <!-- step 3 -->
-4. Output: <!-- what does the agent produce? -->
+1. **Upload:** User submits CSV → FastAPI saves file to `uploads/` → creates DatasetRow → returns dataset_id
+2. **Ask:** User submits {dataset_id, question} → FastAPI creates QueryRun (status=pending) → invokes agent
+3. **Agent setup:** loads CSV as pandas DataFrame, caches by run_id
+4. **ReAct loop:** plan_action → Gemini → pandas expression → execute_action → result appended to history → loop
+5. **Termination:** Gemini emits `FINAL ANSWER: <text>` → finalize saves answer → status=completed
+6. **Response:** FastAPI returns {run_id, answer, iteration_count, status}
 
 ## External Dependencies
 
-<!-- FILL IN: APIs, services, databases the agent depends on. -->
-
 | Dependency | Purpose | Failure Mode |
 |------------|---------|--------------|
-| <!-- name --> | <!-- what it does --> | <!-- what happens if it's down --> |
+| Google Gemini API | LLM reasoning for ReAct loop | Falls back to stub provider; request fails with 503 |
+| Local filesystem | CSV file storage (`uploads/`) | Upload fails with 500; existing datasets unaffected |
 
 ## Deployment Model
 
-<!-- FILL IN: How does this run? (local script, cloud function, long-running service, etc.) -->
+Single-process FastAPI app running locally via `uv run python -m data_analyst`. SQLite database file at `data_analyst.db`. Uploads directory at `uploads/`. No external services required beyond Gemini API.

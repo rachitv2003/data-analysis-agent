@@ -1,136 +1,98 @@
 # Agent Graph
 
-> **Boilerplate status:** Required when the project uses an agent framework (LangGraph, CrewAI, AutoGen, etc.). Filled in by the tech-designer sub-agent as part of the tech design stage.
->
-> If your project has no agent framework (e.g., it's a simple script or API), delete this file.
->
-> The spec-reviewer treats this file as a **CRITICAL BLOCKER** — the tech design will not be approved if this file is absent or incomplete when an agent framework is in use.
->
-> **If the agent acts on the outside world** (tools, data, search — see Rule #9), it must use a **ReAct loop**. This file must then answer the six pre-coding questions in `spec/engineering/ai-agents.md` Section 10, the State below must carry the loop-control fields, and Edge Topology must show the `plan_action → execute_action` loop, not a one-shot pipeline.
+## Graph Type
 
----
+LangGraph `StateGraph` — ReAct (Reason + Act) loop.
 
 ## State
 
-<!-- FILL IN: Define the agent's state type. Every field must be named and typed. -->
-
 ```python
-class AgentState(TypedDict):
-    # Identity
-    run_id: int
-    # ... add all fields
-
-    # Pipeline data (populated progressively by nodes)
-    # ...
-
-    # Control
-    error: str | None   # set by any node on fatal failure
-
-    # ReAct loop only (omit for one-shot pipelines)
-    action_history: list[dict]  # [{"action": str, "result": str, "is_error": bool}]
-    iteration_count: int        # guarded against max_iterations
-    llm_response: str           # raw last LLM output — router checks it for FINAL ANSWER
+class AgentState(TypedDict, total=False):
+    run_id: str
+    dataset_id: str
+    question: str
+    action_history: list[dict]   # [{"action": str, "result": str, "is_error": bool}]
+    iteration_count: int
+    llm_response: str            # raw last LLM output — router inspects for FINAL ANSWER
+    answer: str | None
+    error: str | None
+    status: str                  # completed | failed
 ```
-
----
 
 ## Nodes
 
-<!-- FILL IN: One section per node. -->
-
-### `node_[name]`
-
-**Reads from state:** <!-- field names -->
-
-**Writes to state:** <!-- field names -->
-
+### `setup`
+**Reads from state:** `run_id`, `dataset_id`
+**Writes to state:** nothing (side effect: loads DataFrame into module-level cache keyed by `run_id`)
 **External calls:**
-
 | System | Operation | On Failure |
 |--------|-----------|------------|
-| <!-- system --> | <!-- what it calls --> | <!-- fatal (set error) or partial (log and continue) --> |
+| filesystem | `pandas.read_csv(file_path)` | fatal — set error, route to handle_error |
+| SQLite | fetch Dataset by dataset_id | fatal — set error, route to handle_error |
 
-**Behaviour:** <!-- one paragraph describing what this node does -->
+### `plan_action`
+**Reads from state:** `question`, `action_history`, `iteration_count`
+**Writes to state:** `llm_response`, `iteration_count` (+1)
+**External calls:**
+| System | Operation | On Failure |
+|--------|-----------|------------|
+| Gemini API | chat completion with `<node:plan>` tag injected | fatal on 5xx; recoverable on 4xx (append error, retry) |
 
----
+**Behaviour:** Builds a prompt from the question + action_history, injects `<node:plan>` tag, calls Gemini. If `iteration_count >= max_iterations`, sets error and routes to handle_error.
+
+### `execute_action`
+**Reads from state:** `llm_response` (pandas expression)
+**Writes to state:** appends `{action, result, is_error}` to `action_history`
+**External calls:** none (pure pandas eval against cached DataFrame)
+
+**Behaviour:** `eval(llm_response, {"df": df})`, converts result to string. On exception, marks `is_error=True` and routes back to plan_action for self-correction.
+
+### `finalize`
+**Reads from state:** `llm_response` (after stripping `FINAL ANSWER:` prefix)
+**Writes to state:** `answer`, `status="completed"`
+**Side effects:** saves answer + action_history to QueryRun in SQLite; deletes DataFrame from cache.
+
+### `handle_error`
+**Reads from state:** `error`
+**Writes to state:** `status="failed"`
+**Side effects:** saves error_message to QueryRun in SQLite; deletes DataFrame from cache.
 
 ## Edge Topology
 
-<!-- FILL IN: ASCII diagram of node flow. Show conditional edges explicitly. -->
-
 ```
-START
-  │
-  ▼
-node_a ──(error)──► node_handle_error ──► END
-  │
-  ▼
-node_b
-  │
-  ▼
-node_finalize
-  │
-  ▼
-END
+START → setup
+setup → [error?] → handle_error → END
+setup → [ok]    → plan_action
+
+plan_action → [FINAL ANSWER] → finalize → END
+plan_action → [max_iter]     → handle_error → END
+plan_action → [action]       → execute_action
+
+execute_action → [error] → plan_action   (self-correct, error appended to history)
+execute_action → [ok]    → plan_action   (result appended to history, loop)
 ```
 
----
+## Termination Signal
 
-## Error Handler Node (`node_handle_error`)
+`FINAL ANSWER:` prefix (case-insensitive). `plan_action` router checks `llm_response.strip().upper().startswith("FINAL ANSWER:")`. If yes → strip prefix → set `answer` → route to `finalize`.
 
-<!-- FILL IN: What happens when a fatal error occurs. -->
+## Max Iterations
 
-- Reads: `state.error`, `state.run_id`
-- Updates DB: run status → "failed", error_message, completed_at
-- Logs error with run_id context
-- Terminates graph
+`max_agent_iterations = 10` (configurable via `DATA_ANALYST_MAX_ITERATIONS` env var).
 
----
+## Error Boundary
 
-## Finalize Node (`node_finalize`)
+- **Recoverable:** pandas expression raises Exception, Gemini returns malformed output → append error to history, increment iteration, retry via `plan_action`
+- **Fatal:** LLM API 5xx / network failure, `iteration_count >= max_agent_iterations` → route to `handle_error`, set status=failed
 
-<!-- FILL IN: How a successful run is closed out. -->
+## Setup / Cleanup
 
-- Reads: `state.run_id`, `state.completed_*`, `state.failed_*`
-- Updates DB: run status → "completed", posts_completed count, completed_at
-- Logs run summary
+- `setup` loads CSV via `pandas.read_csv(dataset.file_path)`, stores DataFrame in `_dataframes: dict[str, pd.DataFrame]` module-level dict keyed by `run_id`
+- `finalize` and `handle_error` both pop `run_id` from `_dataframes` (release memory)
 
----
+## Stub Provider
 
-## Graph Assembly (`agent/graph.py`)
-
-<!-- FILL IN: Pseudocode showing how nodes and edges are wired. Must be ≤ 60 lines in the real file. -->
-
-```python
-graph = StateGraph(AgentState)
-
-graph.add_node("node_a", node_a)
-graph.add_node("node_b", node_b)
-graph.add_node("finalize", node_finalize)
-graph.add_node("handle_error", node_handle_error)
-
-graph.set_entry_point("node_a")
-
-# Conditional edges after nodes that can produce fatal errors
-graph.add_conditional_edges(
-    "node_a",
-    lambda s: "handle_error" if s.get("error") else "node_b",
-)
-
-# Unconditional edges
-graph.add_edge("node_b", "finalize")
-graph.add_edge("finalize", END)
-graph.add_edge("handle_error", END)
-
-compiled_graph = graph.compile()
-```
-
----
-
-## Concurrency Model
-
-<!-- FILL IN: How concurrent runs are handled. -->
-
-- **One run at a time** (enforced at API layer — returns 409 if a run is already active)
-- OR: **Parallel nodes** within a single run (describe which nodes run in parallel and why)
-- **Checkpointing:** <!-- none / SqliteSaver / PostgresSaver — and when it's needed -->
+When `GEMINI_API_KEY` is not set, the stub LLM branches on `<node:plan>` in the prompt:
+- First call: returns `df.describe().to_string()` (a real pandas expression)
+- Second call: returns `FINAL ANSWER: [stub] The dataset has {N} rows and {M} columns based on df.describe().`
+- Never returns identical output on two consecutive calls (iteration distinguishes them)
