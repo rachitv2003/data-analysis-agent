@@ -23,6 +23,22 @@ _MARKDOWN_INSTRUCTION = (
     "- Do NOT wrap prose in code blocks\n"
 )
 
+_CHART_INSTRUCTION = (
+    "Chart / visualisation instructions:\n"
+    "- When the user asks for a chart, graph, plot, bar chart, line chart, scatter plot, "
+    "histogram, pie chart, heatmap, or any visualisation, use `px` (plotly.express) or "
+    "`go` (plotly.graph_objects) — both are pre-imported in the sandbox.\n"
+    "- Produce the chart HTML with `fig.to_html(include_plotlyjs='cdn')` as the final "
+    "expression in your action. The system will adjust the CDN flag automatically — always "
+    "write `'cdn'` yourself.\n"
+    "- Do NOT use matplotlib unless plotly raises an ImportError.\n"
+    "- In the FINAL ANSWER, embed the raw HTML string returned by fig.to_html() directly — "
+    "do NOT wrap it in a code block or Markdown fence.\n"
+    "- For a dashboard (multiple charts), produce each chart as a separate action, then in "
+    "the FINAL ANSWER concatenate the HTML strings, each on its own line.\n"
+    "- Keep chart titles concise (≤ 60 characters). Always set axis labels.\n"
+)
+
 _MAX_ROWS = 100
 _MAX_COLS = 20
 
@@ -114,7 +130,8 @@ def _build_prompt(state: AgentState) -> str:
         f"- Once you have enough information, respond with: FINAL ANSWER: <your answer>\n"
         f"- Your FINAL ANSWER must always contain substantive content — never leave it blank.\n"
         f"- {_MARKDOWN_INSTRUCTION}"
-        f"- If you still need data, respond with ONLY a single pandas expression. "
+        f"{_CHART_INSTRUCTION}"
+        f"- If you still need data, respond with ONLY a single pandas/plotly expression. "
         f"Use df1/df2/… or the variable names listed above. Do NOT use print().\n"
     )
 
@@ -156,6 +173,21 @@ def setup(state: AgentState) -> AgentState:
 
         _dataframes[run_id] = final_map
         combined_context = "\n\n".join(context_parts) or None
+
+        # C4: detect whether Plotly CDN JS was already sent in an earlier turn of this session
+        plotly_js_loaded = False
+        session_id = state.get("session_id")
+        if session_id:
+            from data_analyst.db.models import QueryRunRow as _QRR
+            prior_runs = (
+                session.query(_QRR)
+                .filter(_QRR.session_id == session_id, _QRR.status == "completed")
+                .all()
+            )
+            plotly_js_loaded = any(
+                r.answer and "cdn.plot.ly" in r.answer for r in prior_runs
+            )
+
         logger.info("setup.loaded", run_id=run_id, datasets=len(dataset_ids))
         return {
             **state,
@@ -164,6 +196,7 @@ def setup(state: AgentState) -> AgentState:
             "tokens_input": 0,
             "tokens_output": 0,
             "dataset_context": combined_context,
+            "plotly_js_loaded": plotly_js_loaded,
         }
     except Exception as exc:
         logger.error("setup.error", run_id=run_id, error=str(exc))
@@ -220,6 +253,25 @@ def _result_to_str(result) -> str:
     return str(result)
 
 
+def _make_eval_ns(df_map: dict) -> dict:
+    ns: dict = {**df_map, "pd": pd}
+    try:
+        import plotly.express as px
+        import plotly.graph_objects as go
+        ns["px"] = px
+        ns["go"] = go
+    except ImportError:
+        pass
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        ns["plt"] = plt
+    except ImportError:
+        pass
+    return ns
+
+
 def execute_action(state: AgentState) -> AgentState:
     run_id = state["run_id"]
     expression = state.get("llm_response", "").strip()
@@ -229,7 +281,15 @@ def execute_action(state: AgentState) -> AgentState:
         return {**state, "error": "DataFrame not found in cache", "status": "failed"}
 
     history = list(state.get("action_history", []))
-    eval_ns = {**df_map, "pd": pd}
+    plotly_js_loaded = state.get("plotly_js_loaded", False)
+
+    # C4: dedup Plotly CDN — if JS already loaded this session, swap 'cdn' → False
+    if plotly_js_loaded and "include_plotlyjs='cdn'" in expression:
+        expression = expression.replace("include_plotlyjs='cdn'", "include_plotlyjs=False")
+    if plotly_js_loaded and 'include_plotlyjs="cdn"' in expression:
+        expression = expression.replace('include_plotlyjs="cdn"', "include_plotlyjs=False")
+
+    eval_ns = _make_eval_ns(df_map)
 
     try:
         with pd.option_context(
@@ -242,7 +302,10 @@ def execute_action(state: AgentState) -> AgentState:
         result_str = _result_to_str(result)
         logger.info("execute_action.ok", run_id=run_id, expr_preview=expression[:60])
         history.append({"action": expression, "result": result_str, "is_error": False})
-        return {**state, "action_history": history}
+        # Mark CDN as loaded if this result includes the Plotly CDN script
+        if isinstance(result_str, str) and "cdn.plot.ly" in result_str:
+            plotly_js_loaded = True
+        return {**state, "action_history": history, "plotly_js_loaded": plotly_js_loaded}
     except Exception as exc:
         err_str = str(exc)
         logger.warning("execute_action.error", run_id=run_id, error=err_str)

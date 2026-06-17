@@ -18,6 +18,8 @@ dependencies = [
     "pandas>=2.0",
     "structlog>=24.0",
     "aiofiles>=23.0",
+    "plotly>=5.0",
+    "matplotlib>=3.8",
 ]
 
 [project.optional-dependencies]

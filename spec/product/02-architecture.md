@@ -48,12 +48,23 @@ SQLite (data_analyst.db)
 5. **Termination:** Gemini emits `FINAL ANSWER: <text>` → finalize saves answer → status=completed
 6. **Response:** FastAPI returns {run_id, answer, iteration_count, status}
 
+## Agent Sandbox Capabilities
+
+The `execute_action` node evaluates Python expressions in a restricted `eval()` namespace. The following libraries are available in the sandbox:
+
+| Library | Purpose |
+|---------|---------|
+| `pandas` (as `df`, `df1`, `df2`, …) | Data manipulation — filtering, aggregation, joins |
+| `plotly.express` / `plotly.graph_objects` | Interactive chart generation (C4); `fig.to_html()` output embedded in `answer_html` |
+| `matplotlib` | Fallback static chart generation (C4); PNG saved to temp path, base64-embedded in `answer_html` |
+
 ## External Dependencies
 
 | Dependency | Purpose | Failure Mode |
 |------------|---------|--------------|
 | Google Gemini API | LLM reasoning for ReAct loop | Falls back to stub provider; request fails with 503 |
 | Local filesystem | CSV file storage (`uploads/`) | Upload fails with 500; existing datasets unaffected |
+| Plotly CDN (`cdn.plot.ly`) | Loads Plotly JS bundle for interactive charts (C4) | Charts render as empty divs; no server-side failure |
 
 ## Deployment Model
 
