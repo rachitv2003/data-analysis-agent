@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 
-<!-- Upload Section -->
+<!-- Upload -->
 <div class="card">
   <h2>1. Upload a CSV file</h2>
   <label for="csv-file">Select file (.csv only)</label>
@@ -11,58 +11,63 @@
   <div id="dataset-info" class="dataset-info"></div>
 </div>
 
-<!-- Ask Section -->
-<div class="card">
-  <h2>2. Ask a question</h2>
-  <label for="dataset-select">Dataset</label>
-  <select id="dataset-select" onchange="onDatasetChange()">
-    <option value="">— select a dataset —</option>
-    {% for ds in datasets %}
-    <option value="{{ ds.dataset_id }}">{{ ds.filename }} ({{ ds.row_count }} rows)</option>
-    {% endfor %}
-  </select>
+<!-- Two-column layout: main left, sessions right -->
+<div id="workspace" style="display:flex; gap:16px; align-items:flex-start;">
 
-  <!-- Session list -->
-  <div id="session-panel" style="display:none; margin-bottom:16px;">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-      <span style="font-size:12px; font-weight:600; color:#6b7280; text-transform:uppercase; letter-spacing:.05em;">Sessions</span>
-      <button onclick="startNewSession()" id="new-session-btn" style="background:#1e40af; font-size:12px; padding:4px 10px;">+ New session</button>
+  <!-- LEFT: Ask + conversation -->
+  <div style="flex:1; min-width:0;">
+    <div class="card" style="margin-bottom:0;">
+      <h2>2. Ask a question</h2>
+      <label for="dataset-select">Dataset</label>
+      <select id="dataset-select" onchange="onDatasetChange()">
+        <option value="">— select a dataset —</option>
+        {% for ds in datasets %}
+        <option value="{{ ds.dataset_id }}">{{ ds.filename }} ({{ ds.row_count }} rows)</option>
+        {% endfor %}
+      </select>
+
+      <!-- Conversation thread -->
+      <div id="conversation" style="display:none; margin-top:16px; margin-bottom:16px;">
+        <div style="font-size:12px; font-weight:600; color:#6b7280; text-transform:uppercase; letter-spacing:.05em; margin-bottom:8px;">Conversation</div>
+        <div id="thread"></div>
+      </div>
+
+      <label for="question">Your question</label>
+      <textarea id="question" placeholder="e.g. What is the average rating by year?"></textarea>
+      <button id="ask-btn" onclick="askQuestion()">Ask</button>
+      <div id="ask-status"></div>
     </div>
-    <div id="session-list"></div>
   </div>
 
-  <!-- Conversation thread -->
-  <div id="conversation" style="display:none; margin-bottom:16px;">
-    <div style="font-size:12px; font-weight:600; color:#6b7280; text-transform:uppercase; letter-spacing:.05em; margin-bottom:8px;">Conversation</div>
-    <div id="thread"></div>
+  <!-- RIGHT: Sessions sidebar -->
+  <div id="session-sidebar" style="display:none; width:280px; flex-shrink:0;">
+    <div class="card" style="margin-bottom:0; padding:16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <span style="font-size:12px; font-weight:700; color:#6b7280; text-transform:uppercase; letter-spacing:.05em;">Sessions</span>
+        <button onclick="startNewSession()" style="background:#1e40af; font-size:12px; padding:4px 10px;">+ New</button>
+      </div>
+      <div id="session-list"></div>
+    </div>
   </div>
 
-  <label for="question">Your question</label>
-  <textarea id="question" placeholder="e.g. What is the average rating by year?"></textarea>
-
-  <button id="ask-btn" onclick="askQuestion()">Ask</button>
-  <div id="ask-status"></div>
 </div>
 
 <style>
   /* session list */
   .session-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    padding: 8px 12px;
+    padding: 8px 10px;
     border-radius: 6px;
     cursor: pointer;
     border: 1px solid #e5e7eb;
     margin-bottom: 6px;
     background: #fff;
-    transition: background .12s;
+    transition: background .12s, border-color .12s;
   }
   .session-item:hover  { background: #eff6ff; border-color: #bfdbfe; }
-  .session-item.active { background: #eff6ff; border-color: #3b82f6; border-left: 3px solid #3b82f6; }
-  .session-label { font-size: 13px; color: #1f2937; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .session-meta  { font-size: 11px; color: #9ca3af; white-space: nowrap; margin-left: 12px; flex-shrink: 0; }
-  .session-empty { font-size: 13px; color: #9ca3af; padding: 8px 0; font-style: italic; }
+  .session-item.active { background: #eff6ff; border-left: 3px solid #3b82f6; border-color: #3b82f6; }
+  .session-label { font-size: 13px; color: #1f2937; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+  .session-meta  { font-size: 11px; color: #9ca3af; margin-top: 2px; display: block; }
+  .session-empty { font-size: 13px; color: #9ca3af; padding: 4px 0; font-style: italic; }
 
   /* conversation turns */
   .turn {
@@ -79,7 +84,14 @@
   .answer-body ul,
   .answer-body ol { margin: 0 0 8px; padding-left: 20px; }
   .answer-body li { margin-bottom: 3px; }
-  .answer-body table { border-collapse: collapse; margin: 8px 0; font-size: 13px; width: auto; max-width: 100%; overflow-x: auto; display: block; }
+  .answer-body table {
+    border-collapse: collapse;
+    margin: 8px 0;
+    font-size: 13px;
+    display: block;
+    overflow-x: auto;
+    max-width: 100%;
+  }
   .answer-body th,
   .answer-body td { border: 1px solid #d1d5db; padding: 5px 10px; text-align: left; white-space: nowrap; }
   .answer-body th { background: #eff6ff; font-weight: 600; color: #1e3a5f; }
@@ -94,16 +106,14 @@
   let currentSessionId = null;
   let currentDatasetId = null;
 
-  // ── helpers ──────────────────────────────────────────────────────────────────
-
   function escHtml(s) {
     return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   }
 
   function relTime(isoStr) {
     const diff = Math.floor((Date.now() - new Date(isoStr)) / 1000);
-    if (diff < 60) return "just now";
-    if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
+    if (diff < 60)    return "just now";
+    if (diff < 3600)  return `${Math.floor(diff/60)}m ago`;
     if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;
     return `${Math.floor(diff/86400)}d ago`;
   }
@@ -113,23 +123,22 @@
   async function loadSessionList() {
     if (!currentDatasetId) return;
     const list = document.getElementById("session-list");
+    const sidebar = document.getElementById("session-sidebar");
     try {
       const resp = await fetch(`/datasets/${currentDatasetId}/sessions`);
       const body = await resp.json();
-      if (!resp.ok) { list.innerHTML = ""; return; }
+      if (!resp.ok) return;
       const sessions = body.data;
-      document.getElementById("session-panel").style.display = "block";
-      if (!sessions.length) {
-        list.innerHTML = '<div class="session-empty">No previous conversations. Ask a question to start one.</div>';
-        return;
-      }
+      sidebar.style.display = sessions.length ? "block" : "none";
+      if (!sessions.length) { list.innerHTML = ""; return; }
       list.innerHTML = sessions.map(s => `
         <div class="session-item${s.session_id === currentSessionId ? " active" : ""}"
+             data-sid="${s.session_id}"
              onclick="resumeSession('${s.session_id}')">
-          <span class="session-label">${escHtml(s.first_question || "Untitled session")}</span>
+          <span class="session-label">${escHtml((s.first_question || "Untitled").slice(0, 55))}</span>
           <span class="session-meta">${s.turn_count} turn${s.turn_count !== 1 ? "s" : ""} &middot; ${relTime(s.updated_at)}</span>
         </div>`).join("");
-    } catch { list.innerHTML = ""; }
+    } catch { /* non-critical */ }
   }
 
   async function resumeSession(sessionId) {
@@ -137,6 +146,11 @@
     document.getElementById("thread").innerHTML = "";
     document.getElementById("conversation").style.display = "none";
     document.getElementById("ask-status").innerHTML = "";
+
+    // Highlight active session
+    document.querySelectorAll(".session-item").forEach(el => {
+      el.classList.toggle("active", el.dataset.sid === sessionId);
+    });
 
     try {
       const resp = await fetch(`/sessions/${sessionId}`);
@@ -146,13 +160,7 @@
         const html = turn.answer_html || escHtml(turn.answer_markdown || "(no answer)");
         appendTurn(turn.question, html, turn.iteration_count, turn.tokens_input, turn.tokens_output, turn.status);
       }
-    } catch { /* silently fail — session turns are non-critical */ }
-
-    // highlight active session
-    document.querySelectorAll(".session-item").forEach(el => el.classList.remove("active"));
-    document.querySelectorAll(".session-item").forEach(el => {
-      if (el.getAttribute("onclick")?.includes(sessionId)) el.classList.add("active");
-    });
+    } catch { /* silently fail */ }
   }
 
   function startNewSession() {
@@ -224,8 +232,7 @@
         info.innerHTML = `<strong>${escHtml(ds.filename)}</strong> — ${ds.row_count} rows, ${ds.col_count} columns<br>
           <span class="col-list">Columns: ${ds.columns.map(escHtml).join(", ")}</span>`;
         const sel = document.getElementById("dataset-select");
-        const opt = new Option(`${ds.filename} (${ds.row_count} rows)`, ds.dataset_id, true, true);
-        sel.add(opt, 1);
+        sel.add(new Option(`${ds.filename} (${ds.row_count} rows)`, ds.dataset_id, true, true), 1);
         currentDatasetId = ds.dataset_id;
         startNewSession();
         await loadSessionList();
@@ -268,7 +275,7 @@
         const html = r.answer_html || escHtml(r.answer_markdown || "(no answer)");
         appendTurn(question, html, r.iteration_count, r.tokens_input, r.tokens_output, r.status);
         questionEl.value = "";
-        await loadSessionList();  // refresh turn count + timestamp
+        await loadSessionList();
       }
     } catch(e) {
       status.innerHTML = `<span class="error">Network error: ${escHtml(e.message)}</span>`;
@@ -278,13 +285,12 @@
     }
   }
 
-  // ── keyboard shortcut ─────────────────────────────────────────────────────────
+  // ── init ──────────────────────────────────────────────────────────────────────
 
   document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("question").addEventListener("keydown", e => {
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) askQuestion();
     });
-    // Load sessions if a dataset is pre-selected (e.g. after page refresh)
     const sel = document.getElementById("dataset-select");
     if (sel.value) { currentDatasetId = sel.value; loadSessionList(); }
   });

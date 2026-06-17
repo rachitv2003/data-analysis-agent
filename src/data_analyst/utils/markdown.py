@@ -3,7 +3,7 @@ from markdown_it import MarkdownIt
 
 logger = structlog.get_logger()
 
-_md = MarkdownIt("commonmark", {"html": False})
+_md = MarkdownIt("js-default", {"html": False}).enable("table")
 
 
 def render_markdown(text: str) -> str:
