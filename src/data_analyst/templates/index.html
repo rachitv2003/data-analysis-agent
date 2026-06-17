@@ -3,92 +3,115 @@
 
 <!-- Upload card -->
 <div class="card">
-  <h2>1. Upload a data file</h2>
+  <h2>1. Upload data files</h2>
 
-  <!-- Drop zone -->
+  <!-- Drop zone (C17: always visible, stages files — no immediate upload) -->
   <div id="drop-zone">
-    <div style="text-align:center; color:#6b7280;">
+    <div style="text-align:center; color:#6b7280; pointer-events:none;">
       <div style="font-size:28px; margin-bottom:6px;">&#8659;</div>
-      <div style="font-size:14px; font-weight:600; margin-bottom:4px;">Drop files or a folder here</div>
+      <div id="drop-zone-text" style="font-size:14px; font-weight:600; margin-bottom:4px;">Drop files or a folder here</div>
       <div style="font-size:12px; color:#9ca3af; margin-bottom:12px;">or click to browse (.csv · .tsv · .txt · .json)</div>
-      <label style="cursor:pointer; background:#1e40af; color:#fff; border:none; border-radius:6px; padding:8px 18px; font-size:13px; font-weight:600;">
-        Choose files
-        <input type="file" id="csv-file" accept=".csv,.tsv,.txt,.json" multiple style="display:none" onchange="onFilesSelected()">
-      </label>
+    </div>
+    <div style="text-align:center;">
+      <span class="pick-btn" onclick="document.getElementById('file-input').click()" style="background:#1e40af;color:#fff;border:none;border-radius:6px;padding:8px 18px;font-size:13px;font-weight:600;cursor:pointer;display:inline-block;">Choose files</span>
+      <input type="file" id="file-input" accept=".csv,.tsv,.txt,.json" multiple style="display:none" onchange="onFilesSelected()">
     </div>
   </div>
 
-  <!-- C12: optional context -->
-  <details id="context-details" style="margin-top:12px;">
-    <summary style="font-size:13px; color:#1e40af; cursor:pointer; font-weight:600;">+ Add dataset notes (optional)</summary>
-    <label for="upload-context" style="margin-top:8px; display:block; font-size:12px; color:#6b7280;">
-      Describe this dataset — column definitions, units, caveats. Injected into every prompt.
-    </label>
-    <textarea id="upload-context" placeholder="e.g. 'revenue' is in USD thousands. 'region' uses ISO 3166-1 alpha-2 codes." style="height:72px; font-size:13px; margin-top:4px;"></textarea>
-    <div style="font-size:11px; color:#9ca3af; margin-top:2px;" id="context-char-count">0 / 4000</div>
-  </details>
+  <!-- C17: Staged file list -->
+  <div id="staged-panel" style="display:none; margin-top:14px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+      <span style="font-size:13px; font-weight:600; color:#374151;" id="staged-header">0 files staged</span>
+      <button onclick="clearStaged()" style="background:none;color:#6b7280;border:1px solid #d1d5db;font-size:12px;padding:3px 10px;border-radius:5px;">Clear staged</button>
+    </div>
+    <div id="staged-rows"></div>
+    <div style="margin-top:10px;">
+      <button id="upload-staged-btn" onclick="uploadStaged()">Upload <span id="upload-btn-count">0</span> file(s)</button>
+    </div>
+  </div>
 
-  <!-- Upload queue (shown for multi-file) -->
+  <!-- Upload queue (shown while uploading) -->
   <div id="upload-queue" style="display:none; margin-top:12px;"></div>
   <div id="upload-status" style="margin-top:8px;"></div>
 </div>
 
-<!-- Duplicate dialog -->
-<div id="dup-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:100; align-items:center; justify-content:center;">
-  <div style="background:#fff; border-radius:10px; padding:28px 32px; max-width:440px; width:90%; box-shadow:0 8px 32px rgba(0,0,0,.18);">
-    <h3 style="margin:0 0 10px; font-size:16px; color:#1e3a5f;">Duplicate file detected</h3>
-    <p id="dup-msg" style="font-size:14px; color:#374151; margin:0 0 20px; line-height:1.55;"></p>
-    <div style="display:flex; gap:10px; flex-wrap:wrap;">
-      <button id="dup-use-btn"    style="background:#1e40af;" onclick="dupUseExisting()">Use existing</button>
-      <button id="dup-upload-btn" style="background:#6b7280;" onclick="dupUploadAnyway()">Upload anyway</button>
-      <button style="background:none; color:#6b7280; border:1px solid #d1d5db;" onclick="dupCancel()">Cancel</button>
+<!-- Duplicate modal -->
+<div id="dup-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:100;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:10px;padding:28px 32px;max-width:440px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.18);">
+    <h3 style="margin:0 0 10px;font-size:16px;color:#1e3a5f;">Duplicate file detected</h3>
+    <p id="dup-msg" style="font-size:14px;color:#374151;margin:0 0 20px;line-height:1.55;"></p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button style="background:#1e40af;" onclick="dupUseExisting()">Use existing</button>
+      <button style="background:#6b7280;" onclick="dupUploadAnyway()">Upload anyway</button>
+      <button style="background:none;color:#6b7280;border:1px solid #d1d5db;" onclick="document.getElementById('dup-overlay').style.display='none'">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- C15: Clear all datasets modal -->
+<div id="clear-all-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:100;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:10px;padding:28px 32px;max-width:400px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.18);">
+    <h3 style="margin:0 0 10px;font-size:16px;color:#b91c1c;">Delete all datasets?</h3>
+    <p id="clear-all-msg" style="font-size:14px;color:#374151;margin:0 0 20px;line-height:1.55;"></p>
+    <div style="display:flex;gap:10px;">
+      <button onclick="confirmClearAll()" style="background:#b91c1c;">Delete all</button>
+      <button onclick="document.getElementById('clear-all-overlay').style.display='none'" style="background:#6b7280;">Cancel</button>
     </div>
   </div>
 </div>
 
 <!-- Two-column workspace -->
-<div id="workspace" style="display:flex; gap:16px; align-items:flex-start;">
+<div id="workspace" style="display:flex;gap:16px;align-items:flex-start;">
 
   <!-- LEFT: datasets + conversation -->
-  <div style="flex:1; min-width:0;">
+  <div style="flex:1;min-width:0;">
     <div class="card" style="margin-bottom:0;">
       <h2>2. Ask a question</h2>
 
-      <!-- C14: multi-select dataset list -->
-      <label style="font-size:13px; font-weight:600; color:#374151; display:block; margin-bottom:6px;">Datasets</label>
-      <div id="dataset-list-wrap" style="border:1px solid #e5e7eb; border-radius:6px; padding:8px 12px; max-height:160px; overflow-y:auto; margin-bottom:12px; background:#fafafa;">
+      <!-- C14 + C15: dataset checkbox list -->
+      <label style="font-size:13px;font-weight:600;color:#374151;display:block;margin-bottom:6px;">Datasets</label>
+      <div id="dataset-list-wrap" style="border:1px solid #e5e7eb;border-radius:6px;padding:8px 12px;max-height:180px;overflow-y:auto;margin-bottom:4px;background:#fafafa;">
         <div id="dataset-checkboxes">
           {% for ds in datasets %}
-          <label style="display:flex; align-items:center; gap:8px; padding:4px 0; font-size:13px; cursor:pointer;">
-            <input type="checkbox" class="ds-check" value="{{ ds.dataset_id }}" onchange="onDatasetCheckChange()">
-            <span>{{ ds.filename }} <span style="color:#9ca3af;">({{ ds.row_count }} rows)</span></span>
-          </label>
+          <div class="ds-row" data-id="{{ ds.dataset_id }}" data-filename="{{ ds.filename }}" data-row-count="{{ ds.row_count }}">
+            <label>
+              <input type="checkbox" class="ds-check" value="{{ ds.dataset_id }}" onchange="onDatasetCheckChange()">
+              <span>{{ ds.filename }} <span class="row-cnt">({{ ds.row_count }} rows)</span></span>
+            </label>
+            <button class="del-btn" onclick="deleteDataset('{{ ds.dataset_id }}',event)" title="Delete">🗑</button>
+          </div>
           {% endfor %}
         </div>
-        <div id="no-datasets-msg" style="font-size:13px; color:#9ca3af; font-style:italic; padding:4px 0; {% if datasets %}display:none;{% endif %}">
+        <div id="no-datasets-msg" style="font-size:13px;color:#9ca3af;font-style:italic;padding:4px 0;{% if datasets %}display:none;{% endif %}">
           Upload a file to get started.
         </div>
       </div>
+      <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+        <button id="clear-all-btn" onclick="clearAllDatasets()"
+          style="display:{% if datasets %}inline-block{% else %}none{% endif %};background:none;color:#b91c1c;border:1px solid #fca5a5;font-size:12px;padding:3px 10px;border-radius:5px;">
+          Clear all datasets
+        </button>
+      </div>
 
-      <!-- C12: dataset notes panel (shown after selection) -->
-      <div id="dataset-notes-panel" style="display:none; margin-bottom:12px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-          <span style="font-size:12px; font-weight:600; color:#6b7280; text-transform:uppercase; letter-spacing:.05em;">Dataset notes</span>
-          <button onclick="toggleContextEdit()" id="edit-context-btn" style="background:none; color:#1e40af; border:none; font-size:12px; padding:2px 6px; cursor:pointer; text-decoration:underline;">Edit</button>
+      <!-- C12: dataset notes panel -->
+      <div id="dataset-notes-panel" style="display:none;margin-bottom:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <span style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;">Dataset notes</span>
+          <button onclick="toggleCtxEdit()" style="background:none;color:#1e40af;border:none;font-size:12px;padding:2px 6px;cursor:pointer;text-decoration:underline;">Edit</button>
         </div>
-        <div id="context-display" style="font-size:13px; color:#374151; background:#f8fafc; border:1px solid #e5e7eb; border-radius:6px; padding:8px 12px; white-space:pre-wrap; line-height:1.55;"></div>
+        <div id="context-display" style="font-size:13px;color:#374151;background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px;padding:8px 12px;white-space:pre-wrap;line-height:1.55;"></div>
         <div id="context-edit-area" style="display:none;">
-          <textarea id="context-edit-input" style="height:72px; font-size:13px; margin-top:6px;"></textarea>
-          <div style="display:flex; gap:8px; margin-top:6px;">
-            <button onclick="saveContextEdit()" style="font-size:12px; padding:4px 12px;">Save</button>
-            <button onclick="cancelContextEdit()" style="background:#6b7280; font-size:12px; padding:4px 12px;">Cancel</button>
+          <textarea id="context-edit-input" style="height:72px;font-size:13px;margin-top:6px;"></textarea>
+          <div style="display:flex;gap:8px;margin-top:6px;">
+            <button onclick="saveCtxEdit()" style="font-size:12px;padding:4px 12px;">Save</button>
+            <button onclick="cancelCtxEdit()" style="background:#6b7280;font-size:12px;padding:4px 12px;">Cancel</button>
           </div>
         </div>
       </div>
 
       <!-- Conversation thread -->
-      <div id="conversation" style="display:none; margin-bottom:16px;">
-        <div id="querying-label" style="font-size:12px; font-weight:600; color:#6b7280; text-transform:uppercase; letter-spacing:.05em; margin-bottom:8px;">Conversation</div>
+      <div id="conversation" style="display:none;margin-bottom:16px;">
+        <div id="querying-label" style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">Conversation</div>
         <div id="thread"></div>
       </div>
 
@@ -99,12 +122,12 @@
     </div>
   </div>
 
-  <!-- RIGHT: Sessions sidebar -->
-  <div id="session-sidebar" style="display:none; width:280px; flex-shrink:0;">
-    <div class="card" style="margin-bottom:0; padding:16px;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-        <span style="font-size:12px; font-weight:700; color:#6b7280; text-transform:uppercase; letter-spacing:.05em;">Sessions</span>
-        <button onclick="startNewSession()" style="background:#1e40af; font-size:12px; padding:4px 10px;">+ New</button>
+  <!-- RIGHT: sessions sidebar -->
+  <div id="session-sidebar" style="display:none;width:280px;flex-shrink:0;">
+    <div class="card" style="margin-bottom:0;padding:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <span style="font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;">Sessions</span>
+        <button onclick="startNewSession()" style="background:#1e40af;font-size:12px;padding:4px 10px;">+ New</button>
       </div>
       <div id="session-list"></div>
     </div>
@@ -114,13 +137,29 @@
 
 <style>
   #drop-zone {
-    border: 2px dashed #d1d5db;
-    border-radius: 8px;
-    padding: 24px;
-    background: #fafafa;
-    transition: border-color .15s, background .15s;
+    border:2px dashed #d1d5db; border-radius:8px; padding:24px;
+    background:#fafafa; cursor:pointer; transition:border-color .15s,background .15s;
   }
-  #drop-zone.drag-over { border-color: #3b82f6; background: #eff6ff; }
+  #drop-zone.drag-over { border-color:#3b82f6; background:#eff6ff; }
+  #drop-zone.has-staged { border-style:solid; border-color:#bfdbfe; padding:14px; }
+
+  .staged-row { border:1px solid #e5e7eb; border-radius:6px; padding:10px 12px; margin-bottom:8px; background:#fff; }
+  .sr-main { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .sr-name { flex:1; min-width:0; font-size:13px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .sr-size { font-size:12px; color:#9ca3af; flex-shrink:0; }
+  .sr-acts { display:flex; align-items:center; gap:6px; flex-shrink:0; margin-left:auto; }
+  .sr-acts button { font-size:12px; }
+  .sr-warn { font-size:12px; color:#d97706; margin-top:5px; }
+  .sr-preview { font-size:12px; color:#16a34a; margin-top:4px; font-style:italic; }
+
+  .ds-row { display:flex; align-items:center; gap:6px; padding:4px 0; border-bottom:1px solid #f3f4f6; }
+  .ds-row:last-child { border-bottom:none; }
+  .ds-row label { display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; flex:1; min-width:0; }
+  .ds-row label span { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ds-row label .row-cnt { color:#9ca3af; }
+  .del-btn { background:none; border:none; color:#d1d5db; font-size:14px; cursor:pointer; padding:0 4px; flex-shrink:0; opacity:.4; transition:opacity .15s,color .15s; }
+  .del-btn:hover { opacity:1; color:#b91c1c; }
+  .del-confirm { display:flex; align-items:center; gap:8px; font-size:13px; color:#374151; flex-wrap:wrap; padding:4px 0; }
 
   .queue-row { display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid #f3f4f6; font-size:13px; }
   .queue-row:last-child { border-bottom:none; }
@@ -129,8 +168,8 @@
   .q-actions { display:flex; gap:4px; flex-shrink:0; }
   .q-actions button { font-size:11px; padding:2px 8px; }
 
-  .session-item { padding:8px 10px; border-radius:6px; cursor:pointer; border:1px solid #e5e7eb; margin-bottom:6px; background:#fff; transition:background .12s, border-color .12s; }
-  .session-item:hover  { background:#eff6ff; border-color:#bfdbfe; }
+  .session-item { padding:8px 10px; border-radius:6px; cursor:pointer; border:1px solid #e5e7eb; margin-bottom:6px; background:#fff; transition:background .12s; }
+  .session-item:hover { background:#eff6ff; border-color:#bfdbfe; }
   .session-item.active { background:#eff6ff; border-left:3px solid #3b82f6; border-color:#3b82f6; }
   .session-label { font-size:13px; color:#1f2937; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block; }
   .session-meta  { font-size:11px; color:#9ca3af; margin-top:2px; display:block; }
@@ -140,467 +179,482 @@
   .turn-q { font-size:13px; color:#1e40af; font-weight:600; margin-bottom:6px; }
   .answer-body { font-size:14px; line-height:1.65; color:#1f2937; }
   .answer-body p  { margin:0 0 8px; }
-  .answer-body ul, .answer-body ol { margin:0 0 8px; padding-left:20px; }
+  .answer-body ul,.answer-body ol { margin:0 0 8px; padding-left:20px; }
   .answer-body li { margin-bottom:3px; }
   .answer-body table { border-collapse:collapse; margin:8px 0; font-size:13px; display:block; overflow-x:auto; max-width:100%; }
-  .answer-body th, .answer-body td { border:1px solid #d1d5db; padding:5px 10px; text-align:left; white-space:nowrap; }
+  .answer-body th,.answer-body td { border:1px solid #d1d5db; padding:5px 10px; text-align:left; white-space:nowrap; }
   .answer-body th { background:#eff6ff; font-weight:600; color:#1e3a5f; }
   .answer-body strong { color:#1e3a5f; }
   .answer-body code { background:#f3f4f6; padding:1px 4px; border-radius:3px; font-size:12px; }
   .answer-body pre  { background:#f3f4f6; padding:10px; border-radius:4px; overflow-x:auto; font-size:12px; }
   .answer-body em   { color:#6b7280; }
   .turn-meta { font-size:11px; color:#9ca3af; margin-top:6px; }
-  .fmt-badge { background:#e0f2fe; color:#0369a1; font-size:11px; padding:1px 6px; border-radius:3px; margin-left:6px; font-weight:600; text-transform:uppercase; }
+  .fmt-badge { background:#e0f2fe; color:#0369a1; font-size:11px; padding:1px 6px; border-radius:3px; font-weight:600; text-transform:uppercase; }
 </style>
 
 <script>
-  let currentSessionId = null;
-  let _pendingDupFile = null, _pendingDupExistingId = null, _pendingDupExistingFilename = null;
-  let _pendingDupRowId = null; // for queue-row inline dup handling
+  // ── helpers ──────────────────────────────────────────────────────────────────
+  const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const relTime = iso => {
+    const d = Math.floor((Date.now()-new Date(iso))/1000);
+    if(d<60) return"just now"; if(d<3600) return`${Math.floor(d/60)}m ago`;
+    if(d<86400) return`${Math.floor(d/3600)}h ago`; return`${Math.floor(d/86400)}d ago`;
+  };
+  const fmtSize = b => b<1024?b+' B':b<1048576?(b/1024).toFixed(1)+' KB':(b/1048576).toFixed(1)+' MB';
+  const fmtExt = n => ({'.csv':'CSV','.tsv':'TSV','.txt':'TXT','.json':'JSON'})[n.slice(n.lastIndexOf('.')).toLowerCase()]||'FILE';
+  const SUPPORTED = new Set(['.csv','.tsv','.txt','.json']);
 
-  // ── helpers ───────────────────────────────────────────────────────────────────
-  function escHtml(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
-  function relTime(isoStr) {
-    const d = Math.floor((Date.now() - new Date(isoStr)) / 1000);
-    if (d < 60) return "just now";
-    if (d < 3600) return `${Math.floor(d/60)}m ago`;
-    if (d < 86400) return `${Math.floor(d/3600)}h ago`;
-    return `${Math.floor(d/86400)}d ago`;
-  }
+  // ── C17: staged state ────────────────────────────────────────────────────────
+  const _staged = new Map();   // id → {file, context, notesContent, notesFilename}
+  let _seq = 0;
 
-  // ── C12: context char counter ─────────────────────────────────────────────────
-  document.getElementById("upload-context").addEventListener("input", function() {
-    document.getElementById("context-char-count").textContent = `${this.value.length} / 4000`;
-  });
-
-  function getSelectedDatasetIds() {
-    return [...document.querySelectorAll(".ds-check:checked")].map(c => c.value);
-  }
-
-  // ── C14: dataset checkbox change ─────────────────────────────────────────────
-  function onDatasetCheckChange() {
-    const ids = getSelectedDatasetIds();
-    startNewSession();
-    if (ids.length > 0) {
-      loadSessionList();
-      loadDatasetContext(ids);
-    } else {
-      document.getElementById("session-sidebar").style.display = "none";
-      document.getElementById("dataset-notes-panel").style.display = "none";
+  function stageFiles(files) {
+    const existing = new Set([..._staged.values()].map(s=>s.file.name));
+    let added = 0;
+    for (const f of files) {
+      const ext = f.name.slice(f.name.lastIndexOf('.')).toLowerCase();
+      if (!SUPPORTED.has(ext) || existing.has(f.name)) continue;
+      existing.add(f.name);
+      _staged.set(++_seq, {file:f, context:'', notesContent:'', notesFilename:''});
+      added++;
     }
+    if (added) _renderStaged();
   }
 
-  // ── C12: dataset context display ──────────────────────────────────────────────
-  let _contextCache = {}; // dataset_id → context string
+  function stageWithNotes(entries) {
+    const existing = new Set([..._staged.values()].map(s=>s.file.name));
+    for (const {file, context} of entries) {
+      const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
+      if (!SUPPORTED.has(ext) || existing.has(file.name)) continue;
+      existing.add(file.name);
+      _staged.set(++_seq, {file, context, notesContent:'', notesFilename: context?'_folder_notes':''});
+    }
+    _renderStaged();
+  }
 
-  async function loadDatasetContext(ids) {
-    if (ids.length !== 1) {
-      document.getElementById("dataset-notes-panel").style.display = "none";
+  function _renderStaged() {
+    const panel = document.getElementById('staged-panel');
+    const rowsEl = document.getElementById('staged-rows');
+    const n = _staged.size;
+
+    if (!n) {
+      panel.style.display = 'none';
+      document.getElementById('drop-zone').classList.remove('has-staged');
+      document.getElementById('drop-zone-text').textContent = 'Drop files or a folder here';
       return;
     }
-    const id = ids[0];
-    if (_contextCache[id] !== undefined) {
-      showContextPanel(id, _contextCache[id]);
-      return;
-    }
-    try {
-      const resp = await fetch("/datasets");
-      const body = await resp.json();
-      for (const ds of body.data) { _contextCache[ds.dataset_id] = ds.context || ""; }
-      showContextPanel(id, _contextCache[id] || "");
-    } catch { }
-  }
 
-  function showContextPanel(id, ctx) {
-    const panel = document.getElementById("dataset-notes-panel");
-    const display = document.getElementById("context-display");
-    if (ctx) {
-      display.textContent = ctx;
-      panel.style.display = "block";
-    } else {
-      display.textContent = "No notes added yet.";
-      panel.style.display = "block";
-    }
-    document.getElementById("context-edit-input").value = ctx;
-    document.getElementById("context-edit-area").style.display = "none";
-    document.getElementById("context-display").style.display = "block";
-  }
+    panel.style.display = 'block';
+    document.getElementById('drop-zone').classList.add('has-staged');
+    document.getElementById('drop-zone-text').textContent = 'Drop more files to add to the list';
+    document.getElementById('staged-header').textContent = `${n} file${n!==1?'s':''} staged — review before uploading`;
+    document.getElementById('upload-btn-count').textContent = n;
 
-  function toggleContextEdit() {
-    const ea = document.getElementById("context-edit-area");
-    const cd = document.getElementById("context-display");
-    ea.style.display = ea.style.display === "none" ? "block" : "none";
-    cd.style.display = ea.style.display === "none" ? "block" : "none";
-  }
+    // Existing dataset names for dup pre-warning
+    const uploaded = new Set([...document.querySelectorAll('.ds-check')].map(c => {
+      const s = c.parentElement?.querySelector('span'); return s?s.textContent.split(' (')[0]:'';
+    }));
 
-  function cancelContextEdit() {
-    document.getElementById("context-edit-area").style.display = "none";
-    document.getElementById("context-display").style.display = "block";
-  }
-
-  async function saveContextEdit() {
-    const ids = getSelectedDatasetIds();
-    if (ids.length !== 1) return;
-    const id = ids[0];
-    const ctx = document.getElementById("context-edit-input").value.trim();
-    try {
-      const resp = await fetch(`/datasets/${id}/context`, {
-        method: "PATCH",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({ context: ctx }),
-      });
-      if (resp.ok) {
-        _contextCache[id] = ctx;
-        showContextPanel(id, ctx);
-      }
-    } catch { }
-  }
-
-  // ── C13: drag-and-drop ────────────────────────────────────────────────────────
-  const dropZone = document.getElementById("drop-zone");
-  dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("drag-over"); });
-  dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drag-over"));
-  dropZone.addEventListener("drop", e => {
-    e.preventDefault();
-    dropZone.classList.remove("drag-over");
-    const items = [...e.dataTransfer.items];
-    const files = [];
-    let pending = 0;
-    const SUPPORTED = new Set([".csv",".tsv",".txt",".json"]);
-
-    function checkDone() { if (--pending === 0) startUploadQueue(files); }
-
-    for (const item of items) {
-      const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
-      if (entry && entry.isDirectory) {
-        pending++;
-        const reader = entry.createReader();
-        reader.readEntries(entries => {
-          for (const e2 of entries) {
-            if (e2.isFile) {
-              const ext = e2.name.slice(e2.name.lastIndexOf(".")).toLowerCase();
-              if (SUPPORTED.has(ext)) {
-                pending++;
-                e2.file(f => { files.push(f); checkDone(); });
-              }
+    rowsEl.innerHTML = '';
+    for (const [id, item] of _staged) {
+      const dup = uploaded.has(item.file.name);
+      const notesAttached = !!item.notesFilename;
+      const div = document.createElement('div');
+      div.className = 'staged-row'; div.id = `sr-${id}`;
+      div.innerHTML = `
+        <div class="sr-main">
+          <span class="fmt-badge">${fmtExt(item.file.name)}</span>
+          <span class="sr-name">${esc(item.file.name)}</span>
+          <span class="sr-size">${fmtSize(item.file.size)}</span>
+          <div class="sr-acts">
+            <button onclick="toggleNotes(${id})" style="background:#f3f4f6;color:#374151;border:1px solid #d1d5db;">📝 Notes</button>
+            ${notesAttached
+              ? `<span style="font-size:11px;color:#16a34a;cursor:default;">📎 ${esc(item.notesFilename)}</span>`
+              : `<label style="cursor:pointer;font-size:12px;color:#1e40af;text-decoration:underline;">📎 Notes file<input type="file" accept=".txt,.md" style="display:none" onchange="attachNotesFile(${id},this)"></label>`
             }
-          }
-          checkDone();
-        });
-      } else if (item.kind === "file") {
-        const f = item.getAsFile();
-        const ext = f.name.slice(f.name.lastIndexOf(".")).toLowerCase();
-        if (f && SUPPORTED.has(ext)) files.push(f);
+            <button onclick="removeStagedFile(${id})" style="background:none;color:#9ca3af;border:none;font-size:18px;padding:0 6px;cursor:pointer;">✕</button>
+          </div>
+        </div>
+        <div id="sr-notes-${id}" style="display:${item.context?'block':'none'};margin-top:8px;">
+          <textarea id="sr-ta-${id}" placeholder="Notes about this dataset — column definitions, units, caveats…"
+            oninput="_updateContext(${id},this.value)" style="height:56px;font-size:13px;">${esc(item.context)}</textarea>
+          ${item.notesContent ? `<div class="sr-preview">📎 ${esc(item.notesContent.slice(0,160))}${item.notesContent.length>160?'…':''}</div>` : ''}
+        </div>
+        ${dup?`<div class="sr-warn">⚠ A dataset with this filename already exists — you'll be asked when uploading.</div>`:''}`;
+      rowsEl.appendChild(div);
+    }
+  }
+
+  function removeStagedFile(id) { _staged.delete(id); _renderStaged(); }
+  function clearStaged() { _staged.clear(); _renderStaged(); }
+  function toggleNotes(id) {
+    const el = document.getElementById(`sr-notes-${id}`);
+    if (el) el.style.display = el.style.display==='none'?'block':'none';
+  }
+  function _updateContext(id, val) { const s = _staged.get(id); if(s) s.context=val; }
+
+  async function attachNotesFile(id, input) {
+    const f = input.files[0]; if(!f) return;
+    try {
+      const text = await f.text();
+      const s = _staged.get(id); if(!s) return;
+      s.notesContent = text; s.notesFilename = f.name;
+      _renderStaged();
+      const el = document.getElementById(`sr-notes-${id}`); if(el) el.style.display='block';
+    } catch(e) { console.error(e); }
+  }
+
+  // ── C17: Upload staged files ──────────────────────────────────────────────────
+  async function uploadStaged() {
+    if (!_staged.size) return;
+    const items = [..._staged.entries()];
+    _staged.clear(); _renderStaged();
+
+    const queueEl = document.getElementById('upload-queue');
+    queueEl.style.display = 'block';
+    queueEl.innerHTML = items.map(([id,item]) => `
+      <div class="queue-row" id="qrow-${id}">
+        <span class="q-status" id="qst-${id}">⏳</span>
+        <span class="fmt-badge">${fmtExt(item.file.name)}</span>
+        <span class="q-name">${esc(item.file.name)}</span>
+        <span id="qerr-${id}" style="font-size:12px;color:#b91c1c;"></span>
+        <span class="q-actions" id="qact-${id}"></span>
+      </div>`).join('');
+
+    let idx = 0;
+    async function worker() {
+      while (idx < items.length) {
+        const [id, item] = items[idx++];
+        let ctx = item.context.trim();
+        if (item.notesContent) ctx = ctx ? ctx+'\n\n'+item.notesContent : item.notesContent;
+        await _doUpload(item.file, false, ctx, id);
       }
     }
-    if (pending === 0) startUploadQueue(files);
+    await Promise.all(Array.from({length:Math.min(3,items.length)}, worker));
+  }
+
+  // ── Drop zone ─────────────────────────────────────────────────────────────────
+  const dz = document.getElementById('drop-zone');
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+  dz.addEventListener('drop', async e => {
+    e.preventDefault(); dz.classList.remove('drag-over');
+    const dtItems = [...e.dataTransfer.items];
+    const plain = dtItems.filter(i=>i.kind==='file')
+      .map(i=>i.getAsFile())
+      .filter(f=>f&&SUPPORTED.has(f.name.slice(f.name.lastIndexOf('.')).toLowerCase()));
+    const dirs = dtItems.map(i=>i.webkitGetAsEntry?.()).filter(e2=>e2?.isDirectory);
+    if (plain.length) stageFiles(plain);
+    for (const dir of dirs) await _processDir(dir);
   });
+
+  async function _processDir(dirEntry) {
+    const entries = await new Promise(res => dirEntry.createReader().readEntries(res));
+    const notesMap = {};
+    const dataFiles = [];
+    await Promise.all(entries.map(async e2 => {
+      if (!e2.isFile) return;
+      const f = await new Promise(res => e2.file(res));
+      const lo = f.name.toLowerCase();
+      if (lo.endsWith('.notes.txt')||lo.endsWith('.notes.md')) {
+        notesMap[lo.replace(/\.notes\.(txt|md)$/,'')] = await f.text();
+      } else if (lo==='_notes.txt'||lo==='_notes.md') {
+        notesMap['_default'] = await f.text();
+      } else {
+        const ext = lo.slice(lo.lastIndexOf('.'));
+        if (SUPPORTED.has(ext)) dataFiles.push(f);
+      }
+    }));
+    stageWithNotes(dataFiles.map(f => ({
+      file: f,
+      context: notesMap[f.name.toLowerCase().replace(/\.(csv|tsv|txt|json)$/,'')] || notesMap['_default'] || '',
+    })));
+  }
 
   function onFilesSelected() {
-    const input = document.getElementById("csv-file");
-    if (input.files.length) startUploadQueue([...input.files]);
-    input.value = "";
+    const inp = document.getElementById('file-input');
+    if (inp.files.length) stageFiles([...inp.files]);
+    inp.value = '';
   }
 
-  // ── Upload queue ──────────────────────────────────────────────────────────────
-  const CONCURRENCY = 3;
+  // ── Core upload ───────────────────────────────────────────────────────────────
+  const _retry = {};
+  let _pendingDup = null;
 
-  async function startUploadQueue(files) {
-    if (!files.length) return;
-    const ctx = document.getElementById("upload-context").value.trim();
-    const status = document.getElementById("upload-status");
-    status.innerHTML = "";
-
-    if (files.length === 1) {
-      // Single file — use simple flow
-      await _doUpload(files[0], false, ctx, null);
-      return;
-    }
-
-    const queue = document.getElementById("upload-queue");
-    queue.style.display = "block";
-    queue.innerHTML = files.map((f, i) => `
-      <div class="queue-row" id="qrow-${i}">
-        <span class="q-status" id="qst-${i}">&#8230;</span>
-        <span class="q-name">${escHtml(f.name)}</span>
-        <span id="qerr-${i}" style="font-size:12px; color:#b91c1c;"></span>
-        <span class="q-actions" id="qact-${i}"></span>
-      </div>`).join("");
-
-    // Run CONCURRENCY uploads at a time
-    let idx = 0;
-    async function runNext() {
-      while (idx < files.length) {
-        const i = idx++;
-        await _doUpload(files[i], false, ctx, i);
-      }
-    }
-    const workers = Array.from({length: Math.min(CONCURRENCY, files.length)}, runNext);
-    await Promise.all(workers);
-  }
-
-  function qRowStatus(i, icon, color) {
-    if (i === null) return;
-    const el = document.getElementById(`qst-${i}`);
-    if (el) { el.textContent = icon; el.style.color = color || ""; }
-  }
-
-  // ── Core upload function ──────────────────────────────────────────────────────
-  async function _doUpload(file, force, context, qIdx) {
-    const status = document.getElementById("upload-status");
-    const btn = document.getElementById("upload-btn") || null;
-    if (btn) { btn.disabled = true; }
-    if (qIdx !== null) qRowStatus(qIdx, "⏳", "#6b7280");
-
+  async function _doUpload(file, force, ctx, qIdx) {
+    _qst(qIdx,'⏳','#6b7280');
     const fd = new FormData();
-    fd.append("file", file);
-    if (context) fd.append("context", context);
-
+    fd.append('file', file);
+    if (ctx) fd.append('context', ctx);
     try {
-      const url = force ? "/upload?force=true" : "/upload";
-      const resp = await fetch(url, { method: "POST", body: fd });
+      const resp = await fetch(force?'/upload?force=true':'/upload', {method:'POST',body:fd});
       const body = await resp.json();
-
-      if (resp.status === 409) {
+      if (resp.status===409) {
         const det = body.detail;
-        if (qIdx !== null) {
-          // Inline queue resolution
-          qRowStatus(qIdx, "⚠", "#d97706");
-          const actions = document.getElementById(`qact-${qIdx}`);
-          if (actions) {
-            actions.innerHTML =
-              `<button onclick="qUseExisting('${det.existing_dataset_id}','${escHtml(det.existing_filename)}',${qIdx})" style="background:#1e40af;font-size:11px;padding:2px 6px;">Use existing</button>` +
-              `<button onclick="qUploadAnyway(${JSON.stringify(file.name)},${qIdx})" style="background:#6b7280;font-size:11px;padding:2px 6px;">Upload anyway</button>`;
-          }
-          _queueFiles = _queueFiles || {};
-          _queueFiles[qIdx] = { file, context };
-        } else {
-          // Single-file modal
-          _pendingDupFile = file;
-          _pendingDupExistingId = det.existing_dataset_id;
-          _pendingDupExistingFilename = det.existing_filename;
-          const matchDesc = det.match_type === "content"
-            ? `identical contents to <strong>${escHtml(det.existing_filename)}</strong>`
-            : `the same name as <strong>${escHtml(det.existing_filename)}</strong>`;
-          const uploaded = new Date(det.existing_created_at).toLocaleDateString(undefined, {year:"numeric",month:"short",day:"numeric"});
-          document.getElementById("dup-msg").innerHTML = `A file with ${matchDesc} was already uploaded on ${uploaded}. What would you like to do?`;
-          const overlay = document.getElementById("dup-overlay");
-          overlay.style.display = "flex";
-        }
-        return;
+        _qst(qIdx,'⚠','#d97706');
+        const acts = document.getElementById(`qact-${qIdx}`);
+        if (acts) acts.innerHTML =
+          `<button onclick="qUseExisting('${det.existing_dataset_id}','${esc(det.existing_filename)}',${qIdx})" style="background:#1e40af;font-size:11px;padding:2px 6px;">Use existing</button>`+
+          `<button onclick="qUploadAnyway(${qIdx})" style="background:#6b7280;font-size:11px;padding:2px 6px;">Upload anyway</button>`;
+        _retry[qIdx]={file,ctx}; return;
       }
-
       if (!resp.ok) {
-        const msg = body.detail?.message || resp.statusText;
-        if (qIdx !== null) {
-          qRowStatus(qIdx, "✗", "#b91c1c");
-          const err = document.getElementById(`qerr-${qIdx}`);
-          if (err) err.textContent = msg;
-        } else {
-          status.innerHTML = `<span class="error">Error: ${escHtml(msg)}</span>`;
-        }
+        _qst(qIdx,'✗','#b91c1c');
+        const err=document.getElementById(`qerr-${qIdx}`);
+        if(err) err.textContent=body.detail?.message||resp.statusText;
       } else {
-        const ds = body.data;
-        if (qIdx !== null) {
-          qRowStatus(qIdx, "✓", "#16a34a");
-        } else {
-          const fmtBadge = `<span class="fmt-badge">${escHtml(ds.format)}</span>`;
-          status.innerHTML = `<span class="success">Uploaded successfully!</span>`;
-          document.getElementById("dataset-info") && (document.getElementById("dataset-info").innerHTML =
-            `<strong>${escHtml(ds.filename)}</strong>${fmtBadge} — ${ds.row_count} rows, ${ds.col_count} columns<br>
-             <span class="col-list">Columns: ${ds.columns.map(escHtml).join(", ")}</span>`);
-        }
-        _registerDataset(ds);
+        _qst(qIdx,'✓','#16a34a');
+        _registerDataset(body.data);
       }
     } catch(e) {
-      if (qIdx !== null) {
-        qRowStatus(qIdx, "✗", "#b91c1c");
-        const err = document.getElementById(`qerr-${qIdx}`);
-        if (err) err.textContent = e.message;
-      } else {
-        status.innerHTML = `<span class="error">Network error: ${escHtml(e.message)}</span>`;
-      }
-    } finally {
-      if (btn) { btn.disabled = false; }
+      _qst(qIdx,'✗','#b91c1c');
+      const err=document.getElementById(`qerr-${qIdx}`);
+      if(err) err.textContent=e.message;
     }
   }
 
-  let _queueFiles = {};
+  function _qst(id,icon,color) { const el=document.getElementById(`qst-${id}`); if(el){el.textContent=icon;el.style.color=color;} }
 
-  function qUseExisting(existingId, existingFilename, qIdx) {
-    qRowStatus(qIdx, "✓", "#16a34a");
-    const actions = document.getElementById(`qact-${qIdx}`);
-    if (actions) actions.innerHTML = "";
-    _registerDataset({ dataset_id: existingId, filename: existingFilename, format: "", row_count: "", columns: [] });
-    // select the existing one in the checkbox list
-    const cb = document.querySelector(`.ds-check[value="${existingId}"]`);
-    if (cb) cb.checked = true;
+  function qUseExisting(exId, exName, qIdx) {
+    _qst(qIdx,'✓','#16a34a');
+    const a=document.getElementById(`qact-${qIdx}`); if(a) a.innerHTML='';
+    _registerDataset({dataset_id:exId,filename:exName,format:'',row_count:'?',columns:[]});
+  }
+  async function qUploadAnyway(qIdx) {
+    const item=_retry[qIdx]; if(!item) return;
+    document.getElementById(`qact-${qIdx}`).innerHTML='';
+    await _doUpload(item.file,true,item.ctx,qIdx);
   }
 
-  async function qUploadAnyway(filename, qIdx) {
-    const queued = _queueFiles[qIdx];
-    if (!queued) return;
-    const actions = document.getElementById(`qact-${qIdx}`);
-    if (actions) actions.innerHTML = "";
-    await _doUpload(queued.file, true, queued.context, qIdx);
+  async function dupUseExisting() {
+    document.getElementById('dup-overlay').style.display='none';
+    if(_pendingDup?.existingId) _registerDataset({dataset_id:_pendingDup.existingId,filename:_pendingDup.existingName,format:'',row_count:'?',columns:[]});
   }
-
-  // ── Dup modal (single-file) ────────────────────────────────────────────────────
-  function dupUseExisting() {
-    closeDupDialog();
-    if (_pendingDupExistingId) {
-      _registerDataset({ dataset_id: _pendingDupExistingId, filename: _pendingDupExistingFilename, format: "", row_count: "", columns: [] });
-      const cb = document.querySelector(`.ds-check[value="${_pendingDupExistingId}"]`);
-      if (cb) { cb.checked = true; onDatasetCheckChange(); }
-      document.getElementById("upload-status").innerHTML = `<span class="success">Using existing dataset.</span>`;
-    }
-  }
-
   async function dupUploadAnyway() {
-    closeDupDialog();
-    if (_pendingDupFile) await _doUpload(_pendingDupFile, true, document.getElementById("upload-context").value.trim(), null);
+    document.getElementById('dup-overlay').style.display='none';
+    if(_pendingDup) await _doUpload(_pendingDup.file,true,_pendingDup.ctx,_pendingDup.qIdx||'_s');
   }
 
-  function dupCancel() { closeDupDialog(); }
-  function closeDupDialog() { document.getElementById("dup-overlay").style.display = "none"; }
+  // ── Register dataset ──────────────────────────────────────────────────────────
+  const _ctxCache = {};
 
-  // ── Register newly uploaded dataset into checkbox list ─────────────────────────
+  function _dsRowInner(id, filename, rowCount) {
+    return `
+      <label><input type="checkbox" class="ds-check" value="${id}" checked onchange="onDatasetCheckChange()">
+        <span>${esc(filename)} <span class="row-cnt">(${rowCount} rows)</span></span></label>
+      <button class="del-btn" onclick="deleteDataset('${id}',event)" title="Delete">🗑</button>`;
+  }
+
   function _registerDataset(ds) {
     if (!ds.dataset_id) return;
-    const existing = document.querySelector(`.ds-check[value="${ds.dataset_id}"]`);
-    if (!existing) {
-      const container = document.getElementById("dataset-checkboxes");
-      const label = document.createElement("label");
-      label.style.cssText = "display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;cursor:pointer;";
-      label.innerHTML = `<input type="checkbox" class="ds-check" value="${ds.dataset_id}" checked onchange="onDatasetCheckChange()">
-        <span>${escHtml(ds.filename)} <span style="color:#9ca3af;">(${ds.row_count} rows)</span></span>`;
-      container.appendChild(label);
-      document.getElementById("no-datasets-msg").style.display = "none";
-      if (ds.context) _contextCache[ds.dataset_id] = ds.context;
-    }
+    if (document.querySelector(`.ds-check[value="${ds.dataset_id}"]`)) { onDatasetCheckChange(); return; }
+    const div = document.createElement('div');
+    div.className='ds-row'; div.dataset.id=ds.dataset_id; div.dataset.filename=ds.filename; div.dataset.rowCount=ds.row_count;
+    div.innerHTML = _dsRowInner(ds.dataset_id, ds.filename, ds.row_count);
+    document.getElementById('dataset-checkboxes').appendChild(div);
+    document.getElementById('no-datasets-msg').style.display='none';
+    document.getElementById('clear-all-btn').style.display='inline-block';
+    if (ds.context) _ctxCache[ds.dataset_id]=ds.context;
     onDatasetCheckChange();
   }
 
-  // ── Session list ──────────────────────────────────────────────────────────────
-  async function loadSessionList() {
-    const ids = getSelectedDatasetIds();
-    if (!ids.length) return;
-    const primaryId = ids[0];
-    const sidebar = document.getElementById("session-sidebar");
-    const list = document.getElementById("session-list");
+  // ── C15: delete dataset ───────────────────────────────────────────────────────
+  function deleteDataset(datasetId, event) {
+    event.preventDefault(); event.stopPropagation();
+    const row=document.querySelector(`.ds-row[data-id="${datasetId}"]`); if(!row) return;
+    const fn=row.dataset.filename||datasetId, rc=row.dataset.rowCount||'?';
+    row.innerHTML=`<div class="del-confirm">Delete <strong>${esc(fn)}</strong> and all its sessions?
+      <button onclick="confirmDelete('${datasetId}')" style="background:#b91c1c;font-size:12px;padding:2px 8px;">Delete</button>
+      <button onclick="cancelDelete('${datasetId}','${esc(fn)}','${rc}')" style="background:#6b7280;font-size:12px;padding:2px 8px;">Cancel</button>
+    </div>`;
+  }
+
+  function cancelDelete(id, fn, rc) {
+    const row=document.querySelector(`.ds-row[data-id="${id}"]`); if(!row) return;
+    row.innerHTML=_dsRowInner(id,fn,rc);
+  }
+
+  async function confirmDelete(datasetId) {
     try {
-      const resp = await fetch(`/datasets/${primaryId}/sessions`);
-      const body = await resp.json();
-      if (!resp.ok) return;
-      const sessions = body.data;
-      sidebar.style.display = sessions.length ? "block" : "none";
-      if (!sessions.length) { list.innerHTML = ""; return; }
-      list.innerHTML = sessions.map(s => `
-        <div class="session-item${s.session_id === currentSessionId ? " active" : ""}"
-             data-sid="${s.session_id}" onclick="resumeSession('${s.session_id}')">
-          <span class="session-label">${escHtml((s.first_question || "Untitled").slice(0, 55))}</span>
-          <span class="session-meta">${s.turn_count} turn${s.turn_count!==1?"s":""} &middot; ${relTime(s.updated_at)}</span>
-        </div>`).join("");
-    } catch { }
+      const resp=await fetch(`/datasets/${datasetId}`,{method:'DELETE'});
+      const body=await resp.json();
+      if (resp.ok) {
+        document.querySelector(`.ds-row[data-id="${datasetId}"]`)?.remove();
+        if (!document.querySelectorAll('.ds-check').length) {
+          document.getElementById('no-datasets-msg').style.display='block';
+          document.getElementById('clear-all-btn').style.display='none';
+        }
+        if (!getSelectedDatasetIds().length) {
+          startNewSession();
+          document.getElementById('dataset-notes-panel').style.display='none';
+          document.getElementById('session-sidebar').style.display='none';
+        }
+      } else {
+        const row=document.querySelector(`.ds-row[data-id="${datasetId}"]`);
+        if(row) {
+          const fn=row.dataset.filename||datasetId, rc=row.dataset.rowCount||'?';
+          row.innerHTML=`<div class="del-confirm" style="color:#b91c1c;">Error: ${esc(body.detail?.message||'Delete failed')}
+            <button onclick="cancelDelete('${datasetId}','${esc(fn)}','${rc}')" style="background:#6b7280;font-size:12px;padding:2px 8px;">Dismiss</button></div>`;
+        }
+      }
+    } catch(e){ console.error(e); }
+  }
+
+  function clearAllDatasets() {
+    const count=document.querySelectorAll('.ds-check').length; if(!count) return;
+    document.getElementById('clear-all-msg').textContent=
+      `This will permanently delete all ${count} dataset${count>1?'s':''} and all their sessions. This cannot be undone.`;
+    document.getElementById('clear-all-overlay').style.display='flex';
+  }
+
+  async function confirmClearAll() {
+    document.getElementById('clear-all-overlay').style.display='none';
+    try {
+      const resp=await fetch('/datasets',{method:'DELETE'});
+      if(resp.ok){
+        document.getElementById('dataset-checkboxes').innerHTML='';
+        document.getElementById('no-datasets-msg').style.display='block';
+        document.getElementById('clear-all-btn').style.display='none';
+        startNewSession();
+        document.getElementById('dataset-notes-panel').style.display='none';
+        document.getElementById('session-sidebar').style.display='none';
+        document.getElementById('session-list').innerHTML='';
+      }
+    } catch(e){ console.error(e); }
+  }
+
+  // ── C14: dataset checkbox change ──────────────────────────────────────────────
+  function getSelectedDatasetIds() {
+    return [...document.querySelectorAll('.ds-check:checked')].map(c=>c.value);
+  }
+  function onDatasetCheckChange() {
+    const ids=getSelectedDatasetIds();
+    startNewSession();
+    if(ids.length){ loadSessionList(); loadDatasetCtx(ids); }
+    else {
+      document.getElementById('session-sidebar').style.display='none';
+      document.getElementById('dataset-notes-panel').style.display='none';
+    }
+  }
+
+  // ── C12: context panel ────────────────────────────────────────────────────────
+  async function loadDatasetCtx(ids) {
+    if(ids.length!==1){ document.getElementById('dataset-notes-panel').style.display='none'; return; }
+    const id=ids[0];
+    if(_ctxCache[id]!==undefined){ _showCtxPanel(id,_ctxCache[id]); return; }
+    try{
+      const body=await(await fetch('/datasets')).json();
+      for(const ds of body.data) _ctxCache[ds.dataset_id]=ds.context||'';
+      _showCtxPanel(id,_ctxCache[id]||'');
+    } catch{}
+  }
+  function _showCtxPanel(id,ctx) {
+    document.getElementById('context-display').textContent=ctx||'No notes added yet.';
+    document.getElementById('context-edit-input').value=ctx||'';
+    document.getElementById('context-edit-area').style.display='none';
+    document.getElementById('context-display').style.display='block';
+    document.getElementById('dataset-notes-panel').style.display='block';
+  }
+  function toggleCtxEdit() {
+    const ea=document.getElementById('context-edit-area'), cd=document.getElementById('context-display');
+    ea.style.display=ea.style.display==='none'?'block':'none';
+    cd.style.display=ea.style.display==='none'?'block':'none';
+  }
+  function cancelCtxEdit() {
+    document.getElementById('context-edit-area').style.display='none';
+    document.getElementById('context-display').style.display='block';
+  }
+  async function saveCtxEdit() {
+    const ids=getSelectedDatasetIds(); if(ids.length!==1) return;
+    const id=ids[0], ctx=document.getElementById('context-edit-input').value.trim();
+    try{
+      const resp=await fetch(`/datasets/${id}/context`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({context:ctx})});
+      if(resp.ok){ _ctxCache[id]=ctx; _showCtxPanel(id,ctx); }
+    } catch{}
+  }
+
+  // ── Sessions ──────────────────────────────────────────────────────────────────
+  let currentSessionId=null;
+
+  async function loadSessionList() {
+    const ids=getSelectedDatasetIds(); if(!ids.length) return;
+    try{
+      const body=await(await fetch(`/datasets/${ids[0]}/sessions`)).json();
+      const sessions=body.data||[];
+      const sidebar=document.getElementById('session-sidebar');
+      sidebar.style.display=sessions.length?'block':'none';
+      document.getElementById('session-list').innerHTML=sessions.map(s=>`
+        <div class="session-item${s.session_id===currentSessionId?' active':''}" data-sid="${s.session_id}" onclick="resumeSession('${s.session_id}')">
+          <span class="session-label">${esc((s.first_question||'Untitled').slice(0,55))}</span>
+          <span class="session-meta">${s.turn_count} turn${s.turn_count!==1?'s':''} &middot; ${relTime(s.updated_at)}</span>
+        </div>`).join('');
+    } catch{}
   }
 
   async function resumeSession(sessionId) {
-    currentSessionId = sessionId;
-    document.getElementById("thread").innerHTML = "";
-    document.getElementById("conversation").style.display = "none";
-    document.getElementById("ask-status").innerHTML = "";
-    document.querySelectorAll(".session-item").forEach(el => el.classList.toggle("active", el.dataset.sid === sessionId));
-    try {
-      const resp = await fetch(`/sessions/${sessionId}`);
-      const body = await resp.json();
-      if (!resp.ok) return;
-      for (const turn of body.data.turns) {
-        const html = turn.answer_html || escHtml(turn.answer_markdown || "(no answer)");
-        appendTurn(turn.question, html, turn.iteration_count, turn.tokens_input, turn.tokens_output, turn.status);
-      }
-    } catch { }
+    currentSessionId=sessionId;
+    document.getElementById('thread').innerHTML='';
+    document.getElementById('conversation').style.display='none';
+    document.querySelectorAll('.session-item').forEach(el=>el.classList.toggle('active',el.dataset.sid===sessionId));
+    try{
+      const body=await(await fetch(`/sessions/${sessionId}`)).json();
+      for(const t of body.data.turns)
+        appendTurn(t.question,t.answer_html||esc(t.answer_markdown||'(no answer)'),t.iteration_count,t.tokens_input,t.tokens_output,t.status);
+    } catch{}
   }
 
   function startNewSession() {
-    currentSessionId = null;
-    document.getElementById("thread").innerHTML = "";
-    document.getElementById("conversation").style.display = "none";
-    document.getElementById("ask-status").innerHTML = "";
-    document.querySelectorAll(".session-item").forEach(el => el.classList.remove("active"));
-    document.getElementById("querying-label").textContent = "Conversation";
+    currentSessionId=null;
+    document.getElementById('thread').innerHTML='';
+    document.getElementById('conversation').style.display='none';
+    document.getElementById('ask-status').innerHTML='';
+    document.querySelectorAll('.session-item').forEach(el=>el.classList.remove('active'));
+    document.getElementById('querying-label').textContent='Conversation';
   }
 
-  // ── Conversation thread ───────────────────────────────────────────────────────
-  function appendTurn(question, answerHtml, iterCount, tokensIn, tokensOut, status) {
-    const thread = document.getElementById("thread");
-    const div = document.createElement("div");
-    div.className = "turn" + (status === "failed" ? " failed" : "");
-    let meta = `${iterCount} iteration${iterCount!==1?"s":""}`;
-    if (tokensIn > 0 || tokensOut > 0) {
-      meta += ` &nbsp;&middot;&nbsp; ${tokensIn.toLocaleString()} in / ${tokensOut.toLocaleString()} out tokens`;
-    }
-    div.innerHTML = `
-      <div class="turn-q">Q: ${escHtml(question)}</div>
-      <div class="answer-body">${answerHtml}</div>
-      <div class="turn-meta">${meta}</div>`;
-    thread.appendChild(div);
-    document.getElementById("conversation").style.display = "block";
-    div.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  function appendTurn(q,html,iters,ti,to,status) {
+    const div=document.createElement('div');
+    div.className='turn'+(status==='failed'?' failed':'');
+    let meta=`${iters} iteration${iters!==1?'s':''}`;
+    if(ti>0||to>0) meta+=` &nbsp;&middot;&nbsp; ${ti.toLocaleString()} in / ${to.toLocaleString()} out tokens`;
+    div.innerHTML=`<div class="turn-q">Q: ${esc(q)}</div><div class="answer-body">${html}</div><div class="turn-meta">${meta}</div>`;
+    document.getElementById('thread').appendChild(div);
+    document.getElementById('conversation').style.display='block';
+    div.scrollIntoView({behavior:'smooth',block:'nearest'});
   }
 
   // ── Ask ───────────────────────────────────────────────────────────────────────
   async function askQuestion() {
-    const ids = getSelectedDatasetIds();
-    const questionEl = document.getElementById("question");
-    const question = questionEl.value.trim();
-    const status = document.getElementById("ask-status");
-    const btn = document.getElementById("ask-btn");
-
-    if (!ids.length) { status.innerHTML = '<span class="error">Please select at least one dataset.</span>'; return; }
-    if (!question)   { status.innerHTML = '<span class="error">Please enter a question.</span>'; return; }
-
-    // Update querying label for multi-dataset
-    if (ids.length > 1) {
-      const names = [...document.querySelectorAll(".ds-check:checked")]
-        .map(c => c.closest("label").querySelector("span > span:not([style]),.q-name")?.textContent || c.value);
-      document.getElementById("querying-label").textContent = `Querying: ${ids.length} datasets`;
-    }
-
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner"></span>Thinking...';
-    status.innerHTML = "";
-
-    try {
-      const resp = await fetch("/ask", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({ dataset_ids: ids, question, session_id: currentSessionId }),
-      });
-      const body = await resp.json();
-      if (!resp.ok) {
-        status.innerHTML = `<span class="error">Error: ${body.detail?.message || resp.statusText}</span>`;
+    const ids=getSelectedDatasetIds();
+    const qEl=document.getElementById('question'), q=qEl.value.trim();
+    const status=document.getElementById('ask-status'), btn=document.getElementById('ask-btn');
+    if(!ids.length){ status.innerHTML='<span class="error">Select at least one dataset.</span>'; return; }
+    if(!q){ status.innerHTML='<span class="error">Enter a question.</span>'; return; }
+    btn.disabled=true; btn.innerHTML='<span class="spinner"></span>Thinking...'; status.innerHTML='';
+    try{
+      const resp=await fetch('/ask',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({dataset_ids:ids,question:q,session_id:currentSessionId})});
+      const body=await resp.json();
+      if(!resp.ok){
+        status.innerHTML=`<span class="error">${esc(body.detail?.message||resp.statusText)}</span>`;
       } else {
-        const r = body.data;
-        currentSessionId = r.session_id;
-        const html = r.answer_html || escHtml(r.answer_markdown || "(no answer)");
-        appendTurn(question, html, r.iteration_count, r.tokens_input, r.tokens_output, r.status);
-        questionEl.value = "";
+        const r=body.data;
+        currentSessionId=r.session_id;
+        if(ids.length>1) document.getElementById('querying-label').textContent=`Querying ${ids.length} datasets`;
+        appendTurn(q,r.answer_html||esc(r.answer_markdown||'(no answer)'),r.iteration_count,r.tokens_input,r.tokens_output,r.status);
+        qEl.value='';
         await loadSessionList();
       }
-    } catch(e) {
-      status.innerHTML = `<span class="error">Network error: ${escHtml(e.message)}</span>`;
-    } finally {
-      btn.disabled = false;
-      btn.textContent = "Ask";
-    }
+    } catch(e){ status.innerHTML=`<span class="error">Network error: ${esc(e.message)}</span>`; }
+    finally{ btn.disabled=false; btn.textContent='Ask'; }
   }
 
-  document.addEventListener("DOMContentLoaded", () => {
-    document.getElementById("question").addEventListener("keydown", e => {
-      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) askQuestion();
+  document.addEventListener('DOMContentLoaded',()=>{
+    document.getElementById('question').addEventListener('keydown',e=>{
+      if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)) askQuestion();
     });
-    const checks = document.querySelectorAll(".ds-check");
-    if (checks.length) { checks[0].checked = true; onDatasetCheckChange(); }
+    const first=document.querySelector('.ds-check');
+    if(first){ first.checked=true; onDatasetCheckChange(); }
   });
 </script>
 {% endblock %}

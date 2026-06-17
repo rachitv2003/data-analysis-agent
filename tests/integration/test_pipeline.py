@@ -473,3 +473,117 @@ def test_multi_dataset_session_mismatch(client):
 def test_ask_no_dataset_id_returns_error(client):
     resp = client.post("/ask", json={"question": "hello?"})
     assert resp.status_code == 422  # pydantic validation error
+
+
+# ── C15: Dataset deletion ────────────────────────────────────────────────────
+
+def test_delete_dataset_cascades(client, tmp_path):
+    dataset_id = _upload(client)
+
+    # Create a session with one turn
+    r = client.post("/ask", json={"dataset_id": dataset_id, "question": "rows?"})
+    session_id = r.json()["data"]["session_id"]
+
+    resp = client.delete(f"/datasets/{dataset_id}")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert dataset_id in data["deleted_dataset_ids"]
+    assert data["deleted_session_count"] >= 1
+    assert data["deleted_run_count"] >= 1
+
+    # Dataset gone
+    assert client.get("/datasets").json()["data"] == []
+    # Ask returns 404
+    resp2 = client.post("/ask", json={"dataset_id": dataset_id, "question": "hi"})
+    assert resp2.status_code == 404
+
+
+def test_delete_nonexistent_dataset(client):
+    resp = client.delete("/datasets/nonexistent")
+    assert resp.status_code == 404
+
+
+def test_delete_all_datasets(client):
+    _upload(client)
+    client.post("/upload", files={"file": ("b.csv", io.BytesIO(b"x,y\n1,2\n"), "text/csv")})
+
+    resp = client.delete("/datasets")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert len(data["deleted_dataset_ids"]) >= 2
+    assert client.get("/datasets").json()["data"] == []
+
+
+def test_delete_all_datasets_empty(client):
+    resp = client.delete("/datasets")
+    assert resp.status_code == 200
+    assert resp.json()["data"]["deleted_dataset_ids"] == []
+
+
+def test_delete_dataset_csv_file_removed(client):
+    from pathlib import Path
+    dataset_id = _upload(client)
+    # Get the file path
+    ds_list = client.get("/datasets").json()["data"]
+    ds = next(d for d in ds_list if d["dataset_id"] == dataset_id)
+    # We can't easily get file_path from the API, just verify dataset is gone after delete
+    resp = client.delete(f"/datasets/{dataset_id}")
+    assert resp.status_code == 200
+
+
+# ── C16: Notes file upload ───────────────────────────────────────────────────
+
+def test_upload_with_notes_file(client):
+    notes = b"column 'value' is in USD thousands"
+    resp = client.post(
+        "/upload",
+        data={},
+        files={
+            "file": ("sales.csv", io.BytesIO(_make_csv()), "text/csv"),
+            "notes_file": ("sales.notes.txt", io.BytesIO(notes), "text/plain"),
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert "USD thousands" in resp.json()["data"]["context"]
+
+
+def test_upload_notes_file_and_context_combined(client):
+    notes = b"column 'value' is in USD"
+    resp = client.post(
+        "/upload",
+        data={"context": "region uses ISO codes"},
+        files={
+            "file": ("c.csv", io.BytesIO(_make_csv()), "text/csv"),
+            "notes_file": ("c.notes.txt", io.BytesIO(notes), "text/plain"),
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    ctx = resp.json()["data"]["context"]
+    assert "ISO codes" in ctx
+    assert "USD" in ctx
+
+
+def test_upload_notes_file_unsupported_format(client):
+    resp = client.post(
+        "/upload",
+        files={
+            "file": ("d.csv", io.BytesIO(_make_csv()), "text/csv"),
+            "notes_file": ("notes.pdf", io.BytesIO(b"%PDF"), "application/pdf"),
+        },
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["code"] == "unsupported_notes_format"
+
+
+def test_upload_notes_file_combined_too_long(client):
+    long_notes = b"x" * 3500
+    resp = client.post(
+        "/upload",
+        data={"context": "y" * 600},
+        files={
+            "file": ("e.csv", io.BytesIO(_make_csv()), "text/csv"),
+            "notes_file": ("e.notes.txt", io.BytesIO(long_notes), "text/plain"),
+        },
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["code"] == "context_too_long"

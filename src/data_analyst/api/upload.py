@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import Optional
 
 from fastapi import APIRouter, UploadFile, File, Form, Depends, Query
 from sqlalchemy.orm import Session
@@ -12,17 +13,31 @@ from data_analyst.utils.file_parser import compute_hash, detect_format, parse_fi
 router = APIRouter()
 
 _CONTEXT_MAX_LEN = 4000
+_NOTES_EXTS = {".txt", ".md"}
 
 
 @router.post("/upload")
 def upload_file(
     file: UploadFile = File(...),
     context: str = Form(default=""),
+    notes_file: Optional[UploadFile] = File(default=None),
     force: bool = Query(default=False),
     session: Session = Depends(get_session),
 ):
     if not file.filename:
         raise api_error("invalid_file", "No filename provided.")
+
+    # ── C16: merge notes_file into context ────────────────────────────────────
+    if notes_file and notes_file.filename:
+        ext = Path(notes_file.filename).suffix.lower()
+        if ext not in _NOTES_EXTS:
+            raise api_error("unsupported_notes_format", "Notes file must be .txt or .md")
+        try:
+            notes_content = notes_file.file.read().decode("utf-8").strip()
+        except UnicodeDecodeError:
+            raise api_error("notes_file_encoding_error", "Notes file must be UTF-8 encoded.")
+        if notes_content:
+            context = (context.strip() + "\n\n" + notes_content).strip() if context.strip() else notes_content
 
     if context and len(context) > _CONTEXT_MAX_LEN:
         raise api_error("context_too_long", f"Context must be ≤ {_CONTEXT_MAX_LEN} characters.")
