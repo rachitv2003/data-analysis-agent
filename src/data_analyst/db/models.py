@@ -26,6 +26,8 @@ class DatasetRow(Base):
     row_count: Mapped[int] = mapped_column(Integer, nullable=False)
     col_count: Mapped[int] = mapped_column(Integer, nullable=False)
     columns_json: Mapped[str] = mapped_column(Text, nullable=False)
+    content_hash: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    format: Mapped[str] = mapped_column(Text, nullable=False, default="csv")
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=_now
     )

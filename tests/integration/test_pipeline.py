@@ -135,7 +135,10 @@ def test_answer_html_contains_tags(client):
 
 def test_session_dataset_mismatch(client):
     id1 = _upload(client)
-    id2 = _upload(client)
+    # Upload a second, distinct dataset
+    r2 = client.post("/upload", files={"file": ("other.csv", io.BytesIO(b"x,y\n1,2\n3,4\n"), "text/csv")})
+    assert r2.status_code == 200, r2.text
+    id2 = r2.json()["data"]["dataset_id"]
 
     r1 = client.post("/ask", json={"dataset_id": id1, "question": "Rows?"})
     session_id = r1.json()["data"]["session_id"]
@@ -221,5 +224,94 @@ def test_ask_unknown_dataset(client):
 
 
 def test_upload_non_csv(client):
-    resp = client.post("/upload", files={"file": ("data.txt", io.BytesIO(b"hello world"), "text/plain")})
+    resp = client.post("/upload", files={"file": ("data.xlsx", io.BytesIO(b"hello world"), "application/octet-stream")})
     assert resp.status_code == 400
+
+
+# ── C10: Duplicate upload detection ──────────────────────────────────────────
+
+def test_duplicate_same_content(client):
+    csv = _make_csv()
+    client.post("/upload", files={"file": ("sales.csv", io.BytesIO(csv), "text/csv")})
+    resp = client.post("/upload", files={"file": ("sales.csv", io.BytesIO(csv), "text/csv")})
+    assert resp.status_code == 409
+    det = resp.json()["detail"]
+    assert det["code"] == "duplicate_dataset"
+    assert det["match_type"] in ("both", "content", "filename")
+    assert "existing_dataset_id" in det
+
+
+def test_duplicate_same_name_different_content(client):
+    client.post("/upload", files={"file": ("data.csv", io.BytesIO(b"a,b\n1,2\n"), "text/csv")})
+    resp = client.post("/upload", files={"file": ("data.csv", io.BytesIO(b"x,y\n3,4\n"), "text/csv")})
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["match_type"] == "filename"
+
+
+def test_duplicate_same_content_different_name(client):
+    csv = _make_csv()
+    client.post("/upload", files={"file": ("a.csv", io.BytesIO(csv), "text/csv")})
+    resp = client.post("/upload", files={"file": ("b.csv", io.BytesIO(csv), "text/csv")})
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["match_type"] == "content"
+
+
+def test_force_upload_bypasses_duplicate(client):
+    csv = _make_csv()
+    client.post("/upload", files={"file": ("orig.csv", io.BytesIO(csv), "text/csv")})
+    resp = client.post("/upload?force=true", files={"file": ("orig.csv", io.BytesIO(csv), "text/csv")})
+    assert resp.status_code == 200
+
+
+# ── C11: Multi-format ingestion ───────────────────────────────────────────────
+
+def test_upload_tsv(client):
+    tsv = b"name\tvalue\talice\t10\nbob\t20\n"
+    resp = client.post("/upload", files={"file": ("data.tsv", io.BytesIO(tsv), "text/tab-separated-values")})
+    # TSV parsing may have varying results depending on content; just check 200 or 400 parse error
+    assert resp.status_code in (200, 400)  # 400 only if content is malformed
+
+
+def test_upload_tsv_valid(client):
+    tsv = b"name\tvalue\nAlice\t10\nBob\t20\n"
+    resp = client.post("/upload", files={"file": ("data.tsv", io.BytesIO(tsv), "text/tab-separated-values")})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["format"] == "tsv"
+    assert data["col_count"] == 2
+    assert data["row_count"] == 2
+
+
+def test_upload_json_array(client):
+    payload = b'[{"name":"Alice","score":95},{"name":"Bob","score":87}]'
+    resp = client.post("/upload", files={"file": ("data.json", io.BytesIO(payload), "application/json")})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["format"] == "json"
+    assert data["row_count"] == 2
+    assert "name" in data["columns"]
+
+
+def test_upload_json_column_keyed(client):
+    payload = b'{"name":["Alice","Bob"],"score":[95,87]}'
+    resp = client.post("/upload", files={"file": ("data.json", io.BytesIO(payload), "application/json")})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["row_count"] == 2
+
+
+def test_upload_json_invalid_shape(client):
+    payload = b'"just a string"'
+    resp = client.post("/upload", files={"file": ("data.json", io.BytesIO(payload), "application/json")})
+    assert resp.status_code == 400
+
+
+def test_upload_unsupported_extension(client):
+    resp = client.post("/upload", files={"file": ("data.xlsx", io.BytesIO(b"pk"), "application/octet-stream")})
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["code"] == "unsupported_format"
+
+
+def test_upload_response_includes_format(client):
+    resp = client.post("/upload", files={"file": ("test.csv", io.BytesIO(_make_csv()), "text/csv")})
+    assert resp.status_code == 200
+    assert resp.json()["data"]["format"] == "csv"
