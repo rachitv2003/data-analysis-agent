@@ -13,7 +13,7 @@ class AgentState(TypedDict, total=False):
     llm_response: str
     tokens_input: int
     tokens_output: int
-    plotly_js_loaded: bool             # C4: True once a chart with CDN JS has been sent in this session
+    charts: list[str]            # C4: Plotly JSON specs captured during this run
     answer: str | None
     error: str | None
     status: str

@@ -570,11 +570,9 @@
   function onDatasetCheckChange() {
     const ids=getSelectedDatasetIds();
     startNewSession();
-    if(ids.length){ loadSessionList(); loadDatasetCtx(ids); }
-    else {
-      document.getElementById('session-sidebar').style.display='none';
-      document.getElementById('dataset-notes-panel').style.display='none';
-    }
+    if(ids.length) loadDatasetCtx(ids);
+    else document.getElementById('dataset-notes-panel').style.display='none';
+    // Session sidebar is persistent — never reloaded on dataset change
   }
 
   // ── C12: context panel ────────────────────────────────────────────────────────
@@ -617,9 +615,8 @@
   let currentSessionId=null;
 
   async function loadSessionList() {
-    const ids=getSelectedDatasetIds(); if(!ids.length) return;
     try{
-      const body=await(await fetch(`/datasets/${ids[0]}/sessions`)).json();
+      const body=await(await fetch('/sessions')).json();
       const sessions=body.data||[];
       const sidebar=document.getElementById('session-sidebar');
       sidebar.style.display=sessions.length?'block':'none';
@@ -658,6 +655,14 @@
     let meta=`${iters} iteration${iters!==1?'s':''}`;
     if(ti>0||to>0) meta+=` &nbsp;&middot;&nbsp; ${ti.toLocaleString()} in / ${to.toLocaleString()} out tokens`;
     div.innerHTML=`<div class="turn-q">Q: ${esc(q)}</div><div class="answer-body">${html}</div><div class="turn-meta">${meta}</div>`;
+    // C4: render Plotly charts from data-spec divs (client-side, no script injection needed)
+    div.querySelectorAll('.answer-body .plotly-chart').forEach(el => {
+      try {
+        const spec = JSON.parse(el.getAttribute('data-spec'));
+        const layout = Object.assign({ autosize: true }, spec.layout || {});
+        Plotly.newPlot(el, spec.data || [], layout, { responsive: true, displayModeBar: true });
+      } catch(e) { console.error('Plotly render error', e); }
+    });
     document.getElementById('thread').appendChild(div);
     document.getElementById('conversation').style.display='block';
     div.scrollIntoView({behavior:'smooth',block:'nearest'});
@@ -694,6 +699,7 @@
     document.getElementById('question').addEventListener('keydown',e=>{
       if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); askQuestion(); }
     });
+    loadSessionList();
     const first=document.querySelector('.ds-check');
     if(first){ first.checked=true; onDatasetCheckChange(); }
   });

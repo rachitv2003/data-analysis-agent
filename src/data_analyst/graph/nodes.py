@@ -27,16 +27,14 @@ _CHART_INSTRUCTION = (
     "Chart / visualisation instructions:\n"
     "- When the user asks for a chart, graph, plot, bar chart, line chart, scatter plot, "
     "histogram, pie chart, heatmap, or any visualisation, use `px` (plotly.express) or "
-    "`go` (plotly.graph_objects) — both are pre-imported in the sandbox.\n"
-    "- Produce the chart HTML with `fig.to_html(include_plotlyjs='cdn')` as the final "
-    "expression in your action. The system will adjust the CDN flag automatically — always "
-    "write `'cdn'` yourself.\n"
-    "- Do NOT use matplotlib unless plotly raises an ImportError.\n"
-    "- In the FINAL ANSWER, embed the raw HTML string returned by fig.to_html() directly — "
-    "do NOT wrap it in a code block or Markdown fence.\n"
-    "- For a dashboard (multiple charts), produce each chart as a separate action, then in "
-    "the FINAL ANSWER concatenate the HTML strings, each on its own line.\n"
-    "- Keep chart titles concise (≤ 60 characters). Always set axis labels.\n"
+    "`go` (plotly.graph_objects) — both are pre-imported.\n"
+    "- Return `fig` as the LAST expression in your code block (just the bare variable, not a call). "
+    "Do NOT call fig.to_html(), fig.show(), or fig.write_html().\n"
+    "- The system captures the figure automatically and renders it as an interactive chart.\n"
+    "- When you see '[Chart N captured: ...]' in an action result, the chart was saved. "
+    "Write your FINAL ANSWER next — do NOT run more chart actions unless the user asked for multiple charts.\n"
+    "- For multiple charts, each chart is a separate action. After the last chart action, write FINAL ANSWER.\n"
+    "- Do NOT use matplotlib. Keep titles concise (≤ 60 chars). Always set axis labels.\n"
 )
 
 _MAX_ROWS = 100
@@ -58,8 +56,9 @@ def get_provider_name() -> str:
 
 
 def _var_name(filename: str) -> str:
-    """Convert filename to a safe Python variable name: 'Sales Data.csv' → 'sales_data_csv'."""
-    base = re.sub(r"[^\w]", "_", filename.lower()).strip("_")
+    """Convert filename to a safe Python variable name: 'Sales Data.csv' → 'sales_data'."""
+    stem = filename.rsplit(".", 1)[0] if "." in filename else filename
+    base = re.sub(r"[^\w]", "_", stem.lower()).strip("_")
     return re.sub(r"_+", "_", base)
 
 
@@ -73,21 +72,21 @@ def _build_prompt(state: AgentState) -> str:
     original = [(var, df) for var, df in full_map.items() if not _ALIAS_RE.match(var)]
 
     schema_lines = []
-    for i, (var, df) in enumerate(original, 1):
+    for var, df in original:
         schema_lines.append(
-            f"- df{i} ({var}): {len(df)} rows × {len(df.columns)} cols — "
+            f"- `{var}`: {len(df)} rows × {len(df.columns)} cols — "
             f"columns: {', '.join(df.columns.tolist()[:20])}"
         )
 
     if len(original) == 1:
         var, df = original[0]
         df_description = (
-            f"The DataFrame is available as `df` / `df1` / `{var}`:\n"
+            f"The DataFrame is available as `{var}` (also aliased as `df`):\n"
             + "\n".join(schema_lines)
         )
     else:
         df_description = (
-            f"Available DataFrames — use df1, df2, … or the variable names shown:\n"
+            f"Available DataFrames — reference each by its variable name:\n"
             + "\n".join(schema_lines)
         )
 
@@ -104,11 +103,14 @@ def _build_prompt(state: AgentState) -> str:
     conv_text = "\n\n".join(conv_lines) if conv_lines else ""
     prior_context = f"Previous conversation:\n{conv_text}\n\n" if conv_text else ""
 
-    # Action history this turn
+    # Action history this turn — truncate very long results to avoid token bloat.
     action_lines = []
     for entry in state.get("action_history", []):
         prefix = "Error" if entry.get("is_error") else "Result"
-        action_lines.append(f"Action: {entry['action']}\n{prefix}: {entry['result']}")
+        result = entry["result"]
+        if isinstance(result, str) and len(result) > 1500:
+            result = result[:1500] + f"… [truncated — {len(result):,} chars total]"
+        action_lines.append(f"Action: {entry['action']}\n{prefix}: {result}")
     history_text = "\n\n".join(action_lines) if action_lines else "None yet."
 
     return (
@@ -133,8 +135,8 @@ def _build_prompt(state: AgentState) -> str:
         f"{_CHART_INSTRUCTION}"
         f"- If you still need data or need to produce a chart, respond with a Python code block "
         f"(one or more lines). The last line must be an expression whose value is the result "
-        f"(a DataFrame, Series, scalar, or fig.to_html() string). Do NOT use print(). "
-        f"Do NOT wrap the code in markdown fences. Use df1/df2/… or the variable names shown above.\n"
+        f"(a DataFrame, Series, scalar, or a Plotly `fig` object). Do NOT use print(). "
+        f"Do NOT wrap the code in markdown fences. Use the variable names shown above.\n"
     )
 
 
@@ -176,29 +178,15 @@ def setup(state: AgentState) -> AgentState:
         _dataframes[run_id] = final_map
         combined_context = "\n\n".join(context_parts) or None
 
-        # C4: detect whether Plotly CDN JS was already sent in an earlier turn of this session
-        plotly_js_loaded = False
-        session_id = state.get("session_id")
-        if session_id:
-            from data_analyst.db.models import QueryRunRow as _QRR
-            prior_runs = (
-                session.query(_QRR)
-                .filter(_QRR.session_id == session_id, _QRR.status == "completed")
-                .all()
-            )
-            plotly_js_loaded = any(
-                r.answer and "cdn.plot.ly" in r.answer for r in prior_runs
-            )
-
         logger.info("setup.loaded", run_id=run_id, datasets=len(dataset_ids))
         return {
             **state,
             "action_history": [],
+            "charts": [],
             "iteration_count": 0,
             "tokens_input": 0,
             "tokens_output": 0,
             "dataset_context": combined_context,
-            "plotly_js_loaded": plotly_js_loaded,
         }
     except Exception as exc:
         logger.error("setup.error", run_id=run_id, error=str(exc))
@@ -317,13 +305,7 @@ def execute_action(state: AgentState) -> AgentState:
         return {**state, "error": "DataFrame not found in cache", "status": "failed"}
 
     history = list(state.get("action_history", []))
-    plotly_js_loaded = state.get("plotly_js_loaded", False)
-
-    # C4: dedup Plotly CDN — if JS already loaded this session, swap 'cdn' → False
-    if plotly_js_loaded and "include_plotlyjs='cdn'" in expression:
-        expression = expression.replace("include_plotlyjs='cdn'", "include_plotlyjs=False")
-    if plotly_js_loaded and 'include_plotlyjs="cdn"' in expression:
-        expression = expression.replace('include_plotlyjs="cdn"', "include_plotlyjs=False")
+    charts = list(state.get("charts", []))
 
     # Strip markdown code fences the LLM sometimes wraps code in
     expression = re.sub(r"^```[a-zA-Z]*\n?", "", expression)
@@ -333,18 +315,33 @@ def execute_action(state: AgentState) -> AgentState:
 
     try:
         result = _exec_code(expression, eval_ns)
+
+        # C4: detect Plotly figure — capture as JSON spec instead of HTML
+        try:
+            import plotly.basedatatypes as _pbt
+            if isinstance(result, _pbt.BaseFigure):
+                charts.append(result.to_json())
+                n = len(charts)
+                try:
+                    title = result.layout.title.text or f"chart {n}"
+                except Exception:
+                    title = f"chart {n}"
+                result_str = f"[Chart {n} captured: {title}]"
+                logger.info("execute_action.chart_captured", run_id=run_id, n=n, title=title)
+                history.append({"action": expression, "result": result_str, "is_error": False})
+                return {**state, "action_history": history, "charts": charts}
+        except ImportError:
+            pass
+
         result_str = _result_to_str(result)
         logger.info("execute_action.ok", run_id=run_id, expr_preview=expression[:60])
         history.append({"action": expression, "result": result_str, "is_error": False})
-        # Mark CDN as loaded if this result includes the Plotly CDN script
-        if isinstance(result_str, str) and "cdn.plot.ly" in result_str:
-            plotly_js_loaded = True
-        return {**state, "action_history": history, "plotly_js_loaded": plotly_js_loaded}
+        return {**state, "action_history": history, "charts": charts}
     except Exception as exc:
         err_str = str(exc)
         logger.warning("execute_action.error", run_id=run_id, error=err_str)
         history.append({"action": expression, "result": err_str, "is_error": True})
-        return {**state, "action_history": history}
+        return {**state, "action_history": history, "charts": charts}
 
 
 def _persist_run(run_id: str, state: AgentState, answer: str, status: str, error: str | None = None) -> None:
@@ -372,6 +369,9 @@ def _persist_run(run_id: str, state: AgentState, answer: str, status: str, error
 
 
 def finalize(state: AgentState) -> AgentState:
+    import json as _json
+    import html as _html
+
     run_id = state["run_id"]
     raw = state.get("llm_response", "")
 
@@ -381,9 +381,21 @@ def finalize(state: AgentState) -> AgentState:
             answer_md = answer_md.strip()[len(prefix):].strip()
             break
 
+    # C4: append captured Plotly charts as client-side-rendered divs.
+    # The JSON spec is HTML-escaped so it is safe inside a double-quoted attribute.
+    charts = state.get("charts", [])
+    if charts:
+        chart_divs = []
+        for chart_json in charts:
+            spec = _json.loads(chart_json)
+            compact = {"data": spec.get("data", []), "layout": spec.get("layout", {})}
+            attr = _html.escape(_json.dumps(compact), quote=True)
+            chart_divs.append(f'<div class="plotly-chart" data-spec="{attr}"></div>')
+        answer_md = (answer_md + "\n\n" if answer_md.strip() else "") + "\n".join(chart_divs)
+
     _dataframes.pop(run_id, None)
     _persist_run(run_id, state, answer_md, "completed")
-    logger.info("finalize.done", run_id=run_id)
+    logger.info("finalize.done", run_id=run_id, charts=len(charts))
     return {**state, "answer": answer_md, "status": "completed"}
 
 

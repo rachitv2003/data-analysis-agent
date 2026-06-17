@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from data_analyst.api._common import ok, api_error
@@ -7,6 +8,37 @@ from data_analyst.db.models import ConversationSessionRow, QueryRunRow
 from data_analyst.utils.markdown import render_markdown
 
 router = APIRouter()
+
+
+@router.get("/sessions")
+def list_all_sessions(session: Session = Depends(get_session)):
+    """Return all sessions across all datasets, most-recently-updated first."""
+    all_sessions = (
+        session.query(ConversationSessionRow)
+        .order_by(ConversationSessionRow.updated_at.desc())
+        .all()
+    )
+    result = []
+    for s in all_sessions:
+        first_run = (
+            session.query(QueryRunRow)
+            .filter(QueryRunRow.session_id == s.id)
+            .order_by(QueryRunRow.created_at)
+            .first()
+        )
+        turn_count = (
+            session.query(func.count(QueryRunRow.id))
+            .filter(QueryRunRow.session_id == s.id)
+            .scalar()
+        )
+        result.append({
+            "session_id": s.id,
+            "created_at": s.created_at.isoformat(),
+            "updated_at": s.updated_at.isoformat(),
+            "turn_count": turn_count or 0,
+            "first_question": first_run.question if first_run else "",
+        })
+    return ok(result)
 
 
 @router.get("/sessions/{session_id}")
