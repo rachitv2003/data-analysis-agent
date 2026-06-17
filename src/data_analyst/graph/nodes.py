@@ -51,15 +51,21 @@ def _build_prompt(state: AgentState) -> str:
 
     return (
         f"<node:plan>\n"
-        f"You are a data analysis assistant. Answer the user's question using pandas expressions.\n"
+        f"You are a data analysis assistant. Answer the user's question about a pandas DataFrame.\n"
         f"The DataFrame is available as `df`.\n\n"
+        f"IMPORTANT — question interpretation:\n"
+        f"- The user's question may contain typos or informal phrasing. Interpret it charitably.\n"
+        f"- If a word looks like a misspelling of a common data term (e.g. 'desribe' → 'describe', 'sumarise' → 'summarise'), treat it as that term.\n"
+        f"- If the question is conversational or cannot be answered with pandas, answer it directly with FINAL ANSWER.\n\n"
         f"{prior_context}"
         f"Current question: {state['question']}\n\n"
         f"Action history (this turn):\n{history_text}\n\n"
         f"Instructions:\n"
-        f"- If you can now answer definitively, respond with: FINAL ANSWER: <your answer>\n"
+        f"- Once you have enough information, respond with: FINAL ANSWER: <your answer>\n"
+        f"- Your FINAL ANSWER must always contain substantive content — never leave it blank.\n"
+        f"- If you are unsure, state your best interpretation and answer it.\n"
         f"- {_MARKDOWN_INSTRUCTION}"
-        f"- Otherwise respond with ONLY a single pandas expression (no explanation, no markdown).\n"
+        f"- If you still need data, respond with ONLY a single pandas expression (no explanation, no markdown).\n"
         f"- Do NOT use print(). Just the expression.\n"
     )
 
@@ -175,6 +181,9 @@ def handle_error(state: AgentState) -> AgentState:
 
     _dataframes.pop(run_id, None)
 
+    # Give the user a readable message rather than a null answer
+    error_answer = f"_Sorry, I was unable to answer this question._\n\n**Reason:** {error}"
+
     from data_analyst.db.session import create_db_session
     from data_analyst.db.models import QueryRunRow
 
@@ -183,6 +192,7 @@ def handle_error(state: AgentState) -> AgentState:
             run = session.get(QueryRunRow, run_id)
             if run:
                 run.status = "failed"
+                run.answer = error_answer
                 run.error_message = error
                 run.action_history = json.dumps(state.get("action_history", []))
                 run.iteration_count = state.get("iteration_count", 0)
@@ -192,4 +202,4 @@ def handle_error(state: AgentState) -> AgentState:
         logger.error("handle_error.db_error", run_id=run_id, error=str(exc))
 
     logger.error("handle_error.done", run_id=run_id, error=error)
-    return {**state, "status": "failed"}
+    return {**state, "answer": error_answer, "status": "failed"}

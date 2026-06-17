@@ -5,6 +5,7 @@ from data_analyst.config.settings import get_settings
 def test_settings_defaults(monkeypatch):
     monkeypatch.setenv("DATA_ANALYST_DATABASE_URL", "sqlite:///test.db")
     monkeypatch.setenv("DATA_ANALYST_GEMINI_API_KEY", "")
+    monkeypatch.setenv("DATA_ANALYST_LLM_MODEL", "gemini-2.5-flash")
     s = get_settings()
     assert s.database_url == "sqlite:///test.db"
     assert s.gemini_api_key == ""

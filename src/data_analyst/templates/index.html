@@ -46,6 +46,10 @@
     background: #f8fafc;
     border-radius: 0 6px 6px 0;
   }
+  .turn.failed {
+    border-left-color: #fca5a5;
+    background: #fff7f7;
+  }
   .turn-q {
     font-size: 13px;
     color: #1e40af;
@@ -98,10 +102,10 @@
     document.getElementById("ask-status").innerHTML = "";
   }
 
-  function appendTurn(question, answerHtml, iterCount, tokensIn, tokensOut) {
+  function appendTurn(question, answerHtml, iterCount, tokensIn, tokensOut, status) {
     const thread = document.getElementById("thread");
     const div = document.createElement("div");
-    div.className = "turn";
+    div.className = "turn" + (status === "failed" ? " failed" : "");
 
     let meta = `${iterCount} iteration${iterCount !== 1 ? "s" : ""}`;
     if (tokensIn > 0 || tokensOut > 0) {
@@ -189,7 +193,7 @@
         const r = body.data;
         currentSessionId = r.session_id;
         const html = r.answer_html || escHtml(r.answer_markdown || "(no answer)");
-        appendTurn(question, html, r.iteration_count, r.tokens_input, r.tokens_output);
+        appendTurn(question, html, r.iteration_count, r.tokens_input, r.tokens_output, r.status);
         questionEl.value = "";
       }
     } catch(e) {
