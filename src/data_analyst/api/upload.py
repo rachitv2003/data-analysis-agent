@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, UploadFile, File, Depends, Query
+from fastapi import APIRouter, UploadFile, File, Form, Depends, Query
 from sqlalchemy.orm import Session
 
 from data_analyst.api._common import ok, api_error
@@ -11,17 +11,22 @@ from data_analyst.utils.file_parser import compute_hash, detect_format, parse_fi
 
 router = APIRouter()
 
+_CONTEXT_MAX_LEN = 4000
+
 
 @router.post("/upload")
 def upload_file(
     file: UploadFile = File(...),
+    context: str = Form(default=""),
     force: bool = Query(default=False),
     session: Session = Depends(get_session),
 ):
     if not file.filename:
         raise api_error("invalid_file", "No filename provided.")
 
-    # Detect format — raises ValueError for unsupported extensions
+    if context and len(context) > _CONTEXT_MAX_LEN:
+        raise api_error("context_too_long", f"Context must be ≤ {_CONTEXT_MAX_LEN} characters.")
+
     try:
         fmt = detect_format(file.filename)
     except ValueError as exc:
@@ -30,7 +35,7 @@ def upload_file(
     raw = file.file.read()
     content_hash = compute_hash(raw)
 
-    # ── Duplicate detection (skip if force=True) ──────────────────────────────
+    # ── Duplicate detection ───────────────────────────────────────────────────
     if not force:
         by_hash = (
             session.query(DatasetRow)
@@ -52,7 +57,6 @@ def upload_file(
             else:
                 match_type = "filename"
 
-            from data_analyst.api._common import api_error as _err
             from fastapi import HTTPException
             raise HTTPException(
                 status_code=409,
@@ -69,7 +73,7 @@ def upload_file(
                 },
             )
 
-    # ── Parse ──────────────────────────────────────────────────────────────────
+    # ── Parse ─────────────────────────────────────────────────────────────────
     try:
         df = parse_file(raw, fmt)
     except ValueError as exc:
@@ -79,7 +83,7 @@ def upload_file(
     if df.empty or len(df.columns) == 0:
         raise api_error("empty_file", "The uploaded file has no data rows.")
 
-    # ── Persist ────────────────────────────────────────────────────────────────
+    # ── Persist ───────────────────────────────────────────────────────────────
     from data_analyst.config.settings import get_settings
     upload_dir = Path(get_settings().upload_dir)
     upload_dir.mkdir(exist_ok=True)
@@ -92,11 +96,11 @@ def upload_file(
         columns_json=json.dumps(df.columns.tolist()),
         content_hash=content_hash,
         format=fmt,
+        context=context.strip() or None,
     )
     session.add(dataset)
     session.flush()
 
-    # Save as CSV internally regardless of source format (uniform read path for agent)
     dest = upload_dir / f"{dataset.id}.csv"
     df.to_csv(dest, index=False)
     dataset.file_path = str(dest.resolve())
@@ -105,6 +109,7 @@ def upload_file(
         "dataset_id": dataset.id,
         "filename": file.filename,
         "format": fmt,
+        "context": dataset.context or "",
         "row_count": len(df),
         "col_count": len(df.columns),
         "columns": df.columns.tolist(),

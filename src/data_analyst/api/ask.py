@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from sqlalchemy.orm import Session
 
 from data_analyst.api._common import ok, api_error
@@ -12,9 +12,18 @@ router = APIRouter()
 
 
 class AskRequest(BaseModel):
-    dataset_id: str
+    dataset_id: str | None = None       # backward compat — single dataset
+    dataset_ids: list[str] | None = None  # C14 — one or more datasets
     question: str
     session_id: str | None = None
+
+    @model_validator(mode="after")
+    def resolve_dataset_ids(self):
+        if self.dataset_ids is None and self.dataset_id is None:
+            raise ValueError("Provide dataset_id or dataset_ids")
+        if self.dataset_ids is None:
+            self.dataset_ids = [self.dataset_id]
+        return self
 
 
 @router.post("/ask")
@@ -25,12 +34,12 @@ def ask_question(
     if not body.question.strip():
         raise api_error("empty_question", "Question cannot be empty.")
 
-    dataset = session.get(DatasetRow, body.dataset_id)
-    if dataset is None:
-        raise api_error("dataset_not_found", f"Dataset {body.dataset_id} not found.", 404)
+    for did in body.dataset_ids:
+        if session.get(DatasetRow, did) is None:
+            raise api_error("dataset_not_found", f"Dataset {did} not found.", 404)
 
     try:
-        run_id, session_id = run_agent(body.dataset_id, body.question, body.session_id)
+        run_id, session_id = run_agent(body.dataset_ids, body.question, body.session_id)
     except ValueError as exc:
         msg = str(exc)
         if "not found" in msg:
@@ -45,6 +54,7 @@ def ask_question(
     return ok({
         "run_id": run.id,
         "session_id": session_id,
+        "dataset_ids": body.dataset_ids,
         "answer_markdown": answer_md,
         "answer_html": render_markdown(answer_md),
         "iteration_count": run.iteration_count,

@@ -1,4 +1,5 @@
 import json
+import re
 import structlog
 import pandas as pd
 
@@ -8,7 +9,8 @@ from data_analyst.llm.client import LLMClient
 
 logger = structlog.get_logger()
 
-_dataframes: dict[str, pd.DataFrame] = {}
+# Per-run DataFrame store: run_id → {var_name: DataFrame}
+_dataframes: dict[str, dict[str, pd.DataFrame]] = {}
 _llm_client: LLMClient | None = None
 _llm_provider_name: str = "stub"
 
@@ -20,6 +22,9 @@ _MARKDOWN_INSTRUCTION = (
     "- Use ## headings only if the answer has multiple distinct sections\n"
     "- Do NOT wrap prose in code blocks\n"
 )
+
+_MAX_ROWS = 100
+_MAX_COLS = 20
 
 
 def _get_llm() -> LLMClient:
@@ -36,26 +41,59 @@ def get_provider_name() -> str:
     return _llm_provider_name
 
 
+def _var_name(filename: str) -> str:
+    """Convert filename to a safe Python variable name: 'Sales Data.csv' → 'sales_data_csv'."""
+    base = re.sub(r"[^\w]", "_", filename.lower()).strip("_")
+    return re.sub(r"_+", "_", base)
+
+
 def _build_prompt(state: AgentState) -> str:
+    df_map = _dataframes.get(state["run_id"], {})
+    dataset_ids = state.get("dataset_ids", [])
+
+    # Schema summary for all DataFrames
+    schema_lines = []
+    for i, (var, df) in enumerate(df_map.items(), 1):
+        schema_lines.append(
+            f"- df{i} / {var}: {len(df)} rows × {len(df.columns)} cols — "
+            f"columns: {', '.join(df.columns.tolist()[:20])}"
+        )
+    if len(df_map) == 1:
+        var, df = next(iter(df_map.items()))
+        df_description = (
+            f"The DataFrame is available as `df` (alias for `df1` / `{var}`):\n"
+            + "\n".join(schema_lines)
+        )
+    else:
+        df_description = "Available DataFrames:\n" + "\n".join(schema_lines)
+
+    # Dataset context (C12)
+    ctx = state.get("dataset_context") or ""
+    context_block = (
+        f"Dataset context (treat as authoritative):\n{ctx}\n\n"
+        if ctx else ""
+    )
+
+    # Prior conversation
     conv_history = state.get("conversation_history", [])
     conv_lines = [f"Q: {t['question']}\nA: {t['answer']}" for t in conv_history[-10:]]
     conv_text = "\n\n".join(conv_lines) if conv_lines else ""
+    prior_context = f"Previous conversation:\n{conv_text}\n\n" if conv_text else ""
 
+    # Action history this turn
     action_lines = []
     for entry in state.get("action_history", []):
         prefix = "Error" if entry.get("is_error") else "Result"
         action_lines.append(f"Action: {entry['action']}\n{prefix}: {entry['result']}")
     history_text = "\n\n".join(action_lines) if action_lines else "None yet."
 
-    prior_context = f"Previous conversation:\n{conv_text}\n\n" if conv_text else ""
-
     return (
         f"<node:plan>\n"
-        f"You are a data analysis assistant. Answer the user's question about a pandas DataFrame.\n"
-        f"The DataFrame is available as `df`.\n\n"
+        f"You are a data analysis assistant.\n"
+        f"{df_description}\n\n"
+        f"{context_block}"
         f"IMPORTANT — question interpretation:\n"
         f"- The user's question may contain typos or informal phrasing. Interpret it charitably.\n"
-        f"- If a word looks like a misspelling of a common data term (e.g. 'desribe' → 'describe', 'sumarise' → 'summarise'), treat it as that term.\n"
         f"- If the question is conversational or cannot be answered with pandas, answer it directly with FINAL ANSWER.\n\n"
         f"{prior_context}"
         f"Current question: {state['question']}\n\n"
@@ -63,10 +101,9 @@ def _build_prompt(state: AgentState) -> str:
         f"Instructions:\n"
         f"- Once you have enough information, respond with: FINAL ANSWER: <your answer>\n"
         f"- Your FINAL ANSWER must always contain substantive content — never leave it blank.\n"
-        f"- If you are unsure, state your best interpretation and answer it.\n"
         f"- {_MARKDOWN_INSTRUCTION}"
-        f"- If you still need data, respond with ONLY a single pandas expression (no explanation, no markdown).\n"
-        f"- Do NOT use print(). Just the expression.\n"
+        f"- If you still need data, respond with ONLY a single pandas expression. "
+        f"Use df1/df2/… or the variable names listed above. Do NOT use print().\n"
     )
 
 
@@ -75,19 +112,47 @@ def setup(state: AgentState) -> AgentState:
     from data_analyst.db.models import DatasetRow
 
     run_id = state["run_id"]
-    dataset_id = state["dataset_id"]
+    dataset_ids = state.get("dataset_ids", [])
 
     try:
-        with create_db_session() as session:
-            row = session.get(DatasetRow, dataset_id)
-            if row is None:
-                return {**state, "error": f"Dataset {dataset_id} not found", "status": "failed"}
-            file_path = row.file_path
+        df_map: dict[str, pd.DataFrame] = {}
+        context_parts: list[str] = []
 
-        df = pd.read_csv(file_path)
-        _dataframes[run_id] = df
-        logger.info("setup.loaded", run_id=run_id, shape=df.shape)
-        return {**state, "action_history": [], "iteration_count": 0, "tokens_input": 0, "tokens_output": 0}
+        with create_db_session() as session:
+            for i, did in enumerate(dataset_ids, 1):
+                row = session.get(DatasetRow, did)
+                if row is None:
+                    return {**state, "error": f"Dataset {did} not found", "status": "failed"}
+                var = _var_name(row.filename)
+                # Ensure unique var names (e.g. two files with same name after sanitising)
+                if var in df_map:
+                    var = f"{var}_{i}"
+                df = pd.read_csv(row.file_path)
+                df_map[var] = df
+                if row.context:
+                    prefix = f"[{row.filename}]" if len(dataset_ids) > 1 else ""
+                    context_parts.append(f"{prefix} {row.context}".strip())
+
+        # Always provide df / df1 / df2 / … aliases
+        final_map: dict[str, pd.DataFrame] = {}
+        for i, (var, df) in enumerate(df_map.items(), 1):
+            final_map[var] = df
+            final_map[f"df{i}"] = df
+        if len(final_map) > 0:
+            first_df = next(iter(df_map.values()))
+            final_map["df"] = first_df
+
+        _dataframes[run_id] = final_map
+        combined_context = "\n\n".join(context_parts) or None
+        logger.info("setup.loaded", run_id=run_id, datasets=len(dataset_ids))
+        return {
+            **state,
+            "action_history": [],
+            "iteration_count": 0,
+            "tokens_input": 0,
+            "tokens_output": 0,
+            "dataset_context": combined_context,
+        }
     except Exception as exc:
         logger.error("setup.error", run_id=run_id, error=str(exc))
         return {**state, "error": str(exc), "status": "failed"}
@@ -101,7 +166,7 @@ def plan_action(state: AgentState) -> AgentState:
     max_iter = get_settings().max_iterations
 
     if iteration_count >= max_iter:
-        logger.warning("plan_action.max_iterations", run_id=run_id, iteration_count=iteration_count)
+        logger.warning("plan_action.max_iterations", run_id=run_id)
         return {**state, "error": f"Max iterations ({max_iter}) reached.", "status": "failed"}
 
     try:
@@ -121,12 +186,7 @@ def plan_action(state: AgentState) -> AgentState:
         return {**state, "error": str(exc), "status": "failed"}
 
 
-_MAX_ROWS = 100
-_MAX_COLS = 20
-
-
 def _result_to_str(result) -> str:
-    """Serialise a pandas result to a Markdown table (up to 100 rows / 20 cols) or plain string."""
     try:
         if isinstance(result, pd.DataFrame):
             total_rows, total_cols = len(result), len(result.columns)
@@ -151,12 +211,14 @@ def _result_to_str(result) -> str:
 def execute_action(state: AgentState) -> AgentState:
     run_id = state["run_id"]
     expression = state.get("llm_response", "").strip()
-    df = _dataframes.get(run_id)
+    df_map = _dataframes.get(run_id, {})
 
-    if df is None:
+    if not df_map:
         return {**state, "error": "DataFrame not found in cache", "status": "failed"}
 
     history = list(state.get("action_history", []))
+    eval_ns = {**df_map, "pd": pd}
+
     try:
         with pd.option_context(
             "display.max_rows", _MAX_ROWS,
@@ -164,7 +226,7 @@ def execute_action(state: AgentState) -> AgentState:
             "display.width", None,
             "display.max_colwidth", 100,
         ):
-            result = eval(expression, {"df": df, "pd": pd})  # noqa: S307
+            result = eval(expression, eval_ns)  # noqa: S307
         result_str = _result_to_str(result)
         logger.info("execute_action.ok", run_id=run_id, expr_preview=expression[:60])
         history.append({"action": expression, "result": result_str, "is_error": False})
@@ -174,6 +236,30 @@ def execute_action(state: AgentState) -> AgentState:
         logger.warning("execute_action.error", run_id=run_id, error=err_str)
         history.append({"action": expression, "result": err_str, "is_error": True})
         return {**state, "action_history": history}
+
+
+def _persist_run(run_id: str, state: AgentState, answer: str, status: str, error: str | None = None) -> None:
+    from data_analyst.db.session import create_db_session
+    from data_analyst.db.models import QueryRunRow
+    import json as _json
+
+    try:
+        with create_db_session() as db:
+            run = db.get(QueryRunRow, run_id)
+            if run:
+                run.answer = answer
+                run.status = status
+                if error:
+                    run.error_message = error
+                run.action_history = _json.dumps(state.get("action_history", []))
+                run.iteration_count = state.get("iteration_count", 0)
+                run.tokens_input = state.get("tokens_input", 0)
+                run.tokens_output = state.get("tokens_output", 0)
+                ids = state.get("dataset_ids", [])
+                if len(ids) > 1:
+                    run.dataset_ids_json = _json.dumps(ids)
+    except Exception as exc:
+        logger.error("persist_run.error", run_id=run_id, error=str(exc))
 
 
 def finalize(state: AgentState) -> AgentState:
@@ -187,23 +273,7 @@ def finalize(state: AgentState) -> AgentState:
             break
 
     _dataframes.pop(run_id, None)
-
-    from data_analyst.db.session import create_db_session
-    from data_analyst.db.models import QueryRunRow
-
-    try:
-        with create_db_session() as session:
-            run = session.get(QueryRunRow, run_id)
-            if run:
-                run.answer = answer_md
-                run.status = "completed"
-                run.action_history = json.dumps(state.get("action_history", []))
-                run.iteration_count = state.get("iteration_count", 0)
-                run.tokens_input = state.get("tokens_input", 0)
-                run.tokens_output = state.get("tokens_output", 0)
-    except Exception as exc:
-        logger.error("finalize.db_error", run_id=run_id, error=str(exc))
-
+    _persist_run(run_id, state, answer_md, "completed")
     logger.info("finalize.done", run_id=run_id)
     return {**state, "answer": answer_md, "status": "completed"}
 
@@ -211,28 +281,9 @@ def finalize(state: AgentState) -> AgentState:
 def handle_error(state: AgentState) -> AgentState:
     run_id = state["run_id"]
     error = state.get("error", "Unknown error")
-
-    _dataframes.pop(run_id, None)
-
-    # Give the user a readable message rather than a null answer
     error_answer = f"_Sorry, I was unable to answer this question._\n\n**Reason:** {error}"
 
-    from data_analyst.db.session import create_db_session
-    from data_analyst.db.models import QueryRunRow
-
-    try:
-        with create_db_session() as session:
-            run = session.get(QueryRunRow, run_id)
-            if run:
-                run.status = "failed"
-                run.answer = error_answer
-                run.error_message = error
-                run.action_history = json.dumps(state.get("action_history", []))
-                run.iteration_count = state.get("iteration_count", 0)
-                run.tokens_input = state.get("tokens_input", 0)
-                run.tokens_output = state.get("tokens_output", 0)
-    except Exception as exc:
-        logger.error("handle_error.db_error", run_id=run_id, error=str(exc))
-
+    _dataframes.pop(run_id, None)
+    _persist_run(run_id, state, error_answer, "failed", error)
     logger.error("handle_error.done", run_id=run_id, error=error)
     return {**state, "answer": error_answer, "status": "failed"}

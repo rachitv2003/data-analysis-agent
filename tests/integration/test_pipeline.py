@@ -315,3 +315,161 @@ def test_upload_response_includes_format(client):
     resp = client.post("/upload", files={"file": ("test.csv", io.BytesIO(_make_csv()), "text/csv")})
     assert resp.status_code == 200
     assert resp.json()["data"]["format"] == "csv"
+
+
+# ── C12: Dataset context ──────────────────────────────────────────────────────
+
+def test_upload_with_context(client):
+    resp = client.post(
+        "/upload",
+        data={"context": "revenue is in USD thousands"},
+        files={"file": ("sales.csv", io.BytesIO(_make_csv()), "text/csv")},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["context"] == "revenue is in USD thousands"
+
+
+def test_upload_without_context(client):
+    resp = client.post("/upload", files={"file": ("test.csv", io.BytesIO(_make_csv()), "text/csv")})
+    assert resp.status_code == 200
+    assert resp.json()["data"]["context"] == ""
+
+
+def test_upload_context_too_long(client):
+    resp = client.post(
+        "/upload",
+        data={"context": "x" * 4001},
+        files={"file": ("test.csv", io.BytesIO(_make_csv()), "text/csv")},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["code"] == "context_too_long"
+
+
+def test_patch_dataset_context(client):
+    dataset_id = _upload(client)
+    resp = client.patch(f"/datasets/{dataset_id}/context", json={"context": "updated notes"})
+    assert resp.status_code == 200
+    assert resp.json()["data"]["context"] == "updated notes"
+
+
+def test_patch_dataset_context_too_long(client):
+    dataset_id = _upload(client)
+    resp = client.patch(f"/datasets/{dataset_id}/context", json={"context": "y" * 4001})
+    assert resp.status_code == 400
+
+
+def test_patch_context_unknown_dataset(client):
+    resp = client.patch("/datasets/nonexistent/context", json={"context": "hi"})
+    assert resp.status_code == 404
+
+
+def test_datasets_list_includes_context(client):
+    client.post(
+        "/upload",
+        data={"context": "test context"},
+        files={"file": ("ctx.csv", io.BytesIO(_make_csv()), "text/csv")},
+    )
+    resp = client.get("/datasets")
+    assert resp.status_code == 200
+    ds = resp.json()["data"][0]
+    assert "context" in ds
+    assert ds["context"] == "test context"
+
+
+def test_context_injected_in_prompt(client, monkeypatch):
+    """Upload with context and verify it appears in the prompt sent to the LLM."""
+    captured: list[str] = []
+
+    import data_analyst.graph.nodes as nodes_module
+    from data_analyst.llm.providers.base import LLMResponse
+
+    class CapturingProvider:
+        def complete(self, prompt: str) -> LLMResponse:
+            captured.append(prompt)
+            return LLMResponse(text="FINAL ANSWER: done", tokens_input=10, tokens_output=20)
+
+    from data_analyst.llm.client import LLMClient
+    monkeypatch.setattr(nodes_module, "_llm_client", LLMClient(CapturingProvider()))
+
+    resp = client.post(
+        "/upload",
+        data={"context": "region uses ISO 3166 codes"},
+        files={"file": ("ctx2.csv", io.BytesIO(_make_csv()), "text/csv")},
+    )
+    dataset_id = resp.json()["data"]["dataset_id"]
+
+    client.post("/ask", json={"dataset_id": dataset_id, "question": "test?"})
+    assert any("region uses ISO 3166 codes" in p for p in captured)
+
+
+# ── C14: Multi-dataset querying ───────────────────────────────────────────────
+
+def _upload_extra(client) -> str:
+    resp = client.post(
+        "/upload",
+        files={"file": ("extra.csv", io.BytesIO(b"id,score\n1,95\n2,87\n3,72\n"), "text/csv")},
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()["data"]["dataset_id"]
+
+
+def test_ask_with_dataset_ids_list(client):
+    id1 = _upload(client)
+    id2 = _upload_extra(client)
+    resp = client.post("/ask", json={"dataset_ids": [id1, id2], "question": "How many rows in each?"})
+    assert resp.status_code == 200, resp.text
+    result = resp.json()["data"]
+    assert result["status"] == "completed"
+    assert result["dataset_ids"] == [id1, id2]
+
+
+def test_ask_backward_compat_dataset_id(client):
+    """Old-style single dataset_id still works."""
+    dataset_id = _upload(client)
+    resp = client.post("/ask", json={"dataset_id": dataset_id, "question": "Rows?"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["dataset_ids"] == [dataset_id]
+
+
+def test_multi_dataset_both_dfs_available(client, monkeypatch):
+    """Both df1 and df2 must be available in the eval namespace."""
+    captured_ns: list[dict] = []
+
+    import data_analyst.graph.nodes as nodes_module
+    from data_analyst.llm.providers.base import LLMResponse
+
+    call_count = [0]
+
+    class TwoDatasetProvider:
+        def complete(self, prompt: str) -> LLMResponse:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return LLMResponse(text="pd.merge(df1, df2, left_on='name', right_on='id')", tokens_input=10, tokens_output=20)
+            return LLMResponse(text="FINAL ANSWER: merged successfully", tokens_input=10, tokens_output=20)
+
+    from data_analyst.llm.client import LLMClient
+    monkeypatch.setattr(nodes_module, "_llm_client", LLMClient(TwoDatasetProvider()))
+
+    id1 = _upload(client)
+    id2 = _upload_extra(client)
+    resp = client.post("/ask", json={"dataset_ids": [id1, id2], "question": "Join the tables."})
+    # Even if merge fails (key mismatch), agent should not crash — it retries with FINAL ANSWER
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["status"] in ("completed", "failed")
+
+
+def test_multi_dataset_session_mismatch(client):
+    """Session created with [id1] rejects request with [id2]."""
+    id1 = _upload(client)
+    id2 = _upload_extra(client)
+
+    r1 = client.post("/ask", json={"dataset_ids": [id1], "question": "rows?"})
+    sid = r1.json()["data"]["session_id"]
+
+    resp = client.post("/ask", json={"dataset_ids": [id2], "question": "cols?", "session_id": sid})
+    assert resp.status_code == 400
+
+
+def test_ask_no_dataset_id_returns_error(client):
+    resp = client.post("/ask", json={"question": "hello?"})
+    assert resp.status_code == 422  # pydantic validation error

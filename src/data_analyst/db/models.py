@@ -28,6 +28,7 @@ class DatasetRow(Base):
     columns_json: Mapped[str] = mapped_column(Text, nullable=False)
     content_hash: Mapped[str] = mapped_column(Text, nullable=False, default="")
     format: Mapped[str] = mapped_column(Text, nullable=False, default="csv")
+    context: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=_now
     )
@@ -37,7 +38,8 @@ class ConversationSessionRow(Base):
     __tablename__ = "conversation_sessions"
 
     id: Mapped[str] = mapped_column(Text, primary_key=True, default=_uuid)
-    dataset_id: Mapped[str] = mapped_column(Text, nullable=False)
+    dataset_id: Mapped[str] = mapped_column(Text, nullable=False)   # primary dataset (backward compat)
+    dataset_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # full list for C14
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=_now
     )
@@ -60,6 +62,7 @@ class QueryRunRow(Base):
     iteration_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     tokens_input: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     tokens_output: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    dataset_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=_now
     )

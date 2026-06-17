@@ -1,3 +1,4 @@
+import json
 import structlog
 
 from data_analyst.graph.agent import agent_graph
@@ -10,22 +11,36 @@ logger = structlog.get_logger()
 MAX_SESSION_TURNS = 20
 
 
-def run_agent(dataset_id: str, question: str, session_id: str | None = None) -> str:
-    """Create a QueryRun, invoke the ReAct agent, return the run_id."""
+def run_agent(
+    dataset_ids: list[str],
+    question: str,
+    session_id: str | None = None,
+) -> tuple[str, str]:
+    """Create a QueryRun, invoke the ReAct agent, return (run_id, session_id)."""
     init_db()
 
+    if not dataset_ids:
+        raise ValueError("At least one dataset_id is required")
+
+    primary_dataset_id = dataset_ids[0]
+    dataset_ids_json = json.dumps(dataset_ids) if len(dataset_ids) > 1 else None
     conversation_history: list[dict] = []
 
     with create_db_session() as session:
-        # Resolve or create conversation session
         if session_id:
             sess_row = session.get(ConversationSessionRow, session_id)
             if sess_row is None:
                 raise ValueError(f"Session {session_id} not found")
-            if sess_row.dataset_id != dataset_id:
+
+            # Validate dataset set matches
+            sess_ids = (
+                json.loads(sess_row.dataset_ids_json)
+                if sess_row.dataset_ids_json
+                else [sess_row.dataset_id]
+            )
+            if sorted(sess_ids) != sorted(dataset_ids):
                 raise ValueError("Session dataset mismatch")
 
-            # Load prior turns
             prior_runs = (
                 session.query(QueryRunRow)
                 .filter(
@@ -44,14 +59,17 @@ def run_agent(dataset_id: str, question: str, session_id: str | None = None) -> 
                 if r.answer
             ]
         else:
-            # Start a new session
-            sess_row = ConversationSessionRow(dataset_id=dataset_id)
+            sess_row = ConversationSessionRow(
+                dataset_id=primary_dataset_id,
+                dataset_ids_json=dataset_ids_json,
+            )
             session.add(sess_row)
             session.flush()
             session_id = sess_row.id
 
         run = QueryRunRow(
-            dataset_id=dataset_id,
+            dataset_id=primary_dataset_id,
+            dataset_ids_json=dataset_ids_json,
             session_id=session_id,
             question=question,
             status="running",
@@ -62,7 +80,7 @@ def run_agent(dataset_id: str, question: str, session_id: str | None = None) -> 
 
     initial: AgentState = {
         "run_id": run_id,
-        "dataset_id": dataset_id,
+        "dataset_ids": dataset_ids,
         "session_id": session_id,
         "question": question,
         "conversation_history": conversation_history,
@@ -71,7 +89,7 @@ def run_agent(dataset_id: str, question: str, session_id: str | None = None) -> 
         "error": None,
     }
 
-    logger.info("agent.start", run_id=run_id, dataset_id=dataset_id, session_id=session_id)
+    logger.info("agent.start", run_id=run_id, dataset_ids=dataset_ids, session_id=session_id)
     final = agent_graph.invoke(initial)
     logger.info("agent.done", run_id=run_id, status=final.get("status"))
 
