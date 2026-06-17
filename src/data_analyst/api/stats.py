@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func
@@ -14,7 +14,8 @@ router = APIRouter()
 
 @router.get("/stats/daily")
 def daily_stats(session: Session = Depends(get_session)):
-    today = date.today().isoformat()
+    # Use UTC date to match how created_at is stored (datetime.now(timezone.utc))
+    today = datetime.now(timezone.utc).date().isoformat()
     row = (
         session.query(
             func.coalesce(func.sum(QueryRunRow.tokens_input), 0).label("tokens_input"),

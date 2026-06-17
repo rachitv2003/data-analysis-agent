@@ -131,8 +131,10 @@ def _build_prompt(state: AgentState) -> str:
         f"- Your FINAL ANSWER must always contain substantive content — never leave it blank.\n"
         f"- {_MARKDOWN_INSTRUCTION}"
         f"{_CHART_INSTRUCTION}"
-        f"- If you still need data, respond with ONLY a single pandas/plotly expression. "
-        f"Use df1/df2/… or the variable names listed above. Do NOT use print().\n"
+        f"- If you still need data or need to produce a chart, respond with a Python code block "
+        f"(one or more lines). The last line must be an expression whose value is the result "
+        f"(a DataFrame, Series, scalar, or fig.to_html() string). Do NOT use print(). "
+        f"Do NOT wrap the code in markdown fences. Use df1/df2/… or the variable names shown above.\n"
     )
 
 
@@ -272,6 +274,40 @@ def _make_eval_ns(df_map: dict) -> dict:
     return ns
 
 
+def _exec_code(code: str, ns: dict):
+    """Execute one or more lines of Python; return the value of the last expression."""
+    lines = code.strip().splitlines()
+    if not lines:
+        return None
+
+    # Split preamble (all but last line) from the final expression
+    preamble = "\n".join(lines[:-1])
+    last = lines[-1].strip()
+
+    if preamble:
+        with pd.option_context(
+            "display.max_rows", _MAX_ROWS,
+            "display.max_columns", _MAX_COLS,
+            "display.width", None,
+            "display.max_colwidth", 100,
+        ):
+            exec(preamble, ns)  # noqa: S102
+
+    # Try to eval the last line as an expression (returns a value)
+    try:
+        with pd.option_context(
+            "display.max_rows", _MAX_ROWS,
+            "display.max_columns", _MAX_COLS,
+            "display.width", None,
+            "display.max_colwidth", 100,
+        ):
+            return eval(last, ns)  # noqa: S307
+    except SyntaxError:
+        # Last line is a statement (e.g. assignment) — exec it, return None
+        exec(last, ns)  # noqa: S102
+        return None
+
+
 def execute_action(state: AgentState) -> AgentState:
     run_id = state["run_id"]
     expression = state.get("llm_response", "").strip()
@@ -289,16 +325,14 @@ def execute_action(state: AgentState) -> AgentState:
     if plotly_js_loaded and 'include_plotlyjs="cdn"' in expression:
         expression = expression.replace('include_plotlyjs="cdn"', "include_plotlyjs=False")
 
+    # Strip markdown code fences the LLM sometimes wraps code in
+    expression = re.sub(r"^```[a-zA-Z]*\n?", "", expression)
+    expression = re.sub(r"\n?```$", "", expression).strip()
+
     eval_ns = _make_eval_ns(df_map)
 
     try:
-        with pd.option_context(
-            "display.max_rows", _MAX_ROWS,
-            "display.max_columns", _MAX_COLS,
-            "display.width", None,
-            "display.max_colwidth", 100,
-        ):
-            result = eval(expression, eval_ns)  # noqa: S307
+        result = _exec_code(expression, eval_ns)
         result_str = _result_to_str(result)
         logger.info("execute_action.ok", run_id=run_id, expr_preview=expression[:60])
         history.append({"action": expression, "result": result_str, "is_error": False})
