@@ -25,10 +25,18 @@ def parse_file(raw: bytes, fmt: str) -> pd.DataFrame:
     if fmt == "tsv":
         return pd.read_csv(io.BytesIO(raw), sep="\t", encoding="utf-8", encoding_errors="replace")
     if fmt == "txt":
-        return pd.read_csv(
-            io.BytesIO(raw), sep=None, engine="python",
-            encoding="utf-8", encoding_errors="replace",
-        )
+        try:
+            return pd.read_csv(
+                io.BytesIO(raw), sep=None, engine="python",
+                encoding="utf-8", encoding_errors="replace",
+            )
+        except Exception as exc:
+            raise ValueError(
+                f"Could not parse .txt file as tabular data: {exc}. "
+                "Make sure the file contains comma- or tab-separated values with a header row. "
+                "If this is a free-form notes/context file, attach it using the '📎 Notes file' "
+                "button in the staged list instead of uploading it as a dataset."
+            ) from exc
     if fmt == "json":
         return _parse_json(raw)
     raise ValueError(f"Unknown format: {fmt}")

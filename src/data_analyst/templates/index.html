@@ -280,7 +280,10 @@
             oninput="_updateContext(${id},this.value)" style="height:56px;font-size:13px;">${esc(item.context)}</textarea>
           ${item.notesContent ? `<div class="sr-preview">📎 ${esc(item.notesContent.slice(0,160))}${item.notesContent.length>160?'…':''}</div>` : ''}
         </div>
-        ${dup?`<div class="sr-warn">⚠ A dataset with this filename already exists — you'll be asked when uploading.</div>`:''}`;
+        ${dup?`<div class="sr-warn">⚠ A dataset with this filename already exists — you'll be asked when uploading.</div>`:''}
+        ${item.file.name.slice(item.file.name.lastIndexOf('.')).toLowerCase()==='.txt'&&!item.notesFilename
+          ? `<div class="sr-warn" style="color:#6b7280;">ℹ .txt datasets must be comma- or tab-separated. For free-form notes, use <strong>📎 Notes file</strong> instead.</div>`
+          : ''}`;
       rowsEl.appendChild(div);
     }
   }
@@ -337,12 +340,20 @@
   const dz = document.getElementById('drop-zone');
   dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
   dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+  const _NOTES_NAMES = new Set(['context','readme','description','info','_notes','notes']);
+  function _isNotesFile(filename) {
+    const lo = filename.toLowerCase();
+    const stem = lo.replace(/\.(txt|md)$/, '');
+    return (lo.endsWith('.txt')||lo.endsWith('.md')) &&
+           (_NOTES_NAMES.has(stem) || lo.endsWith('.notes.txt') || lo.endsWith('.notes.md'));
+  }
+
   dz.addEventListener('drop', async e => {
     e.preventDefault(); dz.classList.remove('drag-over');
     const dtItems = [...e.dataTransfer.items];
     const plain = dtItems.filter(i=>i.kind==='file')
       .map(i=>i.getAsFile())
-      .filter(f=>f&&SUPPORTED.has(f.name.slice(f.name.lastIndexOf('.')).toLowerCase()));
+      .filter(f=>f && SUPPORTED.has(f.name.slice(f.name.lastIndexOf('.')).toLowerCase()) && !_isNotesFile(f.name));
     const dirs = dtItems.map(i=>i.webkitGetAsEntry?.()).filter(e2=>e2?.isDirectory);
     if (plain.length) stageFiles(plain);
     for (const dir of dirs) await _processDir(dir);
@@ -356,13 +367,21 @@
       if (!e2.isFile) return;
       const f = await new Promise(res => e2.file(res));
       const lo = f.name.toLowerCase();
-      if (lo.endsWith('.notes.txt')||lo.endsWith('.notes.md')) {
-        notesMap[lo.replace(/\.notes\.(txt|md)$/,'')] = await f.text();
-      } else if (lo==='_notes.txt'||lo==='_notes.md') {
+      const ext = lo.slice(lo.lastIndexOf('.'));
+      const isFolderNotes =
+        lo === '_notes.txt' || lo === '_notes.md' ||
+        lo === 'context.txt' || lo === 'context.md' ||
+        lo === 'readme.txt' || lo === 'readme.md' ||
+        lo === 'description.txt' || lo === 'description.md' ||
+        lo === 'info.txt' || lo === 'info.md';
+      const isStemNotes = lo.endsWith('.notes.txt') || lo.endsWith('.notes.md');
+
+      if (isStemNotes) {
+        notesMap[lo.replace(/\.notes\.(txt|md)$/, '')] = await f.text();
+      } else if (isFolderNotes) {
         notesMap['_default'] = await f.text();
-      } else {
-        const ext = lo.slice(lo.lastIndexOf('.'));
-        if (SUPPORTED.has(ext)) dataFiles.push(f);
+      } else if (SUPPORTED.has(ext)) {
+        dataFiles.push(f);
       }
     }));
     stageWithNotes(dataFiles.map(f => ({
@@ -373,7 +392,8 @@
 
   function onFilesSelected() {
     const inp = document.getElementById('file-input');
-    if (inp.files.length) stageFiles([...inp.files]);
+    const files = [...inp.files].filter(f => !_isNotesFile(f.name));
+    if (files.length) stageFiles(files);
     inp.value = '';
   }
 
