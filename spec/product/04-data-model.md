@@ -18,6 +18,8 @@ Metadata about an uploaded CSV file.
 | row_count    | INTEGER  | yes      | Number of data rows |
 | col_count    | INTEGER  | yes      | Number of columns |
 | columns_json | TEXT     | yes      | JSON array of column names |
+| content_hash | TEXT     | yes      | SHA-256 hex digest of raw file bytes (default '' for pre-C10 rows) — C10 |
+| format       | TEXT     | yes      | File format: csv / tsv / txt / json (default 'csv' for pre-C11 rows) — C11 |
 | created_at   | DATETIME | yes      | UTC timestamp |
 
 ### Entity: QueryRun

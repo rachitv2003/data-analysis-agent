@@ -9,5 +9,7 @@
 | 5 | Proactive data insights / auto-profiling | 5 | deferred |
 | 6 | [Rich text responses — Markdown-formatted answers rendered as HTML](06-rich-text-responses.md) | 4 | done |
 | 7 | [Token usage tracking — input/output token counts per query run](07-token-usage-tracking.md) | 4 | done |
-| 8 | [Expanded result display — up to 100 rows / 20 columns as Markdown table](08-expanded-result-display.md) | 5 | draft |
-| 9 | [Session management UI — list, resume, and switch between saved sessions](09-session-management-ui.md) | 5 | draft |
+| 8 | [Expanded result display — up to 100 rows / 20 columns as Markdown table](08-expanded-result-display.md) | 5 | done |
+| 9 | [Session management UI — list, resume, and switch between saved sessions](09-session-management-ui.md) | 5 | done |
+| 10 | [Duplicate upload detection — warn on same filename or contents](10-duplicate-upload-detection.md) | 6 | draft |
+| 11 | [Multi-format ingestion — TSV, TXT, JSON in addition to CSV](11-multi-format-ingestion.md) | 6 | draft |
