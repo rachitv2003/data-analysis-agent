@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from data_analyst.api._common import ok, api_error
 from data_analyst.db.session import get_session
 from data_analyst.db.models import ConversationSessionRow, QueryRunRow
+from data_analyst.utils.markdown import render_markdown
 
 router = APIRouter()
 
@@ -31,7 +32,11 @@ def get_session_turns(
             {
                 "run_id": r.id,
                 "question": r.question,
-                "answer": r.answer,
+                "answer_markdown": r.answer or "",
+                "answer_html": render_markdown(r.answer or ""),
+                "iteration_count": r.iteration_count,
+                "tokens_input": r.tokens_input,
+                "tokens_output": r.tokens_output,
                 "status": r.status,
                 "created_at": r.created_at.isoformat(),
             }

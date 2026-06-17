@@ -56,6 +56,8 @@ class QueryRunRow(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     action_history: Mapped[str | None] = mapped_column(Text, nullable=True)
     iteration_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    tokens_input: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    tokens_output: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=_now
     )

@@ -73,9 +73,13 @@ def test_ask_golden_path(client):
     assert resp.status_code == 200, resp.text
     result = resp.json()["data"]
     assert result["status"] == "completed"
-    assert result["answer"] is not None
-    assert len(result["answer"]) > 0
+    assert result["answer_markdown"] is not None
+    assert len(result["answer_markdown"]) > 0
+    assert result["answer_html"] is not None
+    assert "<" in result["answer_html"]   # rendered HTML must contain tags
     assert result["iteration_count"] >= 1
+    assert result["tokens_input"] >= 0
+    assert result["tokens_output"] >= 0
     assert result["session_id"] is not None
 
 
@@ -101,6 +105,32 @@ def test_multi_turn_conversation(client):
     assert len(turns) == 2
     assert turns[0]["question"] == "How many rows?"
     assert turns[1]["question"] == "What are the column names?"
+    # Both turns should have markdown + html + token fields
+    for turn in turns:
+        assert "answer_markdown" in turn
+        assert "answer_html" in turn
+        assert "tokens_input" in turn
+        assert "tokens_output" in turn
+
+
+def test_token_accumulation_stub(client):
+    """Stub runs 2 iterations (10 in/out each), so totals must be 20/20."""
+    dataset_id = _upload(client)
+    resp = client.post("/ask", json={"dataset_id": dataset_id, "question": "Describe the data."})
+    assert resp.status_code == 200, resp.text
+    result = resp.json()["data"]
+    assert result["tokens_input"] == 20   # 2 iterations × 10 in
+    assert result["tokens_output"] == 40  # 2 iterations × 20 out
+    assert result["iteration_count"] == 2
+
+
+def test_answer_html_contains_tags(client):
+    """Stub answer includes Markdown (bold, table) so answer_html must have HTML elements."""
+    dataset_id = _upload(client)
+    resp = client.post("/ask", json={"dataset_id": dataset_id, "question": "Give me a summary."})
+    assert resp.status_code == 200, resp.text
+    html = resp.json()["data"]["answer_html"]
+    assert "<strong>" in html or "<table>" in html or "<ul>" in html or "<p>" in html
 
 
 def test_session_dataset_mismatch(client):

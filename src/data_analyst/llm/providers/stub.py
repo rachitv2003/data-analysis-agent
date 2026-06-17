@@ -1,20 +1,39 @@
-from data_analyst.llm.providers.base import LLMProvider
+from data_analyst.llm.providers.base import LLMProvider, LLMResponse
+
+_STUB_TOKENS_IN = 10
+_STUB_TOKENS_OUT = 20
 
 
 class StubLLMProvider(LLMProvider):
-    """Offline stub — no API key required. Branches on iteration to avoid identical output."""
+    """Offline stub — no API key required. Returns Markdown-formatted output."""
 
-    def complete(self, prompt: str) -> str:
-        # Detect which iteration we're on by counting how many results are in history
-        # The prompt includes previous action/result pairs — count them
+    def complete(self, prompt: str) -> LLMResponse:
+        if "<node:plan>" not in prompt:
+            return LLMResponse(
+                text="FINAL ANSWER: [stub] Unable to process — missing plan tag.",
+                tokens_input=_STUB_TOKENS_IN,
+                tokens_output=_STUB_TOKENS_OUT,
+            )
+
         iteration = prompt.count("Result:") + prompt.count("Error:")
 
-        if "<node:plan>" not in prompt:
-            return "FINAL ANSWER: [stub] Unable to process — missing plan tag."
-
         if iteration == 0:
-            # First iteration: return a real pandas expression
-            return "df.describe().to_string()"
+            return LLMResponse(
+                text="df.describe().to_string()",
+                tokens_input=_STUB_TOKENS_IN,
+                tokens_output=_STUB_TOKENS_OUT,
+            )
 
-        # Second iteration onwards: return final answer
-        return "FINAL ANSWER: [stub] Based on the data summary, the dataset contains numeric columns with the statistics shown above. Set GEMINI_API_KEY for real analysis."
+        return LLMResponse(
+            text=(
+                "FINAL ANSWER: **[stub mode]** Here is a summary of your dataset:\n\n"
+                "- The data was loaded and described successfully.\n"
+                "- Set `DATA_ANALYST_GEMINI_API_KEY` in your `.env` for **real analysis**.\n\n"
+                "| Metric | Value |\n"
+                "|--------|-------|\n"
+                "| Status | Stub |\n"
+                "| Iterations | 2 |"
+            ),
+            tokens_input=_STUB_TOKENS_IN,
+            tokens_output=_STUB_TOKENS_OUT,
+        )

@@ -1,8 +1,15 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+
+
+@dataclass
+class LLMResponse:
+    text: str
+    tokens_input: int
+    tokens_output: int
 
 
 class LLMProvider(ABC):
     @abstractmethod
-    def complete(self, prompt: str) -> str:
-        """Send a prompt, return the model's text response."""
+    def complete(self, prompt: str) -> LLMResponse:
         ...

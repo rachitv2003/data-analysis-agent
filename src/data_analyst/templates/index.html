@@ -39,11 +39,49 @@
 </div>
 
 <style>
-  .turn { border-left: 3px solid #bfdbfe; padding: 10px 14px; margin-bottom: 10px; background:#f8fafc; border-radius: 0 6px 6px 0; }
-  .turn .q { font-size:13px; color:#555; margin-bottom:4px; }
-  .turn .q strong { color:#1e40af; }
-  .turn .a { font-size:14px; line-height:1.6; white-space:pre-wrap; word-break:break-word; }
-  .turn .meta { font-size:11px; color:#9ca3af; margin-top:4px; }
+  .turn {
+    border-left: 3px solid #bfdbfe;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+    background: #f8fafc;
+    border-radius: 0 6px 6px 0;
+  }
+  .turn-q {
+    font-size: 13px;
+    color: #1e40af;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .answer-body {
+    font-size: 14px;
+    line-height: 1.65;
+    color: #1f2937;
+  }
+  .answer-body p  { margin: 0 0 8px; }
+  .answer-body ul,
+  .answer-body ol { margin: 0 0 8px; padding-left: 20px; }
+  .answer-body li { margin-bottom: 3px; }
+  .answer-body table {
+    border-collapse: collapse;
+    margin: 8px 0;
+    font-size: 13px;
+    width: auto;
+  }
+  .answer-body th,
+  .answer-body td {
+    border: 1px solid #d1d5db;
+    padding: 5px 10px;
+    text-align: left;
+  }
+  .answer-body th { background: #eff6ff; font-weight: 600; color: #1e3a5f; }
+  .answer-body strong { color: #1e3a5f; }
+  .answer-body code { background: #f3f4f6; padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+  .answer-body pre  { background: #f3f4f6; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 12px; }
+  .turn-meta {
+    font-size: 11px;
+    color: #9ca3af;
+    margin-top: 6px;
+  }
 </style>
 
 <script>
@@ -60,20 +98,27 @@
     document.getElementById("ask-status").innerHTML = "";
   }
 
-  function appendTurn(question, answer, iterCount) {
+  function appendTurn(question, answerHtml, iterCount, tokensIn, tokensOut) {
     const thread = document.getElementById("thread");
     const div = document.createElement("div");
     div.className = "turn";
+
+    let meta = `${iterCount} iteration${iterCount !== 1 ? "s" : ""}`;
+    if (tokensIn > 0 || tokensOut > 0) {
+      meta += ` &nbsp;&middot;&nbsp; ${tokensIn.toLocaleString()} in / ${tokensOut.toLocaleString()} out tokens`;
+    }
+
     div.innerHTML = `
-      <div class="q"><strong>Q:</strong> ${escHtml(question)}</div>
-      <div class="a">${escHtml(answer)}</div>
-      <div class="meta">${iterCount} iteration(s)</div>`;
+      <div class="turn-q">Q: ${escHtml(question)}</div>
+      <div class="answer-body">${answerHtml}</div>
+      <div class="turn-meta">${meta}</div>`;
     thread.appendChild(div);
     document.getElementById("conversation").style.display = "block";
+    div.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 
   function escHtml(s) {
-    return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   }
 
   async function uploadFile() {
@@ -102,15 +147,15 @@
       } else {
         const ds = body.data;
         status.innerHTML = `<span class="success">Uploaded successfully!</span>`;
-        info.innerHTML = `<strong>${ds.filename}</strong> — ${ds.row_count} rows, ${ds.col_count} columns<br>
-          <span class="col-list">Columns: ${ds.columns.join(", ")}</span>`;
+        info.innerHTML = `<strong>${escHtml(ds.filename)}</strong> — ${ds.row_count} rows, ${ds.col_count} columns<br>
+          <span class="col-list">Columns: ${ds.columns.map(escHtml).join(", ")}</span>`;
         const sel = document.getElementById("dataset-select");
         const opt = new Option(`${ds.filename} (${ds.row_count} rows)`, ds.dataset_id, true, true);
         sel.add(opt, 1);
         newConversation();
       }
     } catch(e) {
-      status.innerHTML = `<span class="error">Network error: ${e.message}</span>`;
+      status.innerHTML = `<span class="error">Network error: ${escHtml(e.message)}</span>`;
     } finally {
       btn.disabled = false;
       btn.textContent = "Upload";
@@ -125,7 +170,7 @@
     const btn = document.getElementById("ask-btn");
 
     if (!datasetId) { status.innerHTML = '<span class="error">Please select a dataset.</span>'; return; }
-    if (!question) { status.innerHTML = '<span class="error">Please enter a question.</span>'; return; }
+    if (!question)  { status.innerHTML = '<span class="error">Please enter a question.</span>'; return; }
 
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner"></span>Thinking...';
@@ -143,19 +188,18 @@
       } else {
         const r = body.data;
         currentSessionId = r.session_id;
-        appendTurn(question, r.answer || "(no answer returned)", r.iteration_count);
+        const html = r.answer_html || escHtml(r.answer_markdown || "(no answer)");
+        appendTurn(question, html, r.iteration_count, r.tokens_input, r.tokens_output);
         questionEl.value = "";
-        status.innerHTML = "";
       }
     } catch(e) {
-      status.innerHTML = `<span class="error">Network error: ${e.message}</span>`;
+      status.innerHTML = `<span class="error">Network error: ${escHtml(e.message)}</span>`;
     } finally {
       btn.disabled = false;
       btn.textContent = "Ask";
     }
   }
 
-  // Allow Ctrl+Enter to submit
   document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("question").addEventListener("keydown", e => {
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) askQuestion();
