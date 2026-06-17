@@ -86,7 +86,11 @@
           Upload a file to get started.
         </div>
       </div>
-      <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <button id="select-all-btn" onclick="toggleSelectAll()"
+          style="display:{% if datasets %}inline-block{% else %}none{% endif %};background:none;color:#1e40af;border:1px solid #bfdbfe;font-size:12px;padding:3px 10px;border-radius:5px;">
+          Select all
+        </button>
         <button id="clear-all-btn" onclick="clearAllDatasets()"
           style="display:{% if datasets %}inline-block{% else %}none{% endif %};background:none;color:#b91c1c;border:1px solid #fca5a5;font-size:12px;padding:3px 10px;border-radius:5px;">
           Clear all datasets
@@ -474,6 +478,7 @@
     document.getElementById('dataset-checkboxes').appendChild(div);
     document.getElementById('no-datasets-msg').style.display='none';
     document.getElementById('clear-all-btn').style.display='inline-block';
+    document.getElementById('select-all-btn').style.display='inline-block';
     if (ds.context) _ctxCache[ds.dataset_id]=ds.context;
     onDatasetCheckChange();
   }
@@ -503,6 +508,7 @@
         if (!document.querySelectorAll('.ds-check').length) {
           document.getElementById('no-datasets-msg').style.display='block';
           document.getElementById('clear-all-btn').style.display='none';
+          document.getElementById('select-all-btn').style.display='none';
         }
         if (!getSelectedDatasetIds().length) {
           startNewSession();
@@ -535,6 +541,7 @@
         document.getElementById('dataset-checkboxes').innerHTML='';
         document.getElementById('no-datasets-msg').style.display='block';
         document.getElementById('clear-all-btn').style.display='none';
+        document.getElementById('select-all-btn').style.display='none';
         startNewSession();
         document.getElementById('dataset-notes-panel').style.display='none';
         document.getElementById('session-sidebar').style.display='none';
@@ -547,6 +554,15 @@
   function getSelectedDatasetIds() {
     return [...document.querySelectorAll('.ds-check:checked')].map(c=>c.value);
   }
+
+  function toggleSelectAll() {
+    const all = [...document.querySelectorAll('.ds-check')];
+    const allChecked = all.every(c=>c.checked);
+    all.forEach(c=>{ c.checked=!allChecked; });
+    document.getElementById('select-all-btn').textContent = allChecked ? 'Select all' : 'Deselect all';
+    onDatasetCheckChange();
+  }
+
   function onDatasetCheckChange() {
     const ids=getSelectedDatasetIds();
     startNewSession();
@@ -671,7 +687,7 @@
 
   document.addEventListener('DOMContentLoaded',()=>{
     document.getElementById('question').addEventListener('keydown',e=>{
-      if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)) askQuestion();
+      if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); askQuestion(); }
     });
     const first=document.querySelector('.ds-check');
     if(first){ first.checked=true; onDatasetCheckChange(); }
