@@ -47,25 +47,33 @@ def _var_name(filename: str) -> str:
     return re.sub(r"_+", "_", base)
 
 
-def _build_prompt(state: AgentState) -> str:
-    df_map = _dataframes.get(state["run_id"], {})
-    dataset_ids = state.get("dataset_ids", [])
+_ALIAS_RE = re.compile(r"^df\d*$")
 
-    # Schema summary for all DataFrames
+
+def _build_prompt(state: AgentState) -> str:
+    full_map = _dataframes.get(state["run_id"], {})
+
+    # Only show original filename-derived vars in schema; skip df/df1/df2 aliases
+    original = [(var, df) for var, df in full_map.items() if not _ALIAS_RE.match(var)]
+
     schema_lines = []
-    for i, (var, df) in enumerate(df_map.items(), 1):
+    for i, (var, df) in enumerate(original, 1):
         schema_lines.append(
-            f"- df{i} / {var}: {len(df)} rows × {len(df.columns)} cols — "
+            f"- df{i} ({var}): {len(df)} rows × {len(df.columns)} cols — "
             f"columns: {', '.join(df.columns.tolist()[:20])}"
         )
-    if len(df_map) == 1:
-        var, df = next(iter(df_map.items()))
+
+    if len(original) == 1:
+        var, df = original[0]
         df_description = (
-            f"The DataFrame is available as `df` (alias for `df1` / `{var}`):\n"
+            f"The DataFrame is available as `df` / `df1` / `{var}`:\n"
             + "\n".join(schema_lines)
         )
     else:
-        df_description = "Available DataFrames:\n" + "\n".join(schema_lines)
+        df_description = (
+            f"Available DataFrames — use df1, df2, … or the variable names shown:\n"
+            + "\n".join(schema_lines)
+        )
 
     # Dataset context (C12)
     ctx = state.get("dataset_context") or ""
@@ -94,7 +102,11 @@ def _build_prompt(state: AgentState) -> str:
         f"{context_block}"
         f"IMPORTANT — question interpretation:\n"
         f"- The user's question may contain typos or informal phrasing. Interpret it charitably.\n"
-        f"- If the question is conversational or cannot be answered with pandas, answer it directly with FINAL ANSWER.\n\n"
+        f"- Questions like 'what can you tell me about this file', 'describe the data', 'summarise' are "
+        f"conversational — answer them directly with FINAL ANSWER using what you already know from the schema. "
+        f"Do NOT execute pandas for schema-level questions.\n"
+        f"- Only execute a pandas expression when you need a value not available from the schema alone "
+        f"(e.g. a specific aggregation, filter, or join).\n\n"
         f"{prior_context}"
         f"Current question: {state['question']}\n\n"
         f"Action history (this turn):\n{history_text}\n\n"
