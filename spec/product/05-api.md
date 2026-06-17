@@ -133,6 +133,58 @@ REST. All routes return `{"data": ..., "error": null}` on success or raise HTTP 
 |--------|-----------|
 | 404 | session_id not found |
 
+### `DELETE /datasets/{dataset_id}` *(C15)*
+
+**Purpose:** Delete a single dataset and cascade — removes all sessions and query runs for that dataset, then deletes the CSV file from disk.
+
+**Response:**
+```json
+{
+  "data": {
+    "deleted_dataset_ids": ["uuid"],
+    "deleted_session_count": 3,
+    "deleted_run_count": 12
+  },
+  "error": null
+}
+```
+
+**Error cases:**
+| Status | Condition |
+|--------|-----------|
+| 404 | dataset_id not found |
+| 409 | a run for this dataset is currently `running` (`dataset_in_use`) |
+
+---
+
+### `DELETE /datasets` *(C15)*
+
+**Purpose:** Delete all datasets and cascade to all sessions and runs.
+
+**Response:** Same shape as single delete, but `deleted_dataset_ids` lists all deleted IDs.
+
+---
+
+### `PATCH /datasets/{dataset_id}/context` *(C12)*
+
+**Purpose:** Update the context/notes for an existing dataset.
+
+**Request:** `{"context": "string (max 4000 chars)"}`
+
+**Response:** `{"data": {"dataset_id": "uuid", "context": "updated notes"}, "error": null}`
+
+**Error cases:** 400 `context_too_long`, 404 dataset not found.
+
+---
+
+### `POST /upload` — extended fields *(C12, C16)*
+
+In addition to `file`, accepts:
+- `context` (form field, string, optional) — typed dataset notes, max 4 000 chars
+- `notes_file` (file, optional) — `.txt` or `.md` file whose content is used as (or appended to) `context`
+
+Response gains `context: string` field.
+
 ## Authentication
 
 None in v0.1 — single-user local tool.

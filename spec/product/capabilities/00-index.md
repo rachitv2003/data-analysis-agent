@@ -16,3 +16,6 @@
 | 12 | [Dataset context — attach plain-text notes injected into every prompt](12-dataset-context.md) | 7 | draft |
 | 13 | [Multi-file / folder upload — select many files or drop a folder](13-multi-file-upload.md) | 7 | draft |
 | 14 | [Multi-dataset querying — query two or more datasets together](14-multi-dataset-querying.md) | 8 | draft |
+| 15 | [Dataset deletion — remove one or all datasets and cascade to sessions/runs](15-dataset-deletion.md) | 8 | draft |
+| 16 | [Notes file upload — attach a .txt/.md notes file instead of typing context](16-notes-file-upload.md) | 8 | draft |
+| 17 | [Deferred upload — stage files before uploading, add notes per file](17-deferred-upload.md) | 8 | draft |
