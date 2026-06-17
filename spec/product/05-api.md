@@ -177,6 +177,35 @@ REST. All routes return `{"data": ..., "error": null}` on success or raise HTTP 
 
 ---
 
+### `GET /stats/daily` *(C18)*
+
+**Purpose:** Return aggregated token usage statistics and the active model name for the current UTC calendar day. Used by the token usage counter widget.
+
+**Query parameters:** none.
+
+**Response:**
+```json
+{
+  "data": {
+    "date": "2026-06-17",
+    "model": "gemini-2.5-flash",
+    "tokens_input": 3100,
+    "tokens_output": 2410,
+    "query_count": 11
+  },
+  "error": null
+}
+```
+
+**Implementation notes:**
+- Aggregates `query_runs` rows where `status = 'completed'` and `DATE(created_at) = <today UTC>`.
+- `model` is read from `Settings.llm_model` at request time.
+- Returns zero values (all counts = 0) when no completed runs exist for today — never a 404.
+
+**Error cases:** none; always returns 200.
+
+---
+
 ### `POST /upload` — extended fields *(C12, C16)*
 
 In addition to `file`, accepts:

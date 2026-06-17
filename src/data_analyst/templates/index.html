@@ -76,7 +76,7 @@
           <div class="ds-row" data-id="{{ ds.dataset_id }}" data-filename="{{ ds.filename }}" data-row-count="{{ ds.row_count }}">
             <label>
               <input type="checkbox" class="ds-check" value="{{ ds.dataset_id }}" onchange="onDatasetCheckChange()">
-              <span>{{ ds.filename }} <span class="row-cnt">({{ ds.row_count }} rows)</span></span>
+              <span>{{ ds.filename }} <span class="row-cnt">({{ ds.row_count }} rows · {{ ds.col_count }} cols)</span></span>
             </label>
             <button class="del-btn" onclick="deleteDataset('{{ ds.dataset_id }}',event)" title="Delete">🗑</button>
           </div>
@@ -462,10 +462,11 @@
   // ── Register dataset ──────────────────────────────────────────────────────────
   const _ctxCache = {};
 
-  function _dsRowInner(id, filename, rowCount) {
+  function _dsRowInner(id, filename, rowCount, colCount) {
+    const dims = colCount ? `${rowCount} rows · ${colCount} cols` : `${rowCount} rows`;
     return `
       <label><input type="checkbox" class="ds-check" value="${id}" checked onchange="onDatasetCheckChange()">
-        <span>${esc(filename)} <span class="row-cnt">(${rowCount} rows)</span></span></label>
+        <span>${esc(filename)} <span class="row-cnt">(${dims})</span></span></label>
       <button class="del-btn" onclick="deleteDataset('${id}',event)" title="Delete">🗑</button>`;
   }
 
@@ -473,8 +474,8 @@
     if (!ds.dataset_id) return;
     if (document.querySelector(`.ds-check[value="${ds.dataset_id}"]`)) { onDatasetCheckChange(); return; }
     const div = document.createElement('div');
-    div.className='ds-row'; div.dataset.id=ds.dataset_id; div.dataset.filename=ds.filename; div.dataset.rowCount=ds.row_count;
-    div.innerHTML = _dsRowInner(ds.dataset_id, ds.filename, ds.row_count);
+    div.className='ds-row'; div.dataset.id=ds.dataset_id; div.dataset.filename=ds.filename; div.dataset.rowCount=ds.row_count; div.dataset.colCount=ds.col_count||'';
+    div.innerHTML = _dsRowInner(ds.dataset_id, ds.filename, ds.row_count, ds.col_count);
     document.getElementById('dataset-checkboxes').appendChild(div);
     document.getElementById('no-datasets-msg').style.display='none';
     document.getElementById('clear-all-btn').style.display='inline-block';
@@ -487,16 +488,16 @@
   function deleteDataset(datasetId, event) {
     event.preventDefault(); event.stopPropagation();
     const row=document.querySelector(`.ds-row[data-id="${datasetId}"]`); if(!row) return;
-    const fn=row.dataset.filename||datasetId, rc=row.dataset.rowCount||'?';
+    const fn=row.dataset.filename||datasetId, rc=row.dataset.rowCount||'?', cc=row.dataset.colCount||'';
     row.innerHTML=`<div class="del-confirm">Delete <strong>${esc(fn)}</strong> and all its sessions?
       <button onclick="confirmDelete('${datasetId}')" style="background:#b91c1c;font-size:12px;padding:2px 8px;">Delete</button>
-      <button onclick="cancelDelete('${datasetId}','${esc(fn)}','${rc}')" style="background:#6b7280;font-size:12px;padding:2px 8px;">Cancel</button>
+      <button onclick="cancelDelete('${datasetId}','${esc(fn)}','${rc}','${cc}')" style="background:#6b7280;font-size:12px;padding:2px 8px;">Cancel</button>
     </div>`;
   }
 
-  function cancelDelete(id, fn, rc) {
+  function cancelDelete(id, fn, rc, cc) {
     const row=document.querySelector(`.ds-row[data-id="${id}"]`); if(!row) return;
-    row.innerHTML=_dsRowInner(id,fn,rc);
+    row.innerHTML=_dsRowInner(id,fn,rc,cc);
   }
 
   async function confirmDelete(datasetId) {
@@ -518,9 +519,9 @@
       } else {
         const row=document.querySelector(`.ds-row[data-id="${datasetId}"]`);
         if(row) {
-          const fn=row.dataset.filename||datasetId, rc=row.dataset.rowCount||'?';
+          const fn=row.dataset.filename||datasetId, rc=row.dataset.rowCount||'?', cc=row.dataset.colCount||'';
           row.innerHTML=`<div class="del-confirm" style="color:#b91c1c;">Error: ${esc(body.detail?.message||'Delete failed')}
-            <button onclick="cancelDelete('${datasetId}','${esc(fn)}','${rc}')" style="background:#6b7280;font-size:12px;padding:2px 8px;">Dismiss</button></div>`;
+            <button onclick="cancelDelete('${datasetId}','${esc(fn)}','${rc}','${cc}')" style="background:#6b7280;font-size:12px;padding:2px 8px;">Dismiss</button></div>`;
         }
       }
     } catch(e){ console.error(e); }
@@ -678,6 +679,7 @@
         currentSessionId=r.session_id;
         if(ids.length>1) document.getElementById('querying-label').textContent=`Querying ${ids.length} datasets`;
         appendTurn(q,r.answer_html||esc(r.answer_markdown||'(no answer)'),r.iteration_count,r.tokens_input,r.tokens_output,r.status);
+        if(typeof tuAddRun==='function') tuAddRun(r.tokens_input||0, r.tokens_output||0);
         qEl.value='';
         await loadSessionList();
       }

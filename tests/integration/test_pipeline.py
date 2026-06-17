@@ -587,3 +587,26 @@ def test_upload_notes_file_combined_too_long(client):
     )
     assert resp.status_code == 400
     assert resp.json()["detail"]["code"] == "context_too_long"
+
+
+# ── C18: Daily stats ─────────────────────────────────────────────────────────
+
+def test_daily_stats_empty(client):
+    resp = client.get("/stats/daily")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["tokens_input"] == 0
+    assert data["tokens_output"] == 0
+    assert data["query_count"] == 0
+    assert "model" in data
+    assert "date" in data
+
+
+def test_daily_stats_after_query(client):
+    dataset_id = _upload(client)
+    client.post("/ask", json={"dataset_id": dataset_id, "question": "rows?"})
+
+    resp = client.get("/stats/daily")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["query_count"] >= 1

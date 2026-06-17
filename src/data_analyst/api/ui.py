@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from data_analyst.api import templates
+from data_analyst.config.settings import get_settings
 from data_analyst.db.session import get_session
 from data_analyst.db.models import DatasetRow
 from data_analyst.graph.nodes import get_provider_name
@@ -29,5 +30,6 @@ def index(request: Request, session: Session = Depends(get_session)):
         context={
             "datasets": dataset_list,
             "llm_provider": get_provider_name(),
+            "llm_model": get_settings().llm_model,
         },
     )

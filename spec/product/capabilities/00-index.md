@@ -19,3 +19,4 @@
 | 15 | [Dataset deletion — remove one or all datasets and cascade to sessions/runs](15-dataset-deletion.md) | 8 | draft |
 | 16 | [Notes file upload — attach a .txt/.md notes file instead of typing context](16-notes-file-upload.md) | 8 | draft |
 | 17 | [Deferred upload — stage files before uploading, add notes per file](17-deferred-upload.md) | 8 | draft |
+| 18 | [Token usage counter — persistent top-right widget showing session/daily token spend and cost](18-token-usage-counter.md) | 9 | draft |

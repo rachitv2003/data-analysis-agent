@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="llm-model" content="{{ llm_model }}">
   <title>Data Analysis Agent</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -41,6 +42,48 @@
     .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid white; border-top-color: transparent; border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; margin-right: 6px; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .col-list { font-size: 12px; color: #6b7280; margin-top: 4px; }
+
+    /* ── C18: Token usage widget ── */
+    #tu-widget {
+      position: fixed; top: 12px; right: 16px; z-index: 200;
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 12px;
+      user-select: none;
+    }
+    #tu-chip {
+      display: flex; align-items: center; gap: 6px;
+      background: rgba(30,40,60,.82); color: #e5e7eb;
+      backdrop-filter: blur(6px);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 20px;
+      padding: 5px 12px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background .15s;
+    }
+    #tu-chip:hover { background: rgba(30,40,60,.92); }
+    #tu-chip .tu-dot { width: 7px; height: 7px; border-radius: 50%; background: #34d399; flex-shrink: 0; }
+    #tu-panel {
+      display: none;
+      margin-top: 6px;
+      background: #1e293b;
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 10px;
+      padding: 14px 16px;
+      color: #e2e8f0;
+      min-width: 220px; max-width: 260px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.4);
+    }
+    #tu-widget.open #tu-panel { display: block; }
+    .tu-model { font-size: 12px; font-weight: 700; color: #93c5fd; margin-bottom: 10px; letter-spacing: .02em; }
+    .tu-section { margin-bottom: 10px; }
+    .tu-section:last-child { margin-bottom: 0; }
+    .tu-section-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: #64748b; margin-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,.06); padding-bottom: 4px; }
+    .tu-row { display: flex; justify-content: space-between; align-items: baseline; padding: 2px 0; }
+    .tu-key { color: #94a3b8; font-size: 11px; }
+    .tu-val { color: #f1f5f9; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .tu-val.cost { color: #86efac; }
+    .tu-val.na  { color: #64748b; }
   </style>
 </head>
 <body>
@@ -49,6 +92,31 @@
     ⚠ Running in stub mode — set <code>DATA_ANALYST_GEMINI_API_KEY</code> in your <code>.env</code> for real answers
   </div>
   {% endif %}
+
+  <!-- C18: Token usage widget -->
+  <div id="tu-widget">
+    <div id="tu-chip" onclick="tuToggle()">
+      <span class="tu-dot"></span>
+      <span id="tu-chip-text">Loading…</span>
+    </div>
+    <div id="tu-panel">
+      <div class="tu-model" id="tu-model-name">—</div>
+      <div class="tu-section">
+        <div class="tu-section-title">This session</div>
+        <div class="tu-row"><span class="tu-key">Tokens in</span><span class="tu-val" id="ses-ti">0</span></div>
+        <div class="tu-row"><span class="tu-key">Tokens out</span><span class="tu-val" id="ses-to">0</span></div>
+        <div class="tu-row"><span class="tu-key">Queries</span><span class="tu-val" id="ses-qc">0</span></div>
+        <div class="tu-row"><span class="tu-key">Est. cost</span><span class="tu-val cost" id="ses-cost">—</span></div>
+      </div>
+      <div class="tu-section">
+        <div class="tu-section-title">Today (UTC)</div>
+        <div class="tu-row"><span class="tu-key">Tokens in</span><span class="tu-val" id="day-ti">—</span></div>
+        <div class="tu-row"><span class="tu-key">Tokens out</span><span class="tu-val" id="day-to">—</span></div>
+        <div class="tu-row"><span class="tu-key">Queries</span><span class="tu-val" id="day-qc">—</span></div>
+        <div class="tu-row"><span class="tu-key">Est. cost</span><span class="tu-val cost" id="day-cost">—</span></div>
+      </div>
+    </div>
+  </div>
 
   <header>
     <h1>Data Analysis Agent</h1>
@@ -61,6 +129,102 @@
 
   <script>
     window.llmProvider = "{{ llm_provider }}";
+
+    // ── C18: Token usage widget ────────────────────────────────────────────────
+    const _TU_KEY = 'tokenUsage';
+    const _MODEL = document.querySelector('meta[name="llm-model"]')?.content || '';
+
+    const _PRICING = [
+      { pat: 'gemini-2.5-flash', in: 0.30,  out: 2.50  },
+      { pat: 'gemini-2.5-pro',   in: 1.25,  out: 10.00 },
+      { pat: 'gemini-2.0-flash', in: 0.10,  out: 0.40  },
+      { pat: 'gemini-1.5-flash', in: 0.075, out: 0.30  },
+      { pat: 'gemini-1.5-pro',   in: 1.25,  out: 5.00  },
+    ];
+
+    function _price(model) {
+      return _PRICING.find(p => model.includes(p.pat)) || null;
+    }
+
+    function _fmtCost(ti, to, model) {
+      const p = _price(model);
+      if (!p) return null;
+      const c = (ti / 1e6) * p.in + (to / 1e6) * p.out;
+      // format to 6 sig figs with dollar sign
+      return '$' + c.toPrecision(4);
+    }
+
+    function _getSession() {
+      try {
+        return JSON.parse(sessionStorage.getItem(_TU_KEY) || '{"ti":0,"to":0,"qc":0}');
+      } catch { return {ti:0,to:0,qc:0}; }
+    }
+
+    function _saveSession(s) {
+      try { sessionStorage.setItem(_TU_KEY, JSON.stringify(s)); } catch {}
+    }
+
+    function tuAddRun(ti, to) {
+      const s = _getSession();
+      s.ti += (ti||0); s.to += (to||0); s.qc += 1;
+      _saveSession(s);
+      _tuRenderSession(s);
+      tuRefreshDaily();
+    }
+
+    function _tuRenderSession(s) {
+      document.getElementById('ses-ti').textContent  = (s.ti||0).toLocaleString();
+      document.getElementById('ses-to').textContent  = (s.to||0).toLocaleString();
+      document.getElementById('ses-qc').textContent  = (s.qc||0).toLocaleString();
+      const cost = _fmtCost(s.ti||0, s.to||0, _MODEL);
+      const costEl = document.getElementById('ses-cost');
+      costEl.textContent = cost || 'N/A';
+      costEl.className = 'tu-val ' + (cost ? 'cost' : 'na');
+    }
+
+    function _tuRenderDaily(d) {
+      if (!d) {
+        ['day-ti','day-to','day-qc','day-cost'].forEach(id => { document.getElementById(id).textContent = '—'; });
+        return;
+      }
+      document.getElementById('day-ti').textContent = d.tokens_input.toLocaleString();
+      document.getElementById('day-to').textContent = d.tokens_output.toLocaleString();
+      document.getElementById('day-qc').textContent = d.query_count.toLocaleString();
+      const cost = _fmtCost(d.tokens_input, d.tokens_output, d.model || _MODEL);
+      const costEl = document.getElementById('day-cost');
+      costEl.textContent = cost || 'N/A';
+      costEl.className = 'tu-val ' + (cost ? 'cost' : 'na');
+
+      // update chip
+      const total = (d.tokens_input + d.tokens_output).toLocaleString();
+      document.getElementById('tu-chip-text').textContent = `${d.model || _MODEL} · ${total} tok today`;
+      document.getElementById('tu-model-name').textContent = d.model || _MODEL;
+    }
+
+    async function tuRefreshDaily() {
+      try {
+        const body = await (await fetch('/stats/daily')).json();
+        _tuRenderDaily(body.data);
+      } catch {
+        _tuRenderDaily(null);
+      }
+    }
+
+    function tuToggle() {
+      document.getElementById('tu-widget').classList.toggle('open');
+    }
+
+    document.addEventListener('click', e => {
+      const w = document.getElementById('tu-widget');
+      if (!w.contains(e.target)) w.classList.remove('open');
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('tu-model-name').textContent = _MODEL || '—';
+      document.getElementById('tu-chip-text').textContent  = (_MODEL || '—') + ' · loading…';
+      _tuRenderSession(_getSession());
+      tuRefreshDaily();
+    });
   </script>
 </body>
 </html>

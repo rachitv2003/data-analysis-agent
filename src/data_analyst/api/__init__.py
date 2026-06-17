@@ -23,13 +23,14 @@ async def _lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(title="Data Analysis Agent", version="0.1.0", lifespan=_lifespan)
 
-    from data_analyst.api import health, upload, ask, datasets, sessions, dataset_sessions, ui
+    from data_analyst.api import health, upload, ask, datasets, sessions, dataset_sessions, stats, ui
     app.include_router(health.router)
     app.include_router(upload.router)
     app.include_router(ask.router)
     app.include_router(datasets.router)
     app.include_router(sessions.router)
     app.include_router(dataset_sessions.router)
+    app.include_router(stats.router)
     app.include_router(ui.router)
 
     return app
