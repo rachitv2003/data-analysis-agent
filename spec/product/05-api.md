@@ -75,7 +75,8 @@ REST. All routes return `{"data": ..., "error": null}` on success or raise HTTP 
 ```json
 {
   "dataset_id": "uuid",
-  "question": "What is the total revenue by region?"
+  "question": "What is the total revenue by region?",
+  "session_id": "uuid (optional — omit to start a new session)"
 }
 ```
 
@@ -84,6 +85,7 @@ REST. All routes return `{"data": ..., "error": null}` on success or raise HTTP 
 {
   "data": {
     "run_id": "uuid",
+    "session_id": "uuid",
     "answer": "The total revenue by region is: North $1.2M, South $0.8M",
     "iteration_count": 3,
     "status": "completed"
@@ -96,8 +98,37 @@ REST. All routes return `{"data": ..., "error": null}` on success or raise HTTP 
 | Status | Condition |
 |--------|-----------|
 | 404 | dataset_id not found |
+| 404 | session_id not found |
 | 400 | question is empty |
+| 400 | session_id belongs to a different dataset_id |
+| 400 | session has more than 20 turns |
 | 500 | Agent failed after max iterations |
+
+### `GET /sessions/{session_id}`
+
+*(Added for Capability 3)*
+
+**Purpose:** Return all turns in a conversation session in chronological order.
+
+**Response:**
+```json
+{
+  "data": {
+    "session_id": "uuid",
+    "dataset_id": "uuid",
+    "turns": [
+      {"run_id": "uuid", "question": "...", "answer": "...", "created_at": "..."},
+      {"run_id": "uuid", "question": "...", "answer": "...", "created_at": "..."}
+    ]
+  },
+  "error": null
+}
+```
+
+**Error cases:**
+| Status | Condition |
+|--------|-----------|
+| 404 | session_id not found |
 
 ## Authentication
 

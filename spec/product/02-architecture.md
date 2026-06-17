@@ -23,8 +23,9 @@ LangGraph ReAct Agent
   ▼
 SQLite (data_analyst.db)
   ├── datasets   → id, filename, file_path, row_count, col_count, columns_json, created_at
-  └── query_runs → id, dataset_id, question, answer, status, error_message,
-                   action_history, iteration_count, created_at, updated_at
+  ├── query_runs → id, dataset_id, session_id, question, answer, status, error_message,
+  │               action_history, iteration_count, created_at, updated_at
+  └── conversation_sessions → id, dataset_id, created_at, updated_at
 ```
 
 ## Layers
@@ -41,7 +42,7 @@ SQLite (data_analyst.db)
 ## Data Flow
 
 1. **Upload:** User submits CSV → FastAPI saves file to `uploads/` → creates DatasetRow → returns dataset_id
-2. **Ask:** User submits {dataset_id, question} → FastAPI creates QueryRun (status=pending) → invokes agent
+2. **Ask:** User submits {dataset_id, question, session_id?} → FastAPI resolves/creates ConversationSession → creates QueryRun → loads prior Q&A pairs → invokes agent with conversation context
 3. **Agent setup:** loads CSV as pandas DataFrame, caches by run_id
 4. **ReAct loop:** plan_action → Gemini → pandas expression → execute_action → result appended to history → loop
 5. **Termination:** Gemini emits `FINAL ANSWER: <text>` → finalize saves answer → status=completed

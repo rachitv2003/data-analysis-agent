@@ -28,6 +28,7 @@ A single question asked against a dataset and the agent's answer.
 |-----------------|----------|----------|-------------|
 | id              | TEXT PK  | yes      | UUID |
 | dataset_id      | TEXT FK  | yes      | References datasets.id |
+| session_id      | TEXT FK  | no       | References conversation_sessions.id (null = single-turn) |
 | question        | TEXT     | yes      | User's natural language question |
 | answer          | TEXT     | no       | Agent's final answer (null while running) |
 | status          | TEXT     | yes      | pending / running / completed / failed |
@@ -37,10 +38,26 @@ A single question asked against a dataset and the agent's answer.
 | created_at      | DATETIME | yes      | UTC timestamp |
 | updated_at      | DATETIME | yes      | UTC, updated on status change |
 
+### Entity: ConversationSession
+
+*(Added for Capability 3 — multi-turn conversation)*
+
+A session groups multiple QueryRuns against the same dataset into a conversation thread.
+
+| Field      | Type     | Required | Description |
+|------------|----------|----------|-------------|
+| id         | TEXT PK  | yes      | UUID |
+| dataset_id | TEXT FK  | yes      | References datasets.id |
+| created_at | DATETIME | yes      | UTC timestamp |
+| updated_at | DATETIME | yes      | UTC, updated when a new turn is added |
+
 ### Relationships
 
 - `QueryRun.dataset_id` → `Dataset.id` (many-to-one)
-- A Dataset can have many QueryRuns
+- `QueryRun.session_id` → `ConversationSession.id` (many-to-one, nullable — null means single-turn)
+- `ConversationSession.dataset_id` → `Dataset.id` (many-to-one)
+- A Dataset can have many QueryRuns and many ConversationSessions
+- A ConversationSession has many QueryRuns (its turns), ordered by `created_at`
 
 ## Data Lifecycle
 
