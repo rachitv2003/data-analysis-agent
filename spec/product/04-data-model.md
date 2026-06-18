@@ -1,78 +1,79 @@
 # Data Model
 
-## Storage Technology
+## Storage
 
-SQLite via SQLAlchemy 2.0. File-based, zero configuration, ships with Python. Sufficient for single-user workloads.
+SQLite via SQLAlchemy 2.0 ORM (`DeclarativeBase`). File at `data_analyst.db`. Schema is created by `init_db()` → `Base.metadata.create_all(engine)` on startup — no migration tool.
+
+---
 
 ## Entities
 
-### Entity: Dataset
+### `datasets`
 
-Metadata about an uploaded CSV file.
+Metadata about an uploaded file.
 
-| Field        | Type     | Required | Description |
-|--------------|----------|----------|-------------|
-| id           | TEXT PK  | yes      | UUID |
-| filename     | TEXT     | yes      | Original filename from upload |
-| file_path    | TEXT     | yes      | Absolute path to saved CSV on disk |
-| row_count    | INTEGER  | yes      | Number of data rows |
-| col_count    | INTEGER  | yes      | Number of columns |
-| columns_json | TEXT     | yes      | JSON array of column names |
-| content_hash | TEXT     | yes      | SHA-256 hex digest of raw file bytes (default '' for pre-C10 rows) — C10 |
-| format       | TEXT     | yes      | File format: csv / tsv / txt / json (default 'csv' for pre-C11 rows) — C11 |
-| context      | TEXT     | no       | User-provided plain-text notes injected into every prompt for this dataset — C12 |
-| created_at   | DATETIME | yes      | UTC timestamp |
+| Column | SQLAlchemy type | Nullable | Default | Description |
+|--------|----------------|----------|---------|-------------|
+| `id` | TEXT PK | no | `uuid4()` | UUID |
+| `filename` | TEXT | no | — | Original filename from the upload |
+| `file_path` | TEXT | no | — | Absolute path to the saved CSV on disk |
+| `row_count` | INTEGER | no | — | Number of data rows |
+| `col_count` | INTEGER | no | — | Number of columns |
+| `columns_json` | TEXT | no | — | JSON array of column name strings |
+| `content_hash` | TEXT | no | `""` | SHA-256 hex digest of raw uploaded bytes (empty string for rows created before C10) |
+| `format` | TEXT | no | `"csv"` | Source format: `csv`, `tsv`, `txt`, or `json` |
+| `context` | TEXT | yes | NULL | User-provided notes injected into prompts (max 4 000 chars) |
+| `created_at` | TIMESTAMP(tz) | no | `now(UTC)` | UTC creation timestamp |
 
-### Entity: QueryRun
+### `query_runs`
 
-A single question asked against a dataset and the agent's answer.
+A single question/answer pair produced by one agent invocation.
 
-| Field           | Type     | Required | Description |
-|-----------------|----------|----------|-------------|
-| id              | TEXT PK  | yes      | UUID |
-| dataset_id      | TEXT FK  | yes      | References datasets.id |
-| session_id      | TEXT FK  | no       | References conversation_sessions.id (null = single-turn) |
-| question        | TEXT     | yes      | User's natural language question |
-| answer          | TEXT     | no       | Agent's final answer in Markdown (null while running) — C6 |
-| status          | TEXT     | yes      | pending / running / completed / failed |
-| error_message   | TEXT     | no       | Set on failure |
-| action_history  | TEXT     | no       | JSON array of {action, result, is_error} |
-| iteration_count  | INTEGER  | yes      | How many ReAct iterations ran (default 0) |
-| tokens_input     | INTEGER  | yes      | Total prompt tokens sent to LLM across all iterations (default 0) — C7 |
-| tokens_output    | INTEGER  | yes      | Total completion tokens received from LLM (default 0) — C7 |
-| dataset_ids_json    | TEXT     | no       | JSON array of all queried dataset IDs (null for single-dataset runs) — C14 |
-| selector_reasoning  | TEXT     | no       | Raw LLM output from the C19 dataset-selector call; null when explicit dataset_ids were supplied or selector was not triggered — C19 |
-| created_at      | DATETIME | yes      | UTC timestamp |
-| updated_at      | DATETIME | yes      | UTC, updated on status change |
+| Column | SQLAlchemy type | Nullable | Default | Description |
+|--------|----------------|----------|---------|-------------|
+| `id` | TEXT PK | no | `uuid4()` | UUID |
+| `dataset_id` | TEXT | no | — | Primary dataset (first ID; backward compat) |
+| `session_id` | TEXT | yes | NULL | `conversation_sessions.id`; null for single-turn runs |
+| `question` | TEXT | no | — | User's natural language question |
+| `answer` | TEXT | yes | NULL | Agent's final answer in Markdown; null while running |
+| `status` | TEXT | no | `"pending"` | `pending`, `running`, `completed`, or `failed` |
+| `error_message` | TEXT | yes | NULL | Set on failure or force-finalize (`"max_iterations"`, `"consecutive_errors"`) |
+| `action_history` | TEXT | yes | NULL | JSON array of `{action, result, is_error}` objects |
+| `iteration_count` | INTEGER | no | `0` | ReAct iterations completed; written mid-run for progress polling |
+| `tokens_input` | INTEGER | no | `0` | Total prompt tokens across all LLM calls for this run |
+| `tokens_output` | INTEGER | no | `0` | Total completion tokens across all LLM calls for this run |
+| `dataset_ids_json` | TEXT | yes | NULL | JSON array of all session dataset IDs; null for single-dataset runs |
+| `selector_reasoning` | TEXT | yes | NULL | Raw LLM output from C19 selector call; null when selection was skipped |
+| `created_at` | TIMESTAMP(tz) | no | `now(UTC)` | UTC creation timestamp |
+| `updated_at` | TIMESTAMP(tz) | no | `now(UTC)` | UTC; `onupdate=_now` |
 
-### Entity: ConversationSession
+### `conversation_sessions`
 
-*(Added for Capability 3 — multi-turn conversation)*
+A session groups multiple `query_runs` into a conversation thread.
 
-A session groups multiple QueryRuns against the same dataset into a conversation thread.
+| Column | SQLAlchemy type | Nullable | Default | Description |
+|--------|----------------|----------|---------|-------------|
+| `id` | TEXT PK | no | `uuid4()` | UUID |
+| `dataset_id` | TEXT | no | — | Primary dataset (backward compat; always `dataset_ids[0]`) |
+| `dataset_ids_json` | TEXT | yes | NULL | JSON array of all session dataset IDs; null for single-dataset sessions |
+| `created_at` | TIMESTAMP(tz) | no | `now(UTC)` | UTC creation timestamp |
+| `updated_at` | TIMESTAMP(tz) | no | `now(UTC)` | UTC; `onupdate=_now` |
 
-| Field      | Type     | Required | Description |
-|------------|----------|----------|-------------|
-| id         | TEXT PK  | yes      | UUID |
-| dataset_id | TEXT FK  | yes      | References datasets.id |
-| created_at | DATETIME | yes      | UTC timestamp |
-| updated_at | DATETIME | yes      | UTC, updated when a new turn is added |
+---
 
-### Relationships
+## Relationships
 
-- `QueryRun.dataset_id` → `Dataset.id` (many-to-one)
-- `QueryRun.session_id` → `ConversationSession.id` (many-to-one, nullable — null means single-turn)
-- `ConversationSession.dataset_id` → `Dataset.id` (many-to-one)
-- A Dataset can have many QueryRuns and many ConversationSessions
-- A ConversationSession has many QueryRuns (its turns), ordered by `created_at`
+- `query_runs.dataset_id` → `datasets.id` (many-to-one; no FK constraint in SQLite, enforced in code)
+- `query_runs.session_id` → `conversation_sessions.id` (nullable many-to-one)
+- `conversation_sessions.dataset_id` → `datasets.id` (many-to-one)
+- A dataset may have many sessions and many runs
+- A session has many runs (turns), ordered by `created_at`
+
+---
 
 ## Data Lifecycle
 
-- Datasets persist indefinitely (no TTL in v0.1)
-- QueryRuns persist indefinitely; status transitions: pending → running → completed/failed
-- CSV files on disk remain until manually deleted
-
-## Sensitive Data
-
-- No PII stored in v0.1
-- The uploaded CSV may contain user data — it is stored only on the local filesystem and never sent to any service other than the Gemini API (as context in prompts)
+- Datasets persist indefinitely (no TTL).
+- Deleting a dataset cascades to its sessions and runs and deletes the CSV file from disk.
+- `query_runs.status` transitions: `pending` → `running` → `completed` | `failed`.
+- CSV files in `uploads/` are the source of truth for DataFrames; `DatasetRow.file_path` is the pointer.

@@ -1,27 +1,14 @@
 # Capabilities Index
 
-| # | Capability | Phase | Status |
-|---|------------|-------|--------|
-| 1 | CSV Upload — register a CSV file as a dataset | 1 | planned |
-| 2 | Natural Language Q&A — ReAct loop answers questions about uploaded data | 2 | planned |
-| 3 | [Multi-turn conversation history](03-multi-turn-conversation.md) | 3 | draft |
-| 4 | [Charts and dashboards — generate Plotly charts and inline dashboards in response to NL questions](04-charts-and-dashboards.md) | 9 | draft |
-| 5 | Proactive data insights / auto-profiling | 5 | deferred |
-| 6 | [Rich text responses — Markdown-formatted answers rendered as HTML](06-rich-text-responses.md) | 4 | done |
-| 7 | [Token usage tracking — input/output token counts per query run](07-token-usage-tracking.md) | 4 | done |
-| 8 | [Expanded result display — up to 100 rows / 20 columns as Markdown table](08-expanded-result-display.md) | 5 | done |
-| 9 | [Session management UI — list, resume, and switch between saved sessions](09-session-management-ui.md) | 5 | done |
-| 10 | [Duplicate upload detection — warn on same filename or contents](10-duplicate-upload-detection.md) | 6 | done |
-| 11 | [Multi-format ingestion — TSV, TXT, JSON in addition to CSV](11-multi-format-ingestion.md) | 6 | done |
-| 12 | [Dataset context — attach plain-text notes injected into every prompt](12-dataset-context.md) | 7 | draft |
-| 13 | [Multi-file / folder upload — select many files or drop a folder](13-multi-file-upload.md) | 7 | draft |
-| 14 | [Multi-dataset querying — query two or more datasets together](14-multi-dataset-querying.md) | 8 | draft |
-| 15 | [Dataset deletion — remove one or all datasets and cascade to sessions/runs](15-dataset-deletion.md) | 8 | draft |
-| 16 | [Notes file upload — attach a .txt/.md notes file instead of typing context](16-notes-file-upload.md) | 8 | draft |
-| 17 | [Deferred upload — stage files before uploading, add notes per file](17-deferred-upload.md) | 8 | draft |
-| 18 | [Token usage counter — persistent top-right widget showing session/daily token spend and cost](18-token-usage-counter.md) | 9 | draft |
-| 19 | [Automatic dataset selection — LLM inspects all dataset schemas and autonomously selects which to load for each query](19-automatic-dataset-selection.md) | 9 | draft |
-| 20 | [Early exit and best-effort answers — cap iterations at 6, inject wrap-up at N-2, force-finalize on consecutive errors](20-early-exit-best-effort.md) | 10 | draft |
-| 21 | [Multi-provider LLM configuration — switch between Gemini, OpenRouter, and stub via .env; configurable model per provider](21-multi-provider-llm.md) | 10 | draft |
-| 22 | [Query execution timer and progress — elapsed timer + live step counter while a query runs](22-query-timer-progress.md) | 11 | draft |
-| 23 | [Agent steps inspector — collapsible panel showing every Python expression the agent executed, including errors](23-agent-steps-inspector.md) | 11 | draft |
+All capabilities are implemented unless noted otherwise.
+
+| File | Capabilities covered | Status |
+|------|---------------------|--------|
+| [01-data-ingestion.md](01-data-ingestion.md) | C1 CSV upload, C10 duplicate detection, C11 multi-format (CSV/TSV/TXT/JSON), C13 multi-file / folder drop, C16 notes file, C17 staged upload | implemented |
+| [02-query-and-analysis.md](02-query-and-analysis.md) | C2 NL Q&A / ReAct loop, C8 expanded result display (100 rows / 20 cols), C19 automatic dataset selection, C20 early exit / force-finalize | implemented |
+| [03-conversation.md](03-conversation.md) | C3 multi-turn conversation history, C9 session management UI, C14 multi-dataset querying, C15 dataset deletion + cascade | implemented |
+| [04-response-rendering.md](04-response-rendering.md) | C6 rich text / Markdown → HTML, C4 Plotly charts embedded inline, C23 agent steps inspector | implemented |
+| [05-observability.md](05-observability.md) | C7 per-run token tracking, C18 token usage counter widget + daily stats, C22 query timer + live progress bar | implemented |
+| [06-llm-configuration.md](06-llm-configuration.md) | C21 multi-provider LLM (Gemini / OpenRouter / stub), C12 dataset context notes injected into prompts | implemented |
+
+**C5 — Proactive data insights / auto-profiling:** deferred; not implemented.

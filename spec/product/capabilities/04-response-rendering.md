@@ -1,0 +1,96 @@
+# Response Rendering
+
+**Status:** implemented
+**Covers:** C6 (rich text / Markdown), C4 (charts / Plotly), C23 (agent steps inspector)
+
+Answers are stored as Markdown in the database and converted to sanitised HTML before being returned in the API response and rendered in the UI. Plotly charts are embedded inline. Each answer card exposes a collapsible inspector showing every Python expression the agent executed.
+
+---
+
+## Markdown Rendering (C6)
+
+`src/data_analyst/utils/markdown.py` provides `render_markdown(text: str) -> str`.
+
+**Implementation:**
+- Uses `markdown-it-py` with `js-default` preset and `table` plugin enabled.
+- `html: False` — the renderer sanitises HTML injected by the LLM (prevents XSS).
+- Server-generated chart divs (`<div class="plotly-chart" data-spec="..."></div>`) are extracted before rendering and re-appended after, so they pass through untouched despite `html: False`.
+- Falls back to `<pre>` with HTML-escaped content on render error.
+
+The LLM is instructed to use Markdown formatting:
+- `**bold**` for key numbers and column names
+- Markdown tables for tabular results
+- Bullet lists where appropriate
+- `##` headings only for multi-section answers
+- No prose wrapped in code blocks
+
+Both `POST /ask` and `GET /sessions/{session_id}` return `answer_markdown` (raw) and `answer_html` (rendered).
+
+---
+
+## Charts (C4)
+
+Plotly charts are generated inside the agent sandbox and embedded as interactive HTML in the answer.
+
+### Generation
+
+The LLM is instructed (via `_CHART_INSTRUCTION` in `nodes.py`) to use `px` (plotly.express) or `go` (plotly.graph_objects) and return the bare `fig` variable as the last expression — never `fig.to_html()`, `fig.show()`, or `fig.write_html()`.
+
+When `execute_action` detects that the eval result is a `plotly.basedatatypes.BaseFigure`:
+1. Serialises it to JSON via `fig.to_json()`.
+2. Appends the JSON string to `state["charts"]`.
+3. Records `[Chart N captured: <title>]` in `action_history` so the LLM knows the chart was saved.
+
+If the LLM mistakenly calls `fig.to_html()` (detected by `"Plotly.newPlot"` in the result string), `execute_action` injects an error into `action_history` instructing the LLM to retry using the correct pattern.
+
+### Embedding
+
+`finalize` and `force_finalize` both call `_append_charts(answer_md, state)`, which converts each captured JSON spec into:
+
+```html
+<div class="plotly-chart" data-spec="&lt;html-escaped compact JSON&gt;"></div>
+```
+
+These divs are appended after the Markdown prose. The compact JSON contains only `data` and `layout` fields.
+
+### Client-side rendering
+
+`base.html` loads the Plotly JS bundle from CDN (`cdn.plot.ly/plotly-2.35.2.min.js`) in `<head>` — once per page load. After each answer turn is appended to the thread, the client queries `.answer-body .plotly-chart` elements and calls `Plotly.newPlot(el, spec.data, layout, {responsive: true})`.
+
+### CSS constraints
+
+```css
+.answer-body .plotly-graph-div, .answer-body iframe { max-height: 420px; width: 100% !important; }
+.answer-body .plotly-graph-div + .plotly-graph-div, .answer-body .chart-gap { margin-top: 16px; }
+```
+
+### Multiple charts (dashboards)
+
+Each chart is a separate action. After the last chart action, the LLM emits `FINAL ANSWER`. All captured charts are appended to the answer in order.
+
+---
+
+## Agent Steps Inspector (C23)
+
+Each answer card in the UI includes a collapsible "N steps" footer. Clicking it opens a panel listing every `{action, result, is_error}` entry from `action_history`.
+
+**API:** `steps` is returned in both `POST /ask` and `GET /sessions/{session_id}` responses (parsed from `QueryRun.action_history` JSON).
+
+**UI rendering (`renderStep`):**
+- Step number + error badge (red `✗ Error`) if `is_error`.
+- Code block (`step-code`, dark background monospace) showing the Python expression.
+- Result block (`step-result` or `step-result-error`) showing the result string, truncated to 300 chars in the UI.
+- "Copy" button copies the code to clipboard.
+
+When `steps.length === 0`, the footer shows "0 code steps — answered from schema".
+
+---
+
+## Implementation
+
+| File | Role |
+|------|------|
+| `src/data_analyst/utils/markdown.py` | `render_markdown`: Markdown → sanitised HTML, chart div passthrough |
+| `src/data_analyst/graph/nodes.py` | `_CHART_INSTRUCTION`, Plotly capture in `execute_action`, `_append_charts` in `finalize`/`force_finalize` |
+| `src/data_analyst/templates/base.html` | Plotly CDN `<script>` tag |
+| `src/data_analyst/templates/index.html` | `appendTurn`, Plotly `newPlot` calls, `renderStep`, steps toggle, CSS |
