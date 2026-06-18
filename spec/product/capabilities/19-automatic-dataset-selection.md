@@ -169,7 +169,7 @@ return json.dumps([datasets[0].id])
 ## Acceptance Criteria
 
 - [ ] `POST /ask` with no `dataset_ids` field and two datasets uploaded runs successfully and returns an answer
-- [ ] `query_runs.dataset_ids_json` is populated with the IDs the selector chose (not all IDs when only one is relevant)
+- [ ] `query_runs.dataset_ids_json` is populated with the **full set of session dataset IDs** (not just the selector-chosen subset). The selector output only determines which DataFrames are loaded into the sandbox (`sandbox_dataset_ids` at runtime); `dataset_ids_json` always reflects the full session set so the C14 session constraint check never produces false mismatches on follow-up turns.
 - [ ] `query_runs.selector_reasoning` stores the raw LLM output from the selector call
 - [ ] When the selector returns an empty array, all datasets are loaded and a WARN log entry is emitted
 - [ ] When the selector returns malformed JSON, all datasets are loaded and a WARN log entry is emitted

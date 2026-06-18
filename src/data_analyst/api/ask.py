@@ -1,3 +1,5 @@
+import json as _json
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -41,13 +43,14 @@ def ask_question(
         full_ids = explicit_ids
         sandbox_ids = explicit_ids
         selector_reasoning: str | None = None
+        sel_ti, sel_to = 0, 0
     else:
         # C19 auto-selection path: fetch all datasets, run selector
         all_datasets = session.query(DatasetRow).order_by(DatasetRow.created_at).all()
         if not all_datasets:
             raise api_error("no_datasets", "No datasets uploaded yet.", 400)
         full_ids = [ds.id for ds in all_datasets]
-        sandbox_ids, selector_reasoning = select_datasets(body.question, all_datasets)
+        sandbox_ids, selector_reasoning, sel_ti, sel_to = select_datasets(body.question, all_datasets)
 
     try:
         run_id, session_id = run_agent(
@@ -67,6 +70,13 @@ def ask_question(
     if run is None:
         raise api_error("run_not_found", "Agent run record not found.", 500)
 
+    # Add selector LLM tokens (counted before the agent graph runs)
+    if sel_ti or sel_to:
+        run.tokens_input = (run.tokens_input or 0) + sel_ti
+        run.tokens_output = (run.tokens_output or 0) + sel_to
+        session.add(run)
+        session.commit()
+
     answer_md = run.answer or ""
 
     # Resolve filenames for the datasets actually loaded into the sandbox
@@ -77,6 +87,7 @@ def ask_question(
             datasets_used.append({"id": did, "filename": ds.filename})
 
     is_best_effort = run.error_message in ("max_iterations", "consecutive_errors")
+    steps = _json.loads(run.action_history) if run.action_history else []
 
     return ok({
         "run_id": run.id,
@@ -91,4 +102,5 @@ def ask_question(
         "tokens_output": run.tokens_output,
         "status": run.status,
         "is_best_effort": is_best_effort,
+        "steps": steps,
     })

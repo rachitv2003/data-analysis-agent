@@ -163,6 +163,14 @@
   <label for="question">Your question</label>
   <textarea id="question" placeholder="e.g. What is the average rating by year?"></textarea>
   <button id="ask-btn" onclick="askQuestion()">Ask</button>
+  <!-- C22: query progress row -->
+  <div id="progress-row" style="display:none;align-items:center;gap:12px;margin-top:10px;padding:10px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;">
+    <span id="prg-elapsed" style="font-size:12px;font-weight:600;color:#6b7280;flex-shrink:0;">&#9201; 0s</span>
+    <div style="flex:1;background:#e2e8f0;border-radius:4px;height:4px;overflow:hidden;">
+      <div id="prg-bar-fill" style="height:100%;background:#1e40af;border-radius:4px;width:0%;transition:width .4s ease;"></div>
+    </div>
+    <span id="prg-step" style="font-size:12px;color:#6b7280;flex-shrink:0;">Step 0 / —</span>
+  </div>
   <div id="ask-status"></div>
 </div>
 
@@ -221,6 +229,7 @@
   .answer-body pre  { background:#f3f4f6; padding:10px; border-radius:4px; overflow-x:auto; font-size:12px; }
   .answer-body em   { color:#6b7280; }
   .turn-meta { font-size:11px; color:#9ca3af; margin-top:6px; }
+  .turn-timestamp { font-size:11px; color:#cbd5e1; margin-bottom:6px; font-style:italic; }
   .best-effort-badge { display:inline-block; background:#fef3c7; color:#92400e; font-size:11px; font-weight:600; padding:1px 7px; border-radius:4px; border:1px solid #fcd34d; margin-bottom:6px; }
   .datasets-used-footer { font-size:11px; color:#9ca3af; margin-top:4px; }
   .datasets-used-footer summary { cursor:pointer; display:inline; }
@@ -229,6 +238,23 @@
   /* C4: chart sizing */
   .answer-body .plotly-graph-div, .answer-body iframe { max-height:420px; width:100% !important; }
   .answer-body .plotly-graph-div + .plotly-graph-div, .answer-body .chart-gap { margin-top:16px; }
+
+  /* C23: steps inspector */
+  .steps-footer { margin-top:8px; }
+  .steps-toggle { background:none; color:#9ca3af; border:none; font-size:12px; cursor:pointer; padding:2px 0; }
+  .steps-toggle:hover { color:#374151; }
+  .steps-zero { font-size:11px; color:#cbd5e1; font-style:italic; }
+  .steps-panel { margin-top:8px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:12px; }
+  .step-block { margin-bottom:12px; }
+  .step-block:last-child { margin-bottom:0; }
+  .step-header { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+  .step-num { font-size:12px; font-weight:600; color:#374151; }
+  .step-error-badge { background:#fef2f2; color:#dc2626; border-radius:4px; padding:1px 5px; font-size:11px; font-weight:600; }
+  .step-copy-btn { margin-left:auto; background:none; color:#9ca3af; border:1px solid #e5e7eb; font-size:11px; padding:1px 8px; border-radius:4px; cursor:pointer; }
+  .step-copy-btn:hover { background:#f3f4f6; color:#374151; }
+  .step-code { background:#1e293b; color:#e2e8f0; padding:8px 12px; border-radius:4px; font-size:12px; font-family:monospace; white-space:pre-wrap; word-break:break-all; margin:0 0 4px; }
+  .step-result { background:#f3f4f6; color:#374151; padding:6px 10px; border-radius:4px; font-size:12px; font-family:monospace; white-space:pre-wrap; word-break:break-all; margin:0; }
+  .step-result-error { background:#fff5f5; color:#b91c1c; padding:6px 10px; border-radius:4px; font-size:12px; font-family:monospace; white-space:pre-wrap; word-break:break-all; margin:0; }
 </style>
 
 <script>
@@ -683,7 +709,7 @@
     try{
       const body=await(await fetch(`/sessions/${sessionId}`)).json();
       for(const t of body.data.turns)
-        appendTurn(t.question,t.answer_html||esc(t.answer_markdown||'(no answer)'),t.iteration_count,t.tokens_input,t.tokens_output,t.status,null,!!t.is_best_effort);
+        appendTurn(t.question,t.answer_html||esc(t.answer_markdown||'(no answer)'),t.iteration_count,t.tokens_input,t.tokens_output,t.status,null,!!t.is_best_effort,t.steps||[],new Date(t.created_at),null);
     } catch{}
   }
 
@@ -696,9 +722,43 @@
     document.getElementById('querying-label').textContent='Conversation';
   }
 
-  function appendTurn(q,html,iters,ti,to,status,datasetsUsed,isBestEffort) {
+  // C23: steps inspector helpers
+  let _stepSeq = 0;
+  function renderStep(step, n) {
+    const isError = step.is_error;
+    const result = step.result || '';
+    const truncated = result.length > 300 ? result.slice(0,300) + '... (truncated)' : result;
+    const badge = isError ? ' <span class="step-error-badge">&#10005; Error</span>' : '';
+    const resultClass = isError ? 'step-result-error' : 'step-result';
+    const codeId = 'sc-' + (++_stepSeq);
+    return `<div class="step-block">
+      <div class="step-header"><span class="step-num">Step ${n}${badge}</span><button class="step-copy-btn" onclick="copyStep(this,'${codeId}')">Copy</button></div>
+      <pre id="${codeId}" class="step-code">${esc(step.action)}</pre>
+      <pre class="${resultClass}">${esc(truncated)}</pre>
+    </div>`;
+  }
+  function toggleSteps(btn, panelId) {
+    const panel = document.getElementById(panelId);
+    if (!panel) return;
+    const show = panel.style.display === 'none';
+    panel.style.display = show ? 'block' : 'none';
+    btn.innerHTML = btn.innerHTML.replace(show ? '&#9654;' : '&#9660;', show ? '&#9660;' : '&#9654;');
+  }
+  function copyStep(btn, codeId) {
+    const el = document.getElementById(codeId); if (!el) return;
+    navigator.clipboard.writeText(el.textContent).then(() => {
+      const orig = btn.textContent; btn.textContent = 'Copied!';
+      setTimeout(() => { btn.textContent = orig; }, 1500);
+    }).catch(() => {});
+  }
+
+  function appendTurn(q,html,iters,ti,to,status,datasetsUsed,isBestEffort,steps,firedAt,elapsedMs) {
     const div=document.createElement('div');
     div.className='turn'+(status==='failed'?' failed':'');
+    // timestamp + elapsed
+    const timeStr = firedAt ? firedAt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '';
+    const elapsedStr = elapsedMs!=null ? (elapsedMs>=1000 ? (elapsedMs/1000).toFixed(1)+'s' : elapsedMs+'ms') : '';
+    const tsLine = timeStr ? `<div class="turn-timestamp">Asked at ${timeStr}${elapsedStr?' &nbsp;&middot;&nbsp; completed in '+elapsedStr:''}</div>` : '';
     let meta=`${iters} iteration${iters!==1?'s':''}`;
     if(ti>0||to>0) meta+=` &nbsp;&middot;&nbsp; ${ti.toLocaleString()} in / ${to.toLocaleString()} out tokens`;
     let dsFooter='';
@@ -706,8 +766,25 @@
       const names=datasetsUsed.map(d=>esc(d.filename)).join(', ');
       dsFooter=`<details class="datasets-used-footer"><summary>Datasets used (${datasetsUsed.length})</summary><span>${names}</span></details>`;
     }
-    const badge=isBestEffort?`<div class="best-effort-badge">⚠ Best effort</div>`:'';
-    div.innerHTML=`<div class="turn-q">Q: ${esc(q)}</div>${badge}<div class="answer-body">${html}</div><div class="turn-meta">${meta}</div>${dsFooter}`;
+    const badge=isBestEffort?`<div class="best-effort-badge">&#9888; Best effort</div>`:'';
+    // C23: steps footer — always shown when steps provided
+    let stepsFooter = '';
+    if (steps != null) {
+      if (steps.length) {
+        const errCount = steps.filter(s => s.is_error).length;
+        const label = errCount > 0
+          ? `${steps.length} steps &middot; ${errCount} error${errCount!==1?'s':''}`
+          : `${steps.length} step${steps.length!==1?'s':''}`;
+        const panelId = 'sp-' + (++_stepSeq);
+        stepsFooter = `<div class="steps-footer">
+          <button class="steps-toggle" onclick="toggleSteps(this,'${panelId}')">&#9654; ${label}</button>
+          <div id="${panelId}" class="steps-panel" style="display:none;">${steps.map((s,i)=>renderStep(s,i+1)).join('')}</div>
+        </div>`;
+      } else {
+        stepsFooter = `<div class="steps-footer"><span class="steps-zero">0 code steps — answered from schema</span></div>`;
+      }
+    }
+    div.innerHTML=`<div class="turn-q">Q: ${esc(q)}</div>${tsLine}${badge}<div class="answer-body">${html}</div><div class="turn-meta">${meta}</div>${dsFooter}${stepsFooter}`;
     // C4: render Plotly charts from data-spec divs (client-side, no script injection needed)
     div.querySelectorAll('.answer-body .plotly-chart').forEach(el => {
       try {
@@ -728,6 +805,28 @@
     if(!document.querySelectorAll('.ds-check').length){ status.innerHTML='<span class="error">Upload a dataset first.</span>'; return; }
     if(!q){ status.innerHTML='<span class="error">Enter a question.</span>'; return; }
     btn.disabled=true; btn.innerHTML='<span class="spinner"></span>Thinking...'; status.innerHTML='';
+    const firedAt=new Date();
+
+    // C22: start progress display
+    const progressRow=document.getElementById('progress-row');
+    progressRow.style.display='flex';
+    let elapsed=0;
+    document.getElementById('prg-elapsed').textContent='⏱ 0s';
+    document.getElementById('prg-step').textContent='Step 0 / —';
+    document.getElementById('prg-bar-fill').style.width='0%';
+    const elapsedTimer=setInterval(()=>{ elapsed++; document.getElementById('prg-elapsed').textContent=`⏱ ${elapsed}s`; },1000);
+    const pollTimer=setInterval(async()=>{
+      try{
+        const pb=await(await fetch('/runs/current')).json();
+        const d=pb.data;
+        if(d&&d.run_id&&d.status==='running'){
+          const mi=d.max_iterations||6, ic=d.iteration_count||0;
+          document.getElementById('prg-step').textContent=`Step ${ic} / ${mi}`;
+          document.getElementById('prg-bar-fill').style.width=Math.min(100,(ic/mi)*100)+'%';
+        }
+      }catch{}
+    },1000);
+
     try{
       const resp=await fetch('/ask',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({question:q,session_id:currentSessionId})});
@@ -739,13 +838,17 @@
         currentSessionId=r.session_id;
         const dsUsed=r.datasets_used||[];
         if(dsUsed.length>1) document.getElementById('querying-label').textContent=`Querying ${dsUsed.length} datasets`;
-        appendTurn(q,r.answer_html||esc(r.answer_markdown||'(no answer)'),r.iteration_count,r.tokens_input,r.tokens_output,r.status,dsUsed,!!r.is_best_effort);
+        appendTurn(q,r.answer_html||esc(r.answer_markdown||'(no answer)'),r.iteration_count,r.tokens_input,r.tokens_output,r.status,dsUsed,!!r.is_best_effort,r.steps||[],firedAt,Date.now()-firedAt.getTime());
         if(typeof tuAddRun==='function') tuAddRun(r.tokens_input||0, r.tokens_output||0);
         qEl.value='';
         await loadSessionList();
       }
     } catch(e){ status.innerHTML=`<span class="error">Network error: ${esc(e.message)}</span>`; }
-    finally{ btn.disabled=false; btn.textContent='Ask'; }
+    finally{
+      clearInterval(elapsedTimer); clearInterval(pollTimer);
+      progressRow.style.display='none';
+      btn.disabled=false; btn.textContent='Ask';
+    }
   }
 
   document.addEventListener('DOMContentLoaded',()=>{

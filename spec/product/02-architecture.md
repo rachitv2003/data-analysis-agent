@@ -7,10 +7,11 @@ Browser
   │
   ▼
 FastAPI (port 8001)
-  ├── POST /upload          → saves CSV to disk, creates DatasetRow in SQLite
-  ├── POST /ask             → creates QueryRun, invokes agent, returns answer
-  ├── GET  /datasets        → lists uploaded datasets
-  └── GET  /                → serves the main UI (Jinja2)
+  ├── POST /upload                              → saves CSV to disk, creates DatasetRow in SQLite
+  ├── POST /ask                                 → creates QueryRun, invokes agent, returns answer + steps
+  ├── GET  /datasets                            → lists uploaded datasets
+  ├── GET  /sessions/{id}/current-run           → latest QueryRun for session (status + iteration_count) — C22
+  └── GET  /                                    → serves the main UI (Jinja2)
   │
   ▼
 LangGraph ReAct Agent
@@ -47,7 +48,9 @@ SQLite (data_analyst.db)
 4. **Agent setup:** loads selected DataFrames into pandas, caches by run_id
 5. **ReAct loop:** plan_action → Gemini → pandas expression → execute_action → result appended to history → loop
 6. **Termination:** Gemini emits `FINAL ANSWER: <text>` → finalize saves answer → status=completed
-7. **Response:** FastAPI returns {run_id, answer, iteration_count, status, dataset_ids, selector_reasoning}
+7. **Response:** FastAPI returns {run_id, answer, iteration_count, status, dataset_ids, selector_reasoning, steps}
+   - `steps`: full `action_history` array — every Python expression the agent executed, each with `action`, `result`, `is_error` (C23)
+8. **Progress polling (C22):** While step 5 runs, the browser polls `GET /sessions/{id}/current-run` ~1×/s to display a live step counter and elapsed timer. `execute_action` writes `iteration_count` to the DB on every iteration to make this accurate.
 
 ## Agent Sandbox Capabilities
 

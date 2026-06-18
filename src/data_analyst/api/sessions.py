@@ -1,3 +1,5 @@
+import json as _json
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -71,6 +73,7 @@ def get_session_turns(
                 "tokens_output": r.tokens_output,
                 "status": r.status,
                 "is_best_effort": r.error_message in ("max_iterations", "consecutive_errors"),
+                "steps": _json.loads(r.action_history) if r.action_history else [],
                 "created_at": r.created_at.isoformat(),
             }
             for r in turns

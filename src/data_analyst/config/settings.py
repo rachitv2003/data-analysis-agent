@@ -11,7 +11,9 @@ class Settings(BaseSettings):
     )
 
     database_url: str = Field(default="sqlite:///data_analyst.db")
+    llm_provider: str = Field(default="")          # gemini | openrouter | stub | "" (auto)
     gemini_api_key: str = Field(default="")
+    openrouter_api_key: str = Field(default="")
     llm_model: str = Field(default="gemini-2.5-flash")
     max_iterations: int = Field(default=6)
     log_level: str = Field(default="INFO")

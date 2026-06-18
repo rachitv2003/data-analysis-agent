@@ -302,8 +302,23 @@ def _exec_code(code: str, ns: dict):
         return None
 
 
+def _update_iteration_count(run_id: str, iteration_count: int) -> None:
+    """C22: write iteration_count to DB mid-run so the progress endpoint reflects live state."""
+    try:
+        from data_analyst.db.session import create_db_session
+        from data_analyst.db.models import QueryRunRow
+        with create_db_session() as db:
+            run = db.get(QueryRunRow, run_id)
+            if run:
+                run.iteration_count = iteration_count
+                db.commit()
+    except Exception:
+        pass
+
+
 def execute_action(state: AgentState) -> AgentState:
     run_id = state["run_id"]
+    _update_iteration_count(run_id, state.get("iteration_count", 0))
     expression = state.get("llm_response", "").strip()
     df_map = _dataframes.get(run_id, {})
 

@@ -22,3 +22,6 @@
 | 18 | [Token usage counter — persistent top-right widget showing session/daily token spend and cost](18-token-usage-counter.md) | 9 | draft |
 | 19 | [Automatic dataset selection — LLM inspects all dataset schemas and autonomously selects which to load for each query](19-automatic-dataset-selection.md) | 9 | draft |
 | 20 | [Early exit and best-effort answers — cap iterations at 6, inject wrap-up at N-2, force-finalize on consecutive errors](20-early-exit-best-effort.md) | 10 | draft |
+| 21 | [Multi-provider LLM configuration — switch between Gemini, OpenRouter, and stub via .env; configurable model per provider](21-multi-provider-llm.md) | 10 | draft |
+| 22 | [Query execution timer and progress — elapsed timer + live step counter while a query runs](22-query-timer-progress.md) | 11 | draft |
+| 23 | [Agent steps inspector — collapsible panel showing every Python expression the agent executed, including errors](23-agent-steps-inspector.md) | 11 | draft |
