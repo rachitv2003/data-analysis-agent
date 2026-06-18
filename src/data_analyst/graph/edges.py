@@ -17,7 +17,17 @@ def after_plan(state: AgentState) -> str:
 
 
 def after_execute(state: AgentState) -> str:
-    # Always loop back to plan_action (errors are appended to history for self-correction)
     if state.get("error") or state.get("status") == "failed":
         return "handle_error"
+
+    # C20: 3+ consecutive errors → force best-effort synthesis immediately
+    history = state.get("action_history", [])
+    if len(history) >= 3 and all(h.get("is_error") for h in history[-3:]):
+        return "force_finalize"
+
+    # C20: max iterations reached → force best-effort synthesis
+    from data_analyst.config.settings import get_settings
+    if state.get("iteration_count", 0) >= get_settings().max_iterations:
+        return "force_finalize"
+
     return "plan_action"

@@ -193,6 +193,14 @@ def setup(state: AgentState) -> AgentState:
         return {**state, "error": str(exc), "status": "failed"}
 
 
+_WRAPUP_INSTRUCTION = (
+    "IMPORTANT: You are running out of iterations. "
+    "You MUST produce a FINAL ANSWER in this response or the next one. "
+    "Summarise your best findings from the action history above, even if incomplete. "
+    "Do not start a new line of investigation."
+)
+
+
 def plan_action(state: AgentState) -> AgentState:
     from data_analyst.config.settings import get_settings
 
@@ -200,12 +208,10 @@ def plan_action(state: AgentState) -> AgentState:
     iteration_count = state.get("iteration_count", 0)
     max_iter = get_settings().max_iterations
 
-    if iteration_count >= max_iter:
-        logger.warning("plan_action.max_iterations", run_id=run_id)
-        return {**state, "error": f"Max iterations ({max_iter}) reached.", "status": "failed"}
-
     try:
         prompt = _build_prompt(state)
+        if iteration_count >= max_iter - 2:
+            prompt = prompt + f"\n{_WRAPUP_INSTRUCTION}\n"
         llm = _get_llm()
         resp = llm.complete(prompt)
         logger.info("plan_action.response", run_id=run_id, iteration=iteration_count, preview=resp.text[:80])
@@ -333,6 +339,16 @@ def execute_action(state: AgentState) -> AgentState:
         except ImportError:
             pass
 
+        # Detect fig.to_html() output — model called the wrong method; treat as error so it retries
+        if isinstance(result, str) and "Plotly.newPlot" in result:
+            err_str = (
+                "Error: fig.to_html() output detected. "
+                "Return `fig` as the last expression — never call .to_html(), .show(), or .write_html()."
+            )
+            logger.warning("execute_action.plotly_html_detected", run_id=run_id)
+            history.append({"action": expression, "result": err_str, "is_error": True})
+            return {**state, "action_history": history, "charts": charts}
+
         result_str = _result_to_str(result)
         logger.info("execute_action.ok", run_id=run_id, expr_preview=expression[:60])
         history.append({"action": expression, "result": result_str, "is_error": False})
@@ -364,14 +380,29 @@ def _persist_run(run_id: str, state: AgentState, answer: str, status: str, error
                 ids = state.get("dataset_ids", [])
                 if len(ids) > 1:
                     run.dataset_ids_json = _json.dumps(ids)
+                run.selector_reasoning = state.get("selector_reasoning")
     except Exception as exc:
         logger.error("persist_run.error", run_id=run_id, error=str(exc))
 
 
-def finalize(state: AgentState) -> AgentState:
+def _append_charts(answer_md: str, state: AgentState) -> str:
+    """Append any captured Plotly chart divs to the answer markdown."""
     import json as _json
     import html as _html
 
+    charts = state.get("charts", [])
+    if not charts:
+        return answer_md
+    chart_divs = []
+    for chart_json in charts:
+        spec = _json.loads(chart_json)
+        compact = {"data": spec.get("data", []), "layout": spec.get("layout", {})}
+        attr = _html.escape(_json.dumps(compact), quote=True)
+        chart_divs.append(f'<div class="plotly-chart" data-spec="{attr}"></div>')
+    return (answer_md + "\n\n" if answer_md.strip() else "") + "\n".join(chart_divs)
+
+
+def finalize(state: AgentState) -> AgentState:
     run_id = state["run_id"]
     raw = state.get("llm_response", "")
 
@@ -381,22 +412,72 @@ def finalize(state: AgentState) -> AgentState:
             answer_md = answer_md.strip()[len(prefix):].strip()
             break
 
-    # C4: append captured Plotly charts as client-side-rendered divs.
-    # The JSON spec is HTML-escaped so it is safe inside a double-quoted attribute.
-    charts = state.get("charts", [])
-    if charts:
-        chart_divs = []
-        for chart_json in charts:
-            spec = _json.loads(chart_json)
-            compact = {"data": spec.get("data", []), "layout": spec.get("layout", {})}
-            attr = _html.escape(_json.dumps(compact), quote=True)
-            chart_divs.append(f'<div class="plotly-chart" data-spec="{attr}"></div>')
-        answer_md = (answer_md + "\n\n" if answer_md.strip() else "") + "\n".join(chart_divs)
-
+    answer_md = _append_charts(answer_md, state)
     _dataframes.pop(run_id, None)
     _persist_run(run_id, state, answer_md, "completed")
-    logger.info("finalize.done", run_id=run_id, charts=len(charts))
+    logger.info("finalize.done", run_id=run_id, charts=len(state.get("charts", [])))
     return {**state, "answer": answer_md, "status": "completed"}
+
+
+def force_finalize(state: AgentState) -> AgentState:
+    """C20: Best-effort synthesis when max iterations or consecutive errors reached."""
+    run_id = state["run_id"]
+
+    # Determine reason
+    history = state.get("action_history", [])
+    if len(history) >= 3 and all(h.get("is_error") for h in history[-3:]):
+        reason = "consecutive_errors"
+    else:
+        reason = "max_iterations"
+
+    # Build synthesis prompt
+    action_lines = []
+    for entry in history:
+        prefix = "Error" if entry.get("is_error") else "Result"
+        result = entry["result"]
+        if isinstance(result, str) and len(result) > 800:
+            result = result[:800] + "… [truncated]"
+        action_lines.append(f"Action: {entry['action']}\n{prefix}: {result}")
+    history_text = "\n\n".join(action_lines) if action_lines else "No actions were executed."
+
+    prompt = (
+        f"<node:finalize>\n"
+        f"The analysis loop has ended. Based on the work done so far, write the best answer you can.\n"
+        f"If you have partial results, summarise them. If no useful results were obtained, explain "
+        f"what you tried and what information would be needed to answer properly.\n"
+        f"Do NOT say 'I was unable to answer' without explanation. Always produce substantive content.\n"
+        f"Format your response using Markdown.\n"
+        f"</node:finalize>\n\n"
+        f"Question: {state.get('question', '')}\n\n"
+        f"Work done so far:\n{history_text}"
+    )
+
+    try:
+        llm = _get_llm()
+        resp = llm.complete(prompt)
+        answer_md = resp.text.strip()
+        tokens_in = state.get("tokens_input", 0) + resp.tokens_input
+        tokens_out = state.get("tokens_output", 0) + resp.tokens_output
+        logger.warning("force_finalize.done", run_id=run_id, reason=reason)
+    except Exception as exc:
+        logger.error("force_finalize.llm_error", run_id=run_id, error=str(exc))
+        answer_md = (
+            "_Analysis ended early. Here is what was attempted:_\n\n"
+            + "\n".join(f"- {e['action']}" for e in history if not e.get("is_error"))
+            or "_No successful operations were completed._"
+        )
+        tokens_in = state.get("tokens_input", 0)
+        tokens_out = state.get("tokens_output", 0)
+
+    answer_md = _append_charts(answer_md, state)
+    updated = {
+        **state,
+        "tokens_input": tokens_in,
+        "tokens_output": tokens_out,
+    }
+    _dataframes.pop(run_id, None)
+    _persist_run(run_id, updated, answer_md, "completed", error=reason)
+    return {**updated, "answer": answer_md, "status": "completed"}
 
 
 def handle_error(state: AgentState) -> AgentState:

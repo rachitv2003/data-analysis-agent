@@ -20,3 +20,5 @@
 | 16 | [Notes file upload — attach a .txt/.md notes file instead of typing context](16-notes-file-upload.md) | 8 | draft |
 | 17 | [Deferred upload — stage files before uploading, add notes per file](17-deferred-upload.md) | 8 | draft |
 | 18 | [Token usage counter — persistent top-right widget showing session/daily token spend and cost](18-token-usage-counter.md) | 9 | draft |
+| 19 | [Automatic dataset selection — LLM inspects all dataset schemas and autonomously selects which to load for each query](19-automatic-dataset-selection.md) | 9 | draft |
+| 20 | [Early exit and best-effort answers — cap iterations at 6, inject wrap-up at N-2, force-finalize on consecutive errors](20-early-exit-best-effort.md) | 10 | draft |

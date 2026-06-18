@@ -16,7 +16,7 @@
     header { background: #1e40af; color: white; padding: 16px 24px; }
     header h1 { font-size: 20px; font-weight: 600; }
     header p { font-size: 13px; opacity: 0.8; margin-top: 2px; }
-    main { max-width: 860px; margin: 32px auto; padding: 0 16px; }
+    main { max-width: 1440px; margin: 24px auto; padding: 0 20px; }
     .card { background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.1); padding: 24px; margin-bottom: 24px; }
     h2 { font-size: 16px; font-weight: 600; margin-bottom: 16px; color: #1e3a5f; }
     label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 6px; color: #555; }
@@ -44,38 +44,7 @@
     @keyframes spin { to { transform: rotate(360deg); } }
     .col-list { font-size: 12px; color: #6b7280; margin-top: 4px; }
 
-    /* ── C18: Token usage widget ── */
-    #tu-widget {
-      position: fixed; top: 12px; right: 16px; z-index: 200;
-      font-family: system-ui, -apple-system, sans-serif;
-      font-size: 12px;
-      user-select: none;
-    }
-    #tu-chip {
-      display: flex; align-items: center; gap: 6px;
-      background: rgba(30,40,60,.82); color: #e5e7eb;
-      backdrop-filter: blur(6px);
-      border: 1px solid rgba(255,255,255,.12);
-      border-radius: 20px;
-      padding: 5px 12px;
-      cursor: pointer;
-      white-space: nowrap;
-      transition: background .15s;
-    }
-    #tu-chip:hover { background: rgba(30,40,60,.92); }
-    #tu-chip .tu-dot { width: 7px; height: 7px; border-radius: 50%; background: #34d399; flex-shrink: 0; }
-    #tu-panel {
-      display: none;
-      margin-top: 6px;
-      background: #1e293b;
-      border: 1px solid rgba(255,255,255,.12);
-      border-radius: 10px;
-      padding: 14px 16px;
-      color: #e2e8f0;
-      min-width: 220px; max-width: 260px;
-      box-shadow: 0 8px 24px rgba(0,0,0,.4);
-    }
-    #tu-widget.open #tu-panel { display: block; }
+    /* ── C18: Token usage widget (inline dark card) ── */
     .tu-model { font-size: 12px; font-weight: 700; color: #93c5fd; margin-bottom: 10px; letter-spacing: .02em; }
     .tu-section { margin-bottom: 10px; }
     .tu-section:last-child { margin-bottom: 0; }
@@ -93,31 +62,6 @@
     ⚠ Running in stub mode — set <code>DATA_ANALYST_GEMINI_API_KEY</code> in your <code>.env</code> for real answers
   </div>
   {% endif %}
-
-  <!-- C18: Token usage widget -->
-  <div id="tu-widget">
-    <div id="tu-chip" onclick="tuToggle()">
-      <span class="tu-dot"></span>
-      <span id="tu-chip-text">Loading…</span>
-    </div>
-    <div id="tu-panel">
-      <div class="tu-model" id="tu-model-name">—</div>
-      <div class="tu-section">
-        <div class="tu-section-title">This session</div>
-        <div class="tu-row"><span class="tu-key">Tokens in</span><span class="tu-val" id="ses-ti">0</span></div>
-        <div class="tu-row"><span class="tu-key">Tokens out</span><span class="tu-val" id="ses-to">0</span></div>
-        <div class="tu-row"><span class="tu-key">Queries</span><span class="tu-val" id="ses-qc">0</span></div>
-        <div class="tu-row"><span class="tu-key">Est. cost</span><span class="tu-val cost" id="ses-cost">—</span></div>
-      </div>
-      <div class="tu-section">
-        <div class="tu-section-title">Today (UTC)</div>
-        <div class="tu-row"><span class="tu-key">Tokens in</span><span class="tu-val" id="day-ti">—</span></div>
-        <div class="tu-row"><span class="tu-key">Tokens out</span><span class="tu-val" id="day-to">—</span></div>
-        <div class="tu-row"><span class="tu-key">Queries</span><span class="tu-val" id="day-qc">—</span></div>
-        <div class="tu-row"><span class="tu-key">Est. cost</span><span class="tu-val cost" id="day-cost">—</span></div>
-      </div>
-    </div>
-  </div>
 
   <header>
     <h1>Data Analysis Agent</h1>
@@ -195,11 +139,8 @@
       const costEl = document.getElementById('day-cost');
       costEl.textContent = cost || 'N/A';
       costEl.className = 'tu-val ' + (cost ? 'cost' : 'na');
-
-      // update chip
-      const total = (d.tokens_input + d.tokens_output).toLocaleString();
-      document.getElementById('tu-chip-text').textContent = `${d.model || _MODEL} · ${total} tok today`;
-      document.getElementById('tu-model-name').textContent = d.model || _MODEL;
+      const mn = document.getElementById('tu-model-name');
+      if (mn) mn.textContent = d.model || _MODEL;
     }
 
     async function tuRefreshDaily() {
@@ -211,18 +152,9 @@
       }
     }
 
-    function tuToggle() {
-      document.getElementById('tu-widget').classList.toggle('open');
-    }
-
-    document.addEventListener('click', e => {
-      const w = document.getElementById('tu-widget');
-      if (!w.contains(e.target)) w.classList.remove('open');
-    });
-
     document.addEventListener('DOMContentLoaded', () => {
-      document.getElementById('tu-model-name').textContent = _MODEL || '—';
-      document.getElementById('tu-chip-text').textContent  = (_MODEL || '—') + ' · loading…';
+      const mn = document.getElementById('tu-model-name');
+      if (mn) mn.textContent = _MODEL || '—';
       _tuRenderSession(_getSession());
       tuRefreshDaily();
     });

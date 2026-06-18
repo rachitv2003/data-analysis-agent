@@ -40,7 +40,8 @@ A single question asked against a dataset and the agent's answer.
 | iteration_count  | INTEGER  | yes      | How many ReAct iterations ran (default 0) |
 | tokens_input     | INTEGER  | yes      | Total prompt tokens sent to LLM across all iterations (default 0) — C7 |
 | tokens_output    | INTEGER  | yes      | Total completion tokens received from LLM (default 0) — C7 |
-| dataset_ids_json | TEXT     | no       | JSON array of all queried dataset IDs (null for single-dataset runs) — C14 |
+| dataset_ids_json    | TEXT     | no       | JSON array of all queried dataset IDs (null for single-dataset runs) — C14 |
+| selector_reasoning  | TEXT     | no       | Raw LLM output from the C19 dataset-selector call; null when explicit dataset_ids were supplied or selector was not triggered — C19 |
 | created_at      | DATETIME | yes      | UTC timestamp |
 | updated_at      | DATETIME | yes      | UTC, updated on status change |
 

@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     database_url: str = Field(default="sqlite:///data_analyst.db")
     gemini_api_key: str = Field(default="")
     llm_model: str = Field(default="gemini-2.5-flash")
-    max_iterations: int = Field(default=10)
+    max_iterations: int = Field(default=6)
     log_level: str = Field(default="INFO")
     upload_dir: str = Field(default="uploads")
 

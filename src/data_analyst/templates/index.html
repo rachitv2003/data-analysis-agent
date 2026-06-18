@@ -1,40 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
 
-<!-- Upload card -->
-<div class="card">
-  <h2>1. Upload data files</h2>
-
-  <!-- Drop zone (C17: always visible, stages files — no immediate upload) -->
-  <div id="drop-zone">
-    <div style="text-align:center; color:#6b7280; pointer-events:none;">
-      <div style="font-size:28px; margin-bottom:6px;">&#8659;</div>
-      <div id="drop-zone-text" style="font-size:14px; font-weight:600; margin-bottom:4px;">Drop files or a folder here</div>
-      <div style="font-size:12px; color:#9ca3af; margin-bottom:12px;">or click to browse (.csv · .tsv · .txt · .json)</div>
-    </div>
-    <div style="text-align:center;">
-      <span class="pick-btn" onclick="document.getElementById('file-input').click()" style="background:#1e40af;color:#fff;border:none;border-radius:6px;padding:8px 18px;font-size:13px;font-weight:600;cursor:pointer;display:inline-block;">Choose files</span>
-      <input type="file" id="file-input" accept=".csv,.tsv,.txt,.json" multiple style="display:none" onchange="onFilesSelected()">
-    </div>
-  </div>
-
-  <!-- C17: Staged file list -->
-  <div id="staged-panel" style="display:none; margin-top:14px;">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-      <span style="font-size:13px; font-weight:600; color:#374151;" id="staged-header">0 files staged</span>
-      <button onclick="clearStaged()" style="background:none;color:#6b7280;border:1px solid #d1d5db;font-size:12px;padding:3px 10px;border-radius:5px;">Clear staged</button>
-    </div>
-    <div id="staged-rows"></div>
-    <div style="margin-top:10px;">
-      <button id="upload-staged-btn" onclick="uploadStaged()">Upload <span id="upload-btn-count">0</span> file(s)</button>
-    </div>
-  </div>
-
-  <!-- Upload queue (shown while uploading) -->
-  <div id="upload-queue" style="display:none; margin-top:12px;"></div>
-  <div id="upload-status" style="margin-top:8px;"></div>
-</div>
-
 <!-- Duplicate modal -->
 <div id="dup-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:100;align-items:center;justify-content:center;">
   <div style="background:#fff;border-radius:10px;padding:28px 32px;max-width:440px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.18);">
@@ -60,23 +26,34 @@
   </div>
 </div>
 
-<!-- Two-column workspace -->
-<div id="workspace" style="display:flex;gap:16px;align-items:flex-start;">
+<!-- 4-column top row: sessions | datasets | upload | counter -->
+<div id="top-row" style="display:flex;gap:16px;align-items:stretch;margin-bottom:16px;">
 
-  <!-- LEFT: datasets + conversation -->
-  <div style="flex:1;min-width:0;">
-    <div class="card" style="margin-bottom:0;">
-      <h2>2. Ask a question</h2>
+  <!-- Col 1: Sessions -->
+  <div id="session-sidebar" style="flex:1;min-width:0;display:flex;flex-direction:column;">
+    <div class="card" style="margin-bottom:0;padding:16px;flex:1;display:flex;flex-direction:column;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-shrink:0;">
+        <h2 style="margin-bottom:0;">Sessions</h2>
+        <button onclick="startNewSession()" style="background:#1e40af;font-size:12px;padding:4px 10px;">+ New</button>
+      </div>
+      <div id="session-list" style="max-height:220px;overflow-y:auto;">
+        <div id="no-sessions-msg" style="font-size:12px;color:#9ca3af;font-style:italic;padding:4px 0;">No sessions yet</div>
+      </div>
+    </div>
+  </div>
 
-      <!-- C14 + C15: dataset checkbox list -->
-      <label style="font-size:13px;font-weight:600;color:#374151;display:block;margin-bottom:6px;">Datasets</label>
-      <div id="dataset-list-wrap" style="border:1px solid #e5e7eb;border-radius:6px;padding:8px 12px;max-height:180px;overflow-y:auto;margin-bottom:4px;background:#fafafa;">
+  <!-- Col 2: Datasets -->
+  <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
+    <div class="card" style="margin-bottom:0;padding:16px;flex:1;display:flex;flex-direction:column;">
+      <h2 style="margin-bottom:6px;flex-shrink:0;">Datasets</h2>
+      <p style="font-size:11px;color:#6b7280;margin:0 0 8px;flex-shrink:0;">All datasets are queried automatically. Check to delete.</p>
+      <div id="dataset-list-wrap" style="border:1px solid #e5e7eb;border-radius:6px;padding:6px 10px;flex:1;overflow-y:auto;min-height:0;background:#fafafa;margin-bottom:8px;">
         <div id="dataset-checkboxes">
           {% for ds in datasets %}
-          <div class="ds-row" data-id="{{ ds.dataset_id }}" data-filename="{{ ds.filename }}" data-row-count="{{ ds.row_count }}">
+          <div class="ds-row" data-id="{{ ds.dataset_id }}" data-filename="{{ ds.filename }}" data-row-count="{{ ds.row_count }}" data-col-count="{{ ds.col_count }}">
             <label>
               <input type="checkbox" class="ds-check" value="{{ ds.dataset_id }}" onchange="onDatasetCheckChange()">
-              <span>{{ ds.filename }} <span class="row-cnt">({{ ds.row_count }} rows · {{ ds.col_count }} cols)</span></span>
+              <span>{{ ds.filename }} <span class="row-cnt">({{ ds.row_count }} rows)</span></span>
             </label>
             <button class="del-btn" onclick="deleteDataset('{{ ds.dataset_id }}',event)" title="Delete">🗑</button>
           </div>
@@ -86,63 +63,114 @@
           Upload a file to get started.
         </div>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-shrink:0;">
         <button id="select-all-btn" onclick="toggleSelectAll()"
-          style="display:{% if datasets %}inline-block{% else %}none{% endif %};background:none;color:#1e40af;border:1px solid #bfdbfe;font-size:12px;padding:3px 10px;border-radius:5px;">
+          style="display:{% if datasets %}inline-block{% else %}none{% endif %};background:none;color:#1e40af;border:1px solid #bfdbfe;font-size:11px;padding:2px 8px;border-radius:5px;">
           Select all
         </button>
         <button id="clear-all-btn" onclick="clearAllDatasets()"
-          style="display:{% if datasets %}inline-block{% else %}none{% endif %};background:none;color:#b91c1c;border:1px solid #fca5a5;font-size:12px;padding:3px 10px;border-radius:5px;">
-          Clear all datasets
+          style="display:{% if datasets %}inline-block{% else %}none{% endif %};background:none;color:#b91c1c;border:1px solid #fca5a5;font-size:11px;padding:2px 8px;border-radius:5px;">
+          Clear all
         </button>
       </div>
 
       <!-- C12: dataset notes panel -->
-      <div id="dataset-notes-panel" style="display:none;margin-bottom:12px;">
+      <div id="dataset-notes-panel" style="display:none;border-top:1px solid #f3f4f6;padding-top:10px;flex-shrink:0;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-          <span style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;">Dataset notes</span>
-          <button onclick="toggleCtxEdit()" style="background:none;color:#1e40af;border:none;font-size:12px;padding:2px 6px;cursor:pointer;text-decoration:underline;">Edit</button>
+          <span style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;">Dataset notes</span>
+          <button onclick="toggleCtxEdit()" style="background:none;color:#1e40af;border:none;font-size:11px;padding:2px 4px;cursor:pointer;text-decoration:underline;">Edit</button>
         </div>
-        <div id="context-display" style="font-size:13px;color:#374151;background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px;padding:8px 12px;white-space:pre-wrap;line-height:1.55;"></div>
+        <div id="context-display" style="font-size:12px;color:#374151;background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px;padding:6px 10px;white-space:pre-wrap;line-height:1.55;max-height:80px;overflow-y:auto;"></div>
         <div id="context-edit-area" style="display:none;">
-          <textarea id="context-edit-input" style="height:72px;font-size:13px;margin-top:6px;"></textarea>
-          <div style="display:flex;gap:8px;margin-top:6px;">
-            <button onclick="saveCtxEdit()" style="font-size:12px;padding:4px 12px;">Save</button>
-            <button onclick="cancelCtxEdit()" style="background:#6b7280;font-size:12px;padding:4px 12px;">Cancel</button>
+          <textarea id="context-edit-input" style="height:56px;font-size:12px;margin-top:6px;margin-bottom:0;"></textarea>
+          <div style="display:flex;gap:6px;margin-top:4px;">
+            <button onclick="saveCtxEdit()" style="font-size:11px;padding:3px 10px;">Save</button>
+            <button onclick="cancelCtxEdit()" style="background:#6b7280;font-size:11px;padding:3px 10px;">Cancel</button>
           </div>
         </div>
       </div>
-
-      <!-- Conversation thread -->
-      <div id="conversation" style="display:none;margin-bottom:16px;">
-        <div id="querying-label" style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">Conversation</div>
-        <div id="thread"></div>
-      </div>
-
-      <label for="question">Your question</label>
-      <textarea id="question" placeholder="e.g. What is the average rating by year?"></textarea>
-      <button id="ask-btn" onclick="askQuestion()">Ask</button>
-      <div id="ask-status"></div>
     </div>
   </div>
 
-  <!-- RIGHT: sessions sidebar -->
-  <div id="session-sidebar" style="display:none;width:280px;flex-shrink:0;">
-    <div class="card" style="margin-bottom:0;padding:16px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-        <span style="font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;">Sessions</span>
-        <button onclick="startNewSession()" style="background:#1e40af;font-size:12px;padding:4px 10px;">+ New</button>
+  <!-- Col 3: Upload -->
+  <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
+    <div class="card" style="margin-bottom:0;padding:16px;flex:1;display:flex;flex-direction:column;">
+      <h2 style="flex-shrink:0;">Upload data files</h2>
+
+      <!-- Drop zone (C17: always visible, stages files — no immediate upload) -->
+      <div id="drop-zone" style="flex:1;">
+        <div style="color:#6b7280; pointer-events:none; text-align:center; margin-bottom:12px;">
+          <div style="font-size:28px; margin-bottom:6px;">&#8659;</div>
+          <div id="drop-zone-text" style="font-size:14px; font-weight:600; margin-bottom:4px;">Drop files or a folder here</div>
+          <div style="font-size:12px; color:#9ca3af;">or click to browse (.csv · .tsv · .txt · .json)</div>
+        </div>
+        <span class="pick-btn" onclick="document.getElementById('file-input').click()" style="background:#1e40af;color:#fff;border:none;border-radius:6px;padding:8px 18px;font-size:13px;font-weight:600;cursor:pointer;display:inline-block;">Choose files</span>
+        <input type="file" id="file-input" accept=".csv,.tsv,.txt,.json" multiple style="display:none" onchange="onFilesSelected()">
       </div>
-      <div id="session-list"></div>
+
+      <!-- C17: Staged file list -->
+      <div id="staged-panel" style="display:none; margin-top:14px;flex-shrink:0;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <span style="font-size:13px; font-weight:600; color:#374151;" id="staged-header">0 files staged</span>
+          <button onclick="clearStaged()" style="background:none;color:#6b7280;border:1px solid #d1d5db;font-size:12px;padding:3px 10px;border-radius:5px;">Clear staged</button>
+        </div>
+        <div id="staged-rows"></div>
+        <div style="margin-top:10px;">
+          <button id="upload-staged-btn" onclick="uploadStaged()">Upload <span id="upload-btn-count">0</span> file(s)</button>
+        </div>
+      </div>
+
+      <!-- Upload queue (shown while uploading) -->
+      <div id="upload-queue" style="display:none; margin-top:12px;flex-shrink:0;"></div>
+      <div id="upload-status" style="margin-top:8px;flex-shrink:0;"></div>
     </div>
   </div>
 
+  <!-- Col 4: Usage counter -->
+  <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
+    <div id="tu-widget" style="background:#1e293b;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.2);padding:16px;font-size:12px;user-select:none;flex:1;">
+      <div class="tu-model" id="tu-model-name">—</div>
+      <div class="tu-section">
+        <div class="tu-section-title">This session</div>
+        <div class="tu-row"><span class="tu-key">Tokens in</span><span class="tu-val" id="ses-ti">0</span></div>
+        <div class="tu-row"><span class="tu-key">Tokens out</span><span class="tu-val" id="ses-to">0</span></div>
+        <div class="tu-row"><span class="tu-key">Queries</span><span class="tu-val" id="ses-qc">0</span></div>
+        <div class="tu-row"><span class="tu-key">Est. cost</span><span class="tu-val cost" id="ses-cost">—</span></div>
+      </div>
+      <div class="tu-section">
+        <div class="tu-section-title">Today (UTC)</div>
+        <div class="tu-row"><span class="tu-key">Tokens in</span><span class="tu-val" id="day-ti">—</span></div>
+        <div class="tu-row"><span class="tu-key">Tokens out</span><span class="tu-val" id="day-to">—</span></div>
+        <div class="tu-row"><span class="tu-key">Queries</span><span class="tu-val" id="day-qc">—</span></div>
+        <div class="tu-row"><span class="tu-key">Est. cost</span><span class="tu-val cost" id="day-cost">—</span></div>
+      </div>
+      <div class="tu-section">
+        <div class="tu-section-title">Storage</div>
+        <div class="tu-row"><span class="tu-key">Datasets</span><span class="tu-val" id="stor-ds">0</span></div>
+        <div class="tu-row"><span class="tu-key">Total rows</span><span class="tu-val" id="stor-rows">0</span></div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /#top-row -->
+
+<!-- Full-width querying section -->
+<div class="card" style="margin-bottom:0;">
+  <div id="conversation" style="display:none;margin-bottom:16px;">
+    <div id="querying-label" style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">Conversation</div>
+    <div id="thread"></div>
+  </div>
+  <label for="question">Your question</label>
+  <textarea id="question" placeholder="e.g. What is the average rating by year?"></textarea>
+  <button id="ask-btn" onclick="askQuestion()">Ask</button>
+  <div id="ask-status"></div>
 </div>
 
 <style>
   #drop-zone {
     border:2px dashed #d1d5db; border-radius:8px; padding:24px;
     background:#fafafa; cursor:pointer; transition:border-color .15s,background .15s;
+    display:flex; flex-direction:column; justify-content:center; align-items:center; min-height:120px;
   }
   #drop-zone.drag-over { border-color:#3b82f6; background:#eff6ff; }
   #drop-zone.has-staged { border-style:solid; border-color:#bfdbfe; padding:14px; }
@@ -193,6 +221,10 @@
   .answer-body pre  { background:#f3f4f6; padding:10px; border-radius:4px; overflow-x:auto; font-size:12px; }
   .answer-body em   { color:#6b7280; }
   .turn-meta { font-size:11px; color:#9ca3af; margin-top:6px; }
+  .best-effort-badge { display:inline-block; background:#fef3c7; color:#92400e; font-size:11px; font-weight:600; padding:1px 7px; border-radius:4px; border:1px solid #fcd34d; margin-bottom:6px; }
+  .datasets-used-footer { font-size:11px; color:#9ca3af; margin-top:4px; }
+  .datasets-used-footer summary { cursor:pointer; display:inline; }
+  .datasets-used-footer span { margin-left:4px; }
   .fmt-badge { background:#e0f2fe; color:#0369a1; font-size:11px; padding:1px 6px; border-radius:3px; font-weight:600; text-transform:uppercase; }
   /* C4: chart sizing */
   .answer-body .plotly-graph-div, .answer-body iframe { max-height:420px; width:100% !important; }
@@ -485,6 +517,7 @@
     document.getElementById('select-all-btn').style.display='inline-block';
     if (ds.context) _ctxCache[ds.dataset_id]=ds.context;
     onDatasetCheckChange();
+    _updateStorageStat();
   }
 
   // ── C15: delete dataset ───────────────────────────────────────────────────────
@@ -517,8 +550,8 @@
         if (!getSelectedDatasetIds().length) {
           startNewSession();
           document.getElementById('dataset-notes-panel').style.display='none';
-          document.getElementById('session-sidebar').style.display='none';
         }
+        _updateStorageStat();
       } else {
         const row=document.querySelector(`.ds-row[data-id="${datasetId}"]`);
         if(row) {
@@ -548,8 +581,9 @@
         document.getElementById('select-all-btn').style.display='none';
         startNewSession();
         document.getElementById('dataset-notes-panel').style.display='none';
-        document.getElementById('session-sidebar').style.display='none';
-        document.getElementById('session-list').innerHTML='';
+        document.getElementById('session-list').innerHTML=
+          '<div id="no-sessions-msg" style="font-size:12px;color:#9ca3af;font-style:italic;padding:4px 0;">No sessions yet</div>';
+        _updateStorageStat();
       }
     } catch(e){ console.error(e); }
   }
@@ -572,7 +606,6 @@
     startNewSession();
     if(ids.length) loadDatasetCtx(ids);
     else document.getElementById('dataset-notes-panel').style.display='none';
-    // Session sidebar is persistent — never reloaded on dataset change
   }
 
   // ── C12: context panel ────────────────────────────────────────────────────────
@@ -611,6 +644,17 @@
     } catch{}
   }
 
+  // ── Storage stat ─────────────────────────────────────────────────────────────
+  function _updateStorageStat() {
+    const rows = document.querySelectorAll('.ds-row');
+    let total = 0;
+    rows.forEach(r => { total += (parseInt(r.dataset.rowCount, 10) || 0); });
+    const dsEl = document.getElementById('stor-ds');
+    const rowsEl = document.getElementById('stor-rows');
+    if (dsEl) dsEl.textContent = rows.length.toLocaleString();
+    if (rowsEl) rowsEl.textContent = total.toLocaleString();
+  }
+
   // ── Sessions ──────────────────────────────────────────────────────────────────
   let currentSessionId=null;
 
@@ -618,9 +662,12 @@
     try{
       const body=await(await fetch('/sessions')).json();
       const sessions=body.data||[];
-      const sidebar=document.getElementById('session-sidebar');
-      sidebar.style.display=sessions.length?'block':'none';
-      document.getElementById('session-list').innerHTML=sessions.map(s=>`
+      const listEl=document.getElementById('session-list');
+      if (!sessions.length) {
+        listEl.innerHTML='<div id="no-sessions-msg" style="font-size:12px;color:#9ca3af;font-style:italic;padding:4px 0;">No sessions yet</div>';
+        return;
+      }
+      listEl.innerHTML=sessions.map(s=>`
         <div class="session-item${s.session_id===currentSessionId?' active':''}" data-sid="${s.session_id}" onclick="resumeSession('${s.session_id}')">
           <span class="session-label">${esc((s.first_question||'Untitled').slice(0,55))}</span>
           <span class="session-meta">${s.turn_count} turn${s.turn_count!==1?'s':''} &middot; ${relTime(s.updated_at)}</span>
@@ -636,7 +683,7 @@
     try{
       const body=await(await fetch(`/sessions/${sessionId}`)).json();
       for(const t of body.data.turns)
-        appendTurn(t.question,t.answer_html||esc(t.answer_markdown||'(no answer)'),t.iteration_count,t.tokens_input,t.tokens_output,t.status);
+        appendTurn(t.question,t.answer_html||esc(t.answer_markdown||'(no answer)'),t.iteration_count,t.tokens_input,t.tokens_output,t.status,null,!!t.is_best_effort);
     } catch{}
   }
 
@@ -649,12 +696,18 @@
     document.getElementById('querying-label').textContent='Conversation';
   }
 
-  function appendTurn(q,html,iters,ti,to,status) {
+  function appendTurn(q,html,iters,ti,to,status,datasetsUsed,isBestEffort) {
     const div=document.createElement('div');
     div.className='turn'+(status==='failed'?' failed':'');
     let meta=`${iters} iteration${iters!==1?'s':''}`;
     if(ti>0||to>0) meta+=` &nbsp;&middot;&nbsp; ${ti.toLocaleString()} in / ${to.toLocaleString()} out tokens`;
-    div.innerHTML=`<div class="turn-q">Q: ${esc(q)}</div><div class="answer-body">${html}</div><div class="turn-meta">${meta}</div>`;
+    let dsFooter='';
+    if(datasetsUsed&&datasetsUsed.length){
+      const names=datasetsUsed.map(d=>esc(d.filename)).join(', ');
+      dsFooter=`<details class="datasets-used-footer"><summary>Datasets used (${datasetsUsed.length})</summary><span>${names}</span></details>`;
+    }
+    const badge=isBestEffort?`<div class="best-effort-badge">⚠ Best effort</div>`:'';
+    div.innerHTML=`<div class="turn-q">Q: ${esc(q)}</div>${badge}<div class="answer-body">${html}</div><div class="turn-meta">${meta}</div>${dsFooter}`;
     // C4: render Plotly charts from data-spec divs (client-side, no script injection needed)
     div.querySelectorAll('.answer-body .plotly-chart').forEach(el => {
       try {
@@ -670,23 +723,23 @@
 
   // ── Ask ───────────────────────────────────────────────────────────────────────
   async function askQuestion() {
-    const ids=getSelectedDatasetIds();
     const qEl=document.getElementById('question'), q=qEl.value.trim();
     const status=document.getElementById('ask-status'), btn=document.getElementById('ask-btn');
-    if(!ids.length){ status.innerHTML='<span class="error">Select at least one dataset.</span>'; return; }
+    if(!document.querySelectorAll('.ds-check').length){ status.innerHTML='<span class="error">Upload a dataset first.</span>'; return; }
     if(!q){ status.innerHTML='<span class="error">Enter a question.</span>'; return; }
     btn.disabled=true; btn.innerHTML='<span class="spinner"></span>Thinking...'; status.innerHTML='';
     try{
       const resp=await fetch('/ask',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({dataset_ids:ids,question:q,session_id:currentSessionId})});
+        body:JSON.stringify({question:q,session_id:currentSessionId})});
       const body=await resp.json();
       if(!resp.ok){
         status.innerHTML=`<span class="error">${esc(body.detail?.message||resp.statusText)}</span>`;
       } else {
         const r=body.data;
         currentSessionId=r.session_id;
-        if(ids.length>1) document.getElementById('querying-label').textContent=`Querying ${ids.length} datasets`;
-        appendTurn(q,r.answer_html||esc(r.answer_markdown||'(no answer)'),r.iteration_count,r.tokens_input,r.tokens_output,r.status);
+        const dsUsed=r.datasets_used||[];
+        if(dsUsed.length>1) document.getElementById('querying-label').textContent=`Querying ${dsUsed.length} datasets`;
+        appendTurn(q,r.answer_html||esc(r.answer_markdown||'(no answer)'),r.iteration_count,r.tokens_input,r.tokens_output,r.status,dsUsed,!!r.is_best_effort);
         if(typeof tuAddRun==='function') tuAddRun(r.tokens_input||0, r.tokens_output||0);
         qEl.value='';
         await loadSessionList();
@@ -699,9 +752,8 @@
     document.getElementById('question').addEventListener('keydown',e=>{
       if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); askQuestion(); }
     });
+    _updateStorageStat();
     loadSessionList();
-    const first=document.querySelector('.ds-check');
-    if(first){ first.checked=true; onDatasetCheckChange(); }
   });
 </script>
 {% endblock %}

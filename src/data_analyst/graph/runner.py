@@ -15,12 +15,21 @@ def run_agent(
     dataset_ids: list[str],
     question: str,
     session_id: str | None = None,
+    sandbox_dataset_ids: list[str] | None = None,
+    selector_reasoning: str | None = None,
 ) -> tuple[str, str]:
-    """Create a QueryRun, invoke the ReAct agent, return (run_id, session_id)."""
+    """Create a QueryRun, invoke the ReAct agent, return (run_id, session_id).
+
+    dataset_ids       — full set of session datasets; used for C14 constraint + session storage.
+    sandbox_dataset_ids — C19 selector subset to load into the sandbox; defaults to dataset_ids.
+    selector_reasoning  — raw LLM output from the C19 selector call (stored on the run).
+    """
     init_db()
 
     if not dataset_ids:
         raise ValueError("At least one dataset_id is required")
+
+    effective_sandbox_ids = sandbox_dataset_ids if sandbox_dataset_ids else dataset_ids
 
     primary_dataset_id = dataset_ids[0]
     dataset_ids_json = json.dumps(dataset_ids) if len(dataset_ids) > 1 else None
@@ -80,13 +89,14 @@ def run_agent(
 
     initial: AgentState = {
         "run_id": run_id,
-        "dataset_ids": dataset_ids,
+        "dataset_ids": effective_sandbox_ids,
         "session_id": session_id,
         "question": question,
         "conversation_history": conversation_history,
         "action_history": [],
         "iteration_count": 0,
         "error": None,
+        "selector_reasoning": selector_reasoning,
     }
 
     logger.info("agent.start", run_id=run_id, dataset_ids=dataset_ids, session_id=session_id)

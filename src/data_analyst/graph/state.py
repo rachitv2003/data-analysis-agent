@@ -17,3 +17,4 @@ class AgentState(TypedDict, total=False):
     answer: str | None
     error: str | None
     status: str
+    selector_reasoning: str | None      # C19: raw LLM output from dataset-selector call

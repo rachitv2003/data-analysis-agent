@@ -17,6 +17,7 @@ class AgentState(TypedDict, total=False):
     answer: str | None
     error: str | None
     status: str                  # completed | failed
+    selector_reasoning: str | None  # raw selector LLM output (C19); None if selection skipped
 ```
 
 ## Nodes
@@ -38,7 +39,7 @@ class AgentState(TypedDict, total=False):
 |--------|-----------|------------|
 | Gemini API | chat completion with `<node:plan>` tag injected | fatal on 5xx; recoverable on 4xx (append error, retry) |
 
-**Behaviour:** Builds a prompt from the question + action_history, injects `<node:plan>` tag, calls Gemini. If `iteration_count >= max_iterations`, sets error and routes to handle_error.
+**Behaviour:** Builds a prompt from the question + action_history, injects `<node:plan>` tag, calls Gemini. If `iteration_count >= max_iterations`, routes to `force_finalize` (not `handle_error`). When `iteration_count >= max_iterations - 2`, appends a wrap-up instruction to the prompt (no additional LLM call): "IMPORTANT: You have {remaining} iterations remaining. You MUST produce a FINAL ANSWER in this response or the next one. Summarize your best findings from the action history above, even if incomplete. Do not start a new line of investigation."
 
 ### `execute_action`
 **Reads from state:** `llm_response` (pandas expression)
@@ -52,6 +53,16 @@ class AgentState(TypedDict, total=False):
 **Writes to state:** `answer`, `status="completed"`
 **Side effects:** saves answer + action_history to QueryRun in SQLite; deletes DataFrame from cache.
 
+### `force_finalize`
+**Reads from state:** `question`, `action_history`
+**Writes to state:** `answer`, `status="completed"`, `error_message` (`"max_iterations"` or `"consecutive_errors"`)
+**External calls:**
+| System | Operation | On Failure |
+|--------|-----------|------------|
+| LLM (Gemini / stub) | one synthesis call with `<node:finalize>` tag injected | fall back to static message; still sets status=completed |
+
+**Behaviour:** Makes one LLM call asking for a best-effort summary of work done. The response (no `FINAL ANSWER:` prefix required) is saved as the answer. `error_message` is set to indicate which trigger fired. Status is always `completed` — never `failed`. Called when max iterations are reached OR when 3 consecutive execute errors are detected. The stub provider detects `<node:finalize>` and returns a canned best-effort summary.
+
 ### `handle_error`
 **Reads from state:** `error`
 **Writes to state:** `status="failed"`
@@ -64,12 +75,16 @@ START → setup
 setup → [error?] → handle_error → END
 setup → [ok]    → plan_action
 
-plan_action → [FINAL ANSWER] → finalize → END
-plan_action → [max_iter]     → handle_error → END
-plan_action → [action]       → execute_action
+plan_action → [FINAL ANSWER]  → finalize       → END
+plan_action → [max_iter]      → force_finalize → END
+plan_action → [fatal error]   → handle_error   → END
+plan_action → [action]        → execute_action
 
-execute_action → [error] → plan_action   (self-correct, error appended to history)
-execute_action → [ok]    → plan_action   (result appended to history, loop)
+execute_action → [3 consec. errors] → force_finalize → END
+execute_action → [fatal error]      → handle_error   → END
+execute_action → [error / ok]       → plan_action     (error appended to history, self-correct)
+
+force_finalize → END
 ```
 
 ## Termination Signal
@@ -78,12 +93,13 @@ execute_action → [ok]    → plan_action   (result appended to history, loop)
 
 ## Max Iterations
 
-`max_agent_iterations = 10` (configurable via `DATA_ANALYST_MAX_ITERATIONS` env var).
+`MAX_ITERATIONS = 6` (configurable via `DATA_ANALYST_MAX_ITERATIONS` env var; default lowered from 10 to 6 as of C20).
 
 ## Error Boundary
 
 - **Recoverable:** pandas expression raises Exception, Gemini returns malformed output → append error to history, increment iteration, retry via `plan_action`
-- **Fatal:** LLM API 5xx / network failure, `iteration_count >= max_agent_iterations` → route to `handle_error`, set status=failed
+- **Best-effort:** `iteration_count >= MAX_ITERATIONS` OR last 3 `action_history` entries all have `is_error=True` → route to `force_finalize`, set `status="completed"`, `error_message="max_iterations"` or `"consecutive_errors"`
+- **Fatal:** LLM API 5xx / network failure, dataset not found → route to `handle_error`, set `status="failed"`
 
 ## Setup / Cleanup
 
@@ -92,7 +108,6 @@ execute_action → [ok]    → plan_action   (result appended to history, loop)
 
 ## Stub Provider
 
-When `GEMINI_API_KEY` is not set, the stub LLM branches on `<node:plan>` in the prompt:
-- First call: returns `df.describe().to_string()` (a real pandas expression)
-- Second call: returns `FINAL ANSWER: [stub] The dataset has {N} rows and {M} columns based on df.describe().`
-- Never returns identical output on two consecutive calls (iteration distinguishes them)
+When `GEMINI_API_KEY` is not set, the stub LLM branches on the prompt tag:
+- `<node:plan>` — First call: returns `df.describe().to_string()` (a real pandas expression). Second call: returns `FINAL ANSWER: [stub] The dataset has {N} rows and {M} columns based on df.describe().`. Never returns identical output on two consecutive calls (iteration distinguishes them).
+- `<node:finalize>` — Returns a canned best-effort summary: `Based on the work done, here is a partial summary: [stub] The analysis reached the iteration limit. The dataset was loaded and partial results were computed.`

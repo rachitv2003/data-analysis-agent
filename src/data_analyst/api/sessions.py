@@ -70,6 +70,7 @@ def get_session_turns(
                 "tokens_input": r.tokens_input,
                 "tokens_output": r.tokens_output,
                 "status": r.status,
+                "is_best_effort": r.error_message in ("max_iterations", "consecutive_errors"),
                 "created_at": r.created_at.isoformat(),
             }
             for r in turns

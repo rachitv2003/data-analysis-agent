@@ -42,11 +42,12 @@ SQLite (data_analyst.db)
 ## Data Flow
 
 1. **Upload:** User submits CSV → FastAPI saves file to `uploads/` → creates DatasetRow → returns dataset_id
-2. **Ask:** User submits {dataset_id, question, session_id?} → FastAPI resolves/creates ConversationSession → creates QueryRun → loads prior Q&A pairs → invokes agent with conversation context
-3. **Agent setup:** loads CSV as pandas DataFrame, caches by run_id
-4. **ReAct loop:** plan_action → Gemini → pandas expression → execute_action → result appended to history → loop
-5. **Termination:** Gemini emits `FINAL ANSWER: <text>` → finalize saves answer → status=completed
-6. **Response:** FastAPI returns {run_id, answer, iteration_count, status}
+2. **Ask:** User submits {dataset_ids?, question, session_id?} → FastAPI resolves/creates ConversationSession → creates QueryRun → loads prior Q&A pairs
+3. **Dataset selection (C19):** If `dataset_ids` was not supplied, a lightweight LLM call inspects all dataset schemas and returns the IDs relevant to the question; falls back to all datasets if the call fails or returns empty
+4. **Agent setup:** loads selected DataFrames into pandas, caches by run_id
+5. **ReAct loop:** plan_action → Gemini → pandas expression → execute_action → result appended to history → loop
+6. **Termination:** Gemini emits `FINAL ANSWER: <text>` → finalize saves answer → status=completed
+7. **Response:** FastAPI returns {run_id, answer, iteration_count, status, dataset_ids, selector_reasoning}
 
 ## Agent Sandbox Capabilities
 
