@@ -1,6 +1,7 @@
 import json as _json
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -10,6 +11,10 @@ from data_analyst.db.models import ConversationSessionRow, QueryRunRow
 from data_analyst.utils.markdown import render_markdown
 
 router = APIRouter()
+
+
+class SessionNameUpdate(BaseModel):
+    name: str
 
 
 @router.get("/sessions")
@@ -35,6 +40,7 @@ def list_all_sessions(session: Session = Depends(get_session)):
         )
         result.append({
             "session_id": s.id,
+            "name": s.name,
             "created_at": s.created_at.isoformat(),
             "updated_at": s.updated_at.isoformat(),
             "turn_count": turn_count or 0,
@@ -62,6 +68,7 @@ def get_session_turns(
     return ok({
         "session_id": sess.id,
         "dataset_id": sess.dataset_id,
+        "name": sess.name,
         "turns": [
             {
                 "run_id": r.id,
@@ -79,3 +86,36 @@ def get_session_turns(
             for r in turns
         ],
     })
+
+
+@router.patch("/sessions/{session_id}/name")
+def rename_session(
+    session_id: str,
+    body: SessionNameUpdate,
+    session: Session = Depends(get_session),
+):
+    sess = session.get(ConversationSessionRow, session_id)
+    if sess is None:
+        raise api_error("session_not_found", f"Session {session_id} not found.", 404)
+    sess.name = body.name.strip() or None
+    return ok({"session_id": sess.id, "name": sess.name})
+
+
+@router.delete("/sessions/{session_id}")
+def delete_session(
+    session_id: str,
+    session: Session = Depends(get_session),
+):
+    sess = session.get(ConversationSessionRow, session_id)
+    if sess is None:
+        raise api_error("session_not_found", f"Session {session_id} not found.", 404)
+    session.query(QueryRunRow).filter(QueryRunRow.session_id == session_id).delete()
+    session.delete(sess)
+    return ok({"deleted": session_id})
+
+
+@router.delete("/sessions")
+def delete_all_sessions(session: Session = Depends(get_session)):
+    session.query(QueryRunRow).filter(QueryRunRow.session_id.isnot(None)).delete()
+    session.query(ConversationSessionRow).delete()
+    return ok({"deleted": "all"})

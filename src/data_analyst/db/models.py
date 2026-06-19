@@ -40,9 +40,21 @@ class ConversationSessionRow(Base):
     id: Mapped[str] = mapped_column(Text, primary_key=True, default=_uuid)
     dataset_id: Mapped[str] = mapped_column(Text, nullable=False)   # primary dataset (backward compat)
     dataset_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # full list for C14
+    name: Mapped[str | None] = mapped_column(Text, nullable=True)   # user-assigned session name
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=_now
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+
+class SettingsRow(Base):
+    """Single-row key-value store for app-wide settings (e.g. global agent memory)."""
+    __tablename__ = "settings"
+
+    key: Mapped[str] = mapped_column(Text, primary_key=True)
+    value: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=_now, onupdate=_now
     )

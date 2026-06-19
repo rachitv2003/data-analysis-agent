@@ -97,6 +97,22 @@ def _build_prompt(state: AgentState) -> str:
         if ctx else ""
     )
 
+    # Persistent agent memory
+    memory_text = ""
+    try:
+        from data_analyst.db.session import create_db_session
+        from data_analyst.db.models import SettingsRow
+        with create_db_session() as _db:
+            _mem = _db.get(SettingsRow, "global_memory")
+            if _mem and _mem.value and _mem.value.strip():
+                memory_text = _mem.value.strip()
+    except Exception:
+        pass
+    memory_block = (
+        f"Persistent memory (always treat as authoritative background knowledge):\n{memory_text}\n\n"
+        if memory_text else ""
+    )
+
     # Prior conversation
     conv_history = state.get("conversation_history", [])
     conv_lines = [f"Q: {t['question']}\nA: {t['answer']}" for t in conv_history[-10:]]
@@ -118,6 +134,7 @@ def _build_prompt(state: AgentState) -> str:
         f"You are a data analysis assistant.\n"
         f"{df_description}\n\n"
         f"{context_block}"
+        f"{memory_block}"
         f"IMPORTANT — question interpretation:\n"
         f"- The user's question may contain typos or informal phrasing. Interpret it charitably.\n"
         f"- Questions like 'what can you tell me about this file', 'describe the data', 'summarise' are "
@@ -493,6 +510,30 @@ def force_finalize(state: AgentState) -> AgentState:
     _dataframes.pop(run_id, None)
     _persist_run(run_id, updated, answer_md, "completed", error=reason)
     return {**updated, "answer": answer_md, "status": "completed"}
+
+
+def generate_suggestions(question: str, answer: str) -> list[str]:
+    """Generate 3 follow-up question suggestions after an answer."""
+    prompt = (
+        "You are a helpful data analysis assistant. Based on the question and answer below, "
+        "generate exactly 3 short follow-up questions the user might want to ask next. "
+        "Return ONLY a JSON array of 3 strings, no other text.\n\n"
+        f"Question: {question}\n\n"
+        f"Answer (summary): {answer[:600]}"
+    )
+    try:
+        llm = _get_llm()
+        resp = llm.complete(prompt)
+        text = resp.text.strip()
+        # Strip markdown code fences if present
+        text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
+        text = re.sub(r"\n?```$", "", text).strip()
+        parsed = json.loads(text)
+        if isinstance(parsed, list):
+            return [str(q).strip() for q in parsed[:3] if q]
+    except Exception:
+        pass
+    return []
 
 
 def handle_error(state: AgentState) -> AgentState:

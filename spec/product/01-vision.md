@@ -30,11 +30,11 @@ Answering ad-hoc questions about a CSV dataset today requires either writing Pyt
 
 ## Key Constraints
 
-- Must use Google Gemini (`gemini-2.5-flash`) as the LLM provider
+- Default LLM provider is Google Gemini (`gemini-2.5-flash`); OpenRouter and a local stub provider are also supported (configured via `DATA_ANALYST_LLM_PROVIDER`)
 - Stack: Python 3.12+, FastAPI, SQLite, LangGraph, SQLAlchemy 2.0
 - All commands use `uv run` prefix
 - Dev port: 8001
-- Stub mode must be automatic when `GEMINI_API_KEY` is not set
+- Stub mode must be automatic when `DATA_ANALYST_GEMINI_API_KEY` is not set
 
 ## Phases of Development
 

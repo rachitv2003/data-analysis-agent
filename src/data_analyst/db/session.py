@@ -48,4 +48,12 @@ def create_db_session() -> Generator[Session, None, None]:
 
 def init_db() -> None:
     from data_analyst.db.models import Base
-    Base.metadata.create_all(bind=_get_engine())
+    from sqlalchemy import text
+    engine = _get_engine()
+    Base.metadata.create_all(bind=engine)
+    # Incremental migrations — add columns that create_all won't add to existing tables
+    with engine.connect() as conn:
+        existing = {row[1] for row in conn.execute(text("PRAGMA table_info(conversation_sessions)"))}
+        if "name" not in existing:
+            conn.execute(text("ALTER TABLE conversation_sessions ADD COLUMN name TEXT"))
+            conn.commit()

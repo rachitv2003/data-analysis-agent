@@ -56,7 +56,18 @@ A session groups multiple `query_runs` into a conversation thread.
 | `id` | TEXT PK | no | `uuid4()` | UUID |
 | `dataset_id` | TEXT | no | — | Primary dataset (backward compat; always `dataset_ids[0]`) |
 | `dataset_ids_json` | TEXT | yes | NULL | JSON array of all session dataset IDs; null for single-dataset sessions |
+| `name` | TEXT | yes | NULL | User-assigned display name for the session |
 | `created_at` | TIMESTAMP(tz) | no | `now(UTC)` | UTC creation timestamp |
+| `updated_at` | TIMESTAMP(tz) | no | `now(UTC)` | UTC; `onupdate=_now` |
+
+### `settings`
+
+Single-row key-value store for app-wide configuration and persistent memory.
+
+| Column | SQLAlchemy type | Nullable | Default | Description |
+|--------|----------------|----------|---------|-------------|
+| `key` | TEXT PK | no | — | Setting key (e.g. `global_memory`) |
+| `value` | TEXT | yes | NULL | Setting value |
 | `updated_at` | TIMESTAMP(tz) | no | `now(UTC)` | UTC; `onupdate=_now` |
 
 ---

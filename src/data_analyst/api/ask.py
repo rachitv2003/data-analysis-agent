@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from data_analyst.api._common import ok, api_error
 from data_analyst.db.session import get_session
 from data_analyst.db.models import DatasetRow, QueryRunRow
+from data_analyst.graph.nodes import generate_suggestions
 from data_analyst.graph.runner import run_agent
 from data_analyst.graph.selector import select_datasets
 from data_analyst.utils.markdown import render_markdown
@@ -88,6 +89,7 @@ def ask_question(
 
     is_best_effort = run.error_message in ("max_iterations", "consecutive_errors")
     steps = _json.loads(run.action_history) if run.action_history else []
+    suggested_questions = generate_suggestions(body.question, answer_md)
 
     return ok({
         "run_id": run.id,
@@ -103,4 +105,5 @@ def ask_question(
         "status": run.status,
         "is_best_effort": is_best_effort,
         "steps": steps,
+        "suggested_questions": suggested_questions,
     })

@@ -10,7 +10,7 @@ def test_settings_defaults(monkeypatch):
     assert s.database_url == "sqlite:///test.db"
     assert s.gemini_api_key == ""
     assert s.llm_model == "gemini-2.5-flash"
-    assert s.max_iterations == 10
+    assert s.max_iterations == 6
 
 
 def test_settings_override(monkeypatch):

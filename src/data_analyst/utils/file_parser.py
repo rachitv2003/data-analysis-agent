@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
-SUPPORTED_EXTENSIONS = {".csv", ".tsv", ".txt", ".json"}
+SUPPORTED_EXTENSIONS = {".csv", ".tsv", ".txt", ".json", ".xlsx", ".xls"}
 
 
 def compute_hash(raw: bytes) -> str:
@@ -16,10 +16,18 @@ def detect_format(filename: str) -> str:
     ext = Path(filename).suffix.lower()
     if ext not in SUPPORTED_EXTENSIONS:
         raise ValueError(f"Unsupported file type '{ext}'. Accepted: {', '.join(sorted(SUPPORTED_EXTENSIONS))}")
+    # Normalise Excel variants to a single format token
+    if ext in {".xlsx", ".xls"}:
+        return "excel"
     return ext.lstrip(".")
 
 
 def parse_file(raw: bytes, fmt: str) -> pd.DataFrame:
+    if fmt == "excel":
+        try:
+            return pd.read_excel(io.BytesIO(raw), sheet_name=0)
+        except Exception as exc:
+            raise ValueError(f"Could not parse Excel file: {exc}") from exc
     if fmt == "csv":
         return pd.read_csv(io.BytesIO(raw), encoding="utf-8", encoding_errors="replace")
     if fmt == "tsv":

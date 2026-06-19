@@ -1,6 +1,54 @@
 {% extends "base.html" %}
 {% block content %}
 
+<!-- Memory modal -->
+<div id="memory-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:10px;padding:28px 32px;max-width:520px;width:92%;box-shadow:0 8px 32px rgba(0,0,0,.2);">
+    <h3 style="margin:0 0 6px;font-size:16px;color:#1e3a5f;">Persistent Memory</h3>
+    <p style="font-size:13px;color:#6b7280;margin:0 0 12px;line-height:1.5;">Facts saved here are injected into every query. E.g. "Fiscal year starts in April", "Revenue is always in USD".</p>
+    <textarea id="memory-input" style="height:110px;font-size:13px;margin-bottom:12px;" placeholder="No memory saved yet. Add facts line by line…"></textarea>
+    <div style="display:flex;gap:10px;">
+      <button onclick="saveMemory()" style="background:#1e40af;">Save</button>
+      <button onclick="document.getElementById('memory-overlay').style.display='none'" style="background:#6b7280;">Close</button>
+    </div>
+    <div id="memory-status" style="font-size:12px;color:#16a34a;margin-top:8px;"></div>
+  </div>
+</div>
+
+<!-- Data cleaning modal -->
+<div id="clean-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:10px;padding:28px 32px;max-width:620px;width:92%;box-shadow:0 8px 32px rgba(0,0,0,.2);max-height:90vh;overflow-y:auto;">
+    <h3 style="margin:0 0 4px;font-size:16px;color:#1e3a5f;">Clean Dataset: <span id="clean-ds-name"></span></h3>
+    <p style="font-size:13px;color:#6b7280;margin:0 0 12px;">Describe the cleaning operation in plain English.</p>
+    <textarea id="clean-instruction" style="height:64px;font-size:13px;margin-bottom:10px;" placeholder='e.g. "Remove rows where revenue is null", "Rename column X to Y"'></textarea>
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+      <button id="clean-preview-btn" onclick="previewClean()">Preview</button>
+      <button onclick="document.getElementById('clean-overlay').style.display='none'" style="background:#6b7280;">Cancel</button>
+    </div>
+    <div id="clean-preview-area" style="display:none;">
+      <div id="clean-code-block" style="background:#1e293b;color:#e2e8f0;padding:10px 14px;border-radius:6px;font-size:12px;font-family:monospace;white-space:pre-wrap;word-break:break-all;margin-bottom:10px;"></div>
+      <div style="display:flex;gap:20px;font-size:12px;color:#374151;margin-bottom:8px;">
+        <span>Before: <strong id="clean-before-count"></strong></span>
+        <span>After: <strong id="clean-after-count"></strong></span>
+      </div>
+      <button id="clean-apply-btn" onclick="applyClean()" style="background:#16a34a;margin-bottom:6px;">Apply changes</button>
+    </div>
+    <div id="clean-status" style="font-size:12px;margin-top:4px;"></div>
+  </div>
+</div>
+
+<!-- Clear all sessions modal -->
+<div id="clear-sessions-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:100;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:10px;padding:28px 32px;max-width:400px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.18);">
+    <h3 style="margin:0 0 10px;font-size:16px;color:#b91c1c;">Delete all sessions?</h3>
+    <p style="font-size:14px;color:#374151;margin:0 0 20px;line-height:1.55;">This will permanently delete all conversation sessions. Datasets will not be affected.</p>
+    <div style="display:flex;gap:10px;">
+      <button onclick="confirmClearAllSessions()" style="background:#b91c1c;">Delete all</button>
+      <button onclick="document.getElementById('clear-sessions-overlay').style.display='none'" style="background:#6b7280;">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- Duplicate modal -->
 <div id="dup-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:100;align-items:center;justify-content:center;">
   <div style="background:#fff;border-radius:10px;padding:28px 32px;max-width:440px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.18);">
@@ -32,12 +80,19 @@
   <!-- Col 1: Sessions -->
   <div id="session-sidebar" style="flex:1;min-width:0;display:flex;flex-direction:column;">
     <div class="card" style="margin-bottom:0;padding:16px;flex:1;display:flex;flex-direction:column;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-shrink:0;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-shrink:0;gap:6px;">
         <h2 style="margin-bottom:0;">Sessions</h2>
-        <button onclick="startNewSession()" style="background:#1e40af;font-size:12px;padding:4px 10px;">+ New</button>
+        <div style="display:flex;gap:6px;flex-shrink:0;">
+          <button id="sess-del-sel-btn" onclick="deleteSelectedSessions()" style="display:none;background:#b91c1c;font-size:11px;padding:3px 8px;">Delete sel.</button>
+          <button onclick="openMemoryModal()" style="background:#475569;font-size:11px;padding:4px 8px;" title="Persistent memory">Memory</button>
+          <button onclick="startNewSession()" style="background:#1e40af;font-size:12px;padding:4px 10px;">+ New</button>
+        </div>
       </div>
-      <div id="session-list" style="max-height:220px;overflow-y:auto;">
+      <div id="session-list" style="max-height:200px;overflow-y:auto;flex:1;">
         <div id="no-sessions-msg" style="font-size:12px;color:#9ca3af;font-style:italic;padding:4px 0;">No sessions yet</div>
+      </div>
+      <div id="sess-footer" style="display:none;padding-top:6px;border-top:1px solid #f3f4f6;margin-top:6px;flex-shrink:0;">
+        <button onclick="clearAllSessions()" style="background:none;color:#b91c1c;border:1px solid #fca5a5;font-size:11px;padding:2px 8px;border-radius:5px;">Clear all sessions</button>
       </div>
     </div>
   </div>
@@ -51,11 +106,18 @@
         <div id="dataset-checkboxes">
           {% for ds in datasets %}
           <div class="ds-row" data-id="{{ ds.dataset_id }}" data-filename="{{ ds.filename }}" data-row-count="{{ ds.row_count }}" data-col-count="{{ ds.col_count }}">
-            <label>
-              <input type="checkbox" class="ds-check" value="{{ ds.dataset_id }}" onchange="onDatasetCheckChange()">
-              <span>{{ ds.filename }} <span class="row-cnt">({{ ds.row_count }} rows)</span></span>
-            </label>
-            <button class="del-btn" onclick="deleteDataset('{{ ds.dataset_id }}',event)" title="Delete">🗑</button>
+            <div class="ds-main-row">
+              <label><input type="checkbox" class="ds-check" value="{{ ds.dataset_id }}" onchange="onDatasetCheckChange()">
+                <span>{{ ds.filename }} <span class="row-cnt">({{ ds.row_count }} rows &middot; {{ ds.col_count }} cols)</span></span></label>
+              <div class="ds-actions">
+                <button class="ds-cols-btn" onclick="toggleColumns('{{ ds.dataset_id }}',event)" title="View columns">▸ cols</button>
+                <button class="ds-clean-btn" onclick="openCleanModal('{{ ds.dataset_id }}','{{ ds.filename }}',event)" title="Clean data">🧹</button>
+                <button class="del-btn" onclick="deleteDataset('{{ ds.dataset_id }}',event)" title="Delete">🗑</button>
+              </div>
+            </div>
+            <div class="ds-cols-panel" id="cols-{{ ds.dataset_id }}" style="display:none;">
+              {% for col in ds.columns %}<span class="col-chip">{{ col }}</span>{% endfor %}
+            </div>
           </div>
           {% endfor %}
         </div>
@@ -63,10 +125,14 @@
           Upload a file to get started.
         </div>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-shrink:0;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-shrink:0;gap:6px;flex-wrap:wrap;">
         <button id="select-all-btn" onclick="toggleSelectAll()"
           style="display:{% if datasets %}inline-block{% else %}none{% endif %};background:none;color:#1e40af;border:1px solid #bfdbfe;font-size:11px;padding:2px 8px;border-radius:5px;">
           Select all
+        </button>
+        <button id="ds-del-sel-btn" onclick="deleteSelectedDatasets()"
+          style="display:none;background:#b91c1c;font-size:11px;padding:2px 8px;border-radius:5px;">
+          Delete selected
         </button>
         <button id="clear-all-btn" onclick="clearAllDatasets()"
           style="display:{% if datasets %}inline-block{% else %}none{% endif %};background:none;color:#b91c1c;border:1px solid #fca5a5;font-size:11px;padding:2px 8px;border-radius:5px;">
@@ -102,10 +168,10 @@
         <div style="color:#6b7280; pointer-events:none; text-align:center; margin-bottom:12px;">
           <div style="font-size:28px; margin-bottom:6px;">&#8659;</div>
           <div id="drop-zone-text" style="font-size:14px; font-weight:600; margin-bottom:4px;">Drop files or a folder here</div>
-          <div style="font-size:12px; color:#9ca3af;">or click to browse (.csv · .tsv · .txt · .json)</div>
+          <div style="font-size:12px; color:#9ca3af;">or click to browse (.csv · .tsv · .txt · .json · .xlsx)</div>
         </div>
         <span class="pick-btn" onclick="document.getElementById('file-input').click()" style="background:#1e40af;color:#fff;border:none;border-radius:6px;padding:8px 18px;font-size:13px;font-weight:600;cursor:pointer;display:inline-block;">Choose files</span>
-        <input type="file" id="file-input" accept=".csv,.tsv,.txt,.json" multiple style="display:none" onchange="onFilesSelected()">
+        <input type="file" id="file-input" accept=".csv,.tsv,.txt,.json,.xlsx,.xls" multiple style="display:none" onchange="onFilesSelected()">
       </div>
 
       <!-- C17: Staged file list -->
@@ -157,7 +223,10 @@
 <!-- Full-width querying section -->
 <div class="card" style="margin-bottom:0;">
   <div id="conversation" style="display:none;margin-bottom:16px;">
-    <div id="querying-label" style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">Conversation</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+      <div id="querying-label" style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;">Conversation</div>
+      <button onclick="exportConversationMd()" style="background:none;color:#6b7280;border:1px solid #d1d5db;font-size:11px;padding:2px 8px;border-radius:5px;" title="Export as Markdown">⬇ Export MD</button>
+    </div>
     <div id="thread"></div>
   </div>
   <label for="question">Your question</label>
@@ -185,21 +254,44 @@
 
   .staged-row { border:1px solid #e5e7eb; border-radius:6px; padding:10px 12px; margin-bottom:8px; background:#fff; }
   .sr-main { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-  .sr-name { flex:1; min-width:0; font-size:13px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .sr-rename { flex:1; min-width:80px; }
   .sr-size { font-size:12px; color:#9ca3af; flex-shrink:0; }
   .sr-acts { display:flex; align-items:center; gap:6px; flex-shrink:0; margin-left:auto; }
   .sr-acts button { font-size:12px; }
   .sr-warn { font-size:12px; color:#d97706; margin-top:5px; }
   .sr-preview { font-size:12px; color:#16a34a; margin-top:4px; font-style:italic; }
 
-  .ds-row { display:flex; align-items:center; gap:6px; padding:4px 0; border-bottom:1px solid #f3f4f6; }
+  .ds-row { padding:4px 0; border-bottom:1px solid #f3f4f6; }
   .ds-row:last-child { border-bottom:none; }
-  .ds-row label { display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; flex:1; min-width:0; }
-  .ds-row label span { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .ds-row label .row-cnt { color:#9ca3af; }
+  .ds-main-row { display:flex; align-items:center; gap:6px; }
+  .ds-main-row label { display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; flex:1; min-width:0; }
+  .ds-main-row label span { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ds-main-row label .row-cnt { color:#9ca3af; }
+  .ds-actions { display:flex; align-items:center; gap:2px; flex-shrink:0; }
   .del-btn { background:none; border:none; color:#d1d5db; font-size:14px; cursor:pointer; padding:0 4px; flex-shrink:0; opacity:.4; transition:opacity .15s,color .15s; }
   .del-btn:hover { opacity:1; color:#b91c1c; }
+  .ds-cols-btn { background:none; border:none; color:#9ca3af; font-size:11px; cursor:pointer; padding:0 4px; opacity:.6; transition:opacity .15s; white-space:nowrap; }
+  .ds-cols-btn:hover { opacity:1; color:#1e40af; }
+  .ds-clean-btn { background:none; border:none; color:#9ca3af; font-size:13px; cursor:pointer; padding:0 4px; opacity:.5; transition:opacity .15s; }
+  .ds-clean-btn:hover { opacity:1; }
+  .ds-cols-panel { padding:4px 0 6px 22px; display:flex; flex-wrap:wrap; gap:4px; }
+  .col-chip { background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; border-radius:4px; font-size:11px; padding:1px 6px; white-space:nowrap; }
   .del-confirm { display:flex; align-items:center; gap:8px; font-size:13px; color:#374151; flex-wrap:wrap; padding:4px 0; }
+
+  .session-item { padding:6px 8px; border-radius:6px; border:1px solid #e5e7eb; margin-bottom:5px; background:#fff; transition:background .12s; display:flex; align-items:center; gap:6px; }
+  .session-item:hover { background:#eff6ff; border-color:#bfdbfe; }
+  .session-item.active { background:#eff6ff; border-left:3px solid #3b82f6; border-color:#3b82f6; }
+  .sess-check { flex-shrink:0; cursor:pointer; }
+  .sess-body { flex:1; min-width:0; cursor:pointer; }
+  .session-label { font-size:13px; color:#1f2937; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block; }
+  .session-meta  { font-size:11px; color:#9ca3af; margin-top:1px; display:block; }
+  .sess-rename-btn { background:none; border:none; color:#d1d5db; font-size:13px; cursor:pointer; padding:0 3px; flex-shrink:0; opacity:.4; transition:opacity .15s; }
+  .sess-rename-btn:hover { opacity:1; color:#1e40af; }
+  .sess-rename-input { font-size:12px; padding:2px 6px; border:1px solid #bfdbfe; border-radius:4px; flex:1; min-width:0; height:22px; }
+
+  .followup-chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .followup-chip { background:#eff6ff; color:#1e40af; border:1px solid #bfdbfe; border-radius:16px; font-size:12px; padding:4px 12px; cursor:pointer; transition:background .12s; line-height:1.4; }
+  .followup-chip:hover { background:#dbeafe; border-color:#93c5fd; }
 
   .queue-row { display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid #f3f4f6; font-size:13px; }
   .queue-row:last-child { border-bottom:none; }
@@ -208,11 +300,6 @@
   .q-actions { display:flex; gap:4px; flex-shrink:0; }
   .q-actions button { font-size:11px; padding:2px 8px; }
 
-  .session-item { padding:8px 10px; border-radius:6px; cursor:pointer; border:1px solid #e5e7eb; margin-bottom:6px; background:#fff; transition:background .12s; }
-  .session-item:hover { background:#eff6ff; border-color:#bfdbfe; }
-  .session-item.active { background:#eff6ff; border-left:3px solid #3b82f6; border-color:#3b82f6; }
-  .session-label { font-size:13px; color:#1f2937; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block; }
-  .session-meta  { font-size:11px; color:#9ca3af; margin-top:2px; display:block; }
 
   .turn { border-left:3px solid #bfdbfe; padding:10px 14px; margin-bottom:12px; background:#f8fafc; border-radius:0 6px 6px 0; }
   .turn.failed { border-left-color:#fca5a5; background:#fff7f7; }
@@ -266,8 +353,8 @@
     if(d<86400) return`${Math.floor(d/3600)}h ago`; return`${Math.floor(d/86400)}d ago`;
   };
   const fmtSize = b => b<1024?b+' B':b<1048576?(b/1024).toFixed(1)+' KB':(b/1048576).toFixed(1)+' MB';
-  const fmtExt = n => ({'.csv':'CSV','.tsv':'TSV','.txt':'TXT','.json':'JSON'})[n.slice(n.lastIndexOf('.')).toLowerCase()]||'FILE';
-  const SUPPORTED = new Set(['.csv','.tsv','.txt','.json']);
+  const fmtExt = n => ({'.csv':'CSV','.tsv':'TSV','.txt':'TXT','.json':'JSON','.xlsx':'XLS','.xls':'XLS'})[n.slice(n.lastIndexOf('.')).toLowerCase()]||'FILE';
+  const SUPPORTED = new Set(['.csv','.tsv','.txt','.json','.xlsx','.xls']);
 
   // ── C17: staged state ────────────────────────────────────────────────────────
   const _staged = new Map();   // id → {file, context, notesContent, notesFilename}
@@ -280,7 +367,7 @@
       const ext = f.name.slice(f.name.lastIndexOf('.')).toLowerCase();
       if (!SUPPORTED.has(ext) || existing.has(f.name)) continue;
       existing.add(f.name);
-      _staged.set(++_seq, {file:f, context:'', notesContent:'', notesFilename:''});
+      _staged.set(++_seq, {file:f, context:'', notesContent:'', notesFilename:'', renamedAs:''});
       added++;
     }
     if (added) _renderStaged();
@@ -292,7 +379,7 @@
       const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
       if (!SUPPORTED.has(ext) || existing.has(file.name)) continue;
       existing.add(file.name);
-      _staged.set(++_seq, {file, context, notesContent:'', notesFilename: context?'_folder_notes':''});
+      _staged.set(++_seq, {file, context, notesContent:'', notesFilename: context?'_folder_notes':'', renamedAs:''});
     }
     _renderStaged();
   }
@@ -329,7 +416,7 @@
       div.innerHTML = `
         <div class="sr-main">
           <span class="fmt-badge">${fmtExt(item.file.name)}</span>
-          <span class="sr-name">${esc(item.file.name)}</span>
+          <input class="sr-rename" value="${esc(item.renamedAs||item.file.name)}" oninput="_updateRename(${id},this.value)" title="Rename before upload" style="flex:1;min-width:0;font-size:13px;font-weight:500;padding:2px 6px;border:1px solid #e5e7eb;border-radius:4px;background:#f9fafb;">
           <span class="sr-size">${fmtSize(item.file.size)}</span>
           <div class="sr-acts">
             <button onclick="toggleNotes(${id})" style="background:#f3f4f6;color:#374151;border:1px solid #d1d5db;">📝 Notes</button>
@@ -360,6 +447,7 @@
     if (el) el.style.display = el.style.display==='none'?'block':'none';
   }
   function _updateContext(id, val) { const s = _staged.get(id); if(s) s.context=val; }
+  function _updateRename(id, val) { const s = _staged.get(id); if(s) s.renamedAs=val.trim(); }
 
   async function attachNotesFile(id, input) {
     const f = input.files[0]; if(!f) return;
@@ -395,7 +483,7 @@
         const [id, item] = items[idx++];
         let ctx = item.context.trim();
         if (item.notesContent) ctx = ctx ? ctx+'\n\n'+item.notesContent : item.notesContent;
-        await _doUpload(item.file, false, ctx, id);
+        await _doUpload(item.file, false, ctx, id, item.renamedAs);
       }
     }
     await Promise.all(Array.from({length:Math.min(3,items.length)}, worker));
@@ -466,10 +554,13 @@
   const _retry = {};
   let _pendingDup = null;
 
-  async function _doUpload(file, force, ctx, qIdx) {
+  async function _doUpload(file, force, ctx, qIdx, renamedAs) {
     _qst(qIdx,'⏳','#6b7280');
     const fd = new FormData();
-    fd.append('file', file);
+    const uploadFile = renamedAs && renamedAs !== file.name
+      ? new File([file], renamedAs, {type: file.type, lastModified: file.lastModified})
+      : file;
+    fd.append('file', uploadFile);
     if (ctx) fd.append('context', ctx);
     try {
       const resp = await fetch(force?'/upload?force=true':'/upload', {method:'POST',body:fd});
@@ -481,7 +572,7 @@
         if (acts) acts.innerHTML =
           `<button onclick="qUseExisting('${det.existing_dataset_id}','${esc(det.existing_filename)}',${qIdx})" style="background:#1e40af;font-size:11px;padding:2px 6px;">Use existing</button>`+
           `<button onclick="qUploadAnyway(${qIdx})" style="background:#6b7280;font-size:11px;padding:2px 6px;">Upload anyway</button>`;
-        _retry[qIdx]={file,ctx}; return;
+        _retry[qIdx]={file,ctx,renamedAs}; return;
       }
       if (!resp.ok) {
         _qst(qIdx,'✗','#b91c1c');
@@ -508,7 +599,7 @@
   async function qUploadAnyway(qIdx) {
     const item=_retry[qIdx]; if(!item) return;
     document.getElementById(`qact-${qIdx}`).innerHTML='';
-    await _doUpload(item.file,true,item.ctx,qIdx);
+    await _doUpload(item.file,true,item.ctx,qIdx,item.renamedAs);
   }
 
   async function dupUseExisting() {
@@ -523,12 +614,20 @@
   // ── Register dataset ──────────────────────────────────────────────────────────
   const _ctxCache = {};
 
-  function _dsRowInner(id, filename, rowCount, colCount) {
-    const dims = colCount ? `${rowCount} rows · ${colCount} cols` : `${rowCount} rows`;
+  function _dsRowInner(id, filename, rowCount, colCount, columns) {
+    const dims = colCount ? `${rowCount} rows &middot; ${colCount} cols` : `${rowCount} rows`;
+    const colChips = (columns||[]).map(c=>`<span class="col-chip">${esc(c)}</span>`).join('');
     return `
-      <label><input type="checkbox" class="ds-check" value="${id}" checked onchange="onDatasetCheckChange()">
-        <span>${esc(filename)} <span class="row-cnt">(${dims})</span></span></label>
-      <button class="del-btn" onclick="deleteDataset('${id}',event)" title="Delete">🗑</button>`;
+      <div class="ds-main-row">
+        <label><input type="checkbox" class="ds-check" value="${id}" checked onchange="onDatasetCheckChange()">
+          <span>${esc(filename)} <span class="row-cnt">(${dims})</span></span></label>
+        <div class="ds-actions">
+          <button class="ds-cols-btn" onclick="toggleColumns('${id}',event)" title="View columns">▸ cols</button>
+          <button class="ds-clean-btn" onclick="openCleanModal('${id}','${esc(filename)}',event)" title="Clean data">🧹</button>
+          <button class="del-btn" onclick="deleteDataset('${id}',event)" title="Delete">🗑</button>
+        </div>
+      </div>
+      <div class="ds-cols-panel" id="cols-${id}" style="display:none;">${colChips}</div>`;
   }
 
   function _registerDataset(ds) {
@@ -536,7 +635,7 @@
     if (document.querySelector(`.ds-check[value="${ds.dataset_id}"]`)) { onDatasetCheckChange(); return; }
     const div = document.createElement('div');
     div.className='ds-row'; div.dataset.id=ds.dataset_id; div.dataset.filename=ds.filename; div.dataset.rowCount=ds.row_count; div.dataset.colCount=ds.col_count||'';
-    div.innerHTML = _dsRowInner(ds.dataset_id, ds.filename, ds.row_count, ds.col_count);
+    div.innerHTML = _dsRowInner(ds.dataset_id, ds.filename, ds.row_count, ds.col_count, ds.columns||[]);
     document.getElementById('dataset-checkboxes').appendChild(div);
     document.getElementById('no-datasets-msg').style.display='none';
     document.getElementById('clear-all-btn').style.display='inline-block';
@@ -629,9 +728,37 @@
 
   function onDatasetCheckChange() {
     const ids=getSelectedDatasetIds();
+    const checked=document.querySelectorAll('.ds-check:checked').length;
+    const total=document.querySelectorAll('.ds-check').length;
+    const delBtn=document.getElementById('ds-del-sel-btn');
+    if(delBtn){ delBtn.style.display=checked?'inline-block':'none'; delBtn.textContent=`Delete ${checked} selected`; }
     startNewSession();
     if(ids.length) loadDatasetCtx(ids);
     else document.getElementById('dataset-notes-panel').style.display='none';
+  }
+
+  async function deleteSelectedDatasets() {
+    const checked=[...document.querySelectorAll('.ds-check:checked')];
+    if(!checked.length) return;
+    if(!confirm(`Delete ${checked.length} dataset${checked.length!==1?'s':''} and all their sessions?`)) return;
+    for(const cb of checked){
+      const id=cb.value;
+      try{
+        const resp=await fetch(`/datasets/${id}`,{method:'DELETE'});
+        if(resp.ok) document.querySelector(`.ds-row[data-id="${id}"]`)?.remove();
+      }catch{}
+    }
+    const remaining=document.querySelectorAll('.ds-check').length;
+    if(!remaining){
+      document.getElementById('no-datasets-msg').style.display='block';
+      document.getElementById('clear-all-btn').style.display='none';
+      document.getElementById('select-all-btn').style.display='none';
+    }
+    document.getElementById('ds-del-sel-btn').style.display='none';
+    startNewSession();
+    document.getElementById('dataset-notes-panel').style.display='none';
+    _updateStorageStat();
+    await loadSessionList();
   }
 
   // ── C12: context panel ────────────────────────────────────────────────────────
@@ -689,16 +816,70 @@
       const body=await(await fetch('/sessions')).json();
       const sessions=body.data||[];
       const listEl=document.getElementById('session-list');
+      const footer=document.getElementById('sess-footer');
       if (!sessions.length) {
         listEl.innerHTML='<div id="no-sessions-msg" style="font-size:12px;color:#9ca3af;font-style:italic;padding:4px 0;">No sessions yet</div>';
+        if(footer) footer.style.display='none';
         return;
       }
-      listEl.innerHTML=sessions.map(s=>`
-        <div class="session-item${s.session_id===currentSessionId?' active':''}" data-sid="${s.session_id}" onclick="resumeSession('${s.session_id}')">
-          <span class="session-label">${esc((s.first_question||'Untitled').slice(0,55))}</span>
-          <span class="session-meta">${s.turn_count} turn${s.turn_count!==1?'s':''} &middot; ${relTime(s.updated_at)}</span>
-        </div>`).join('');
+      if(footer) footer.style.display='block';
+      listEl.innerHTML=sessions.map(s=>{
+        const label=esc((s.name||s.first_question||'Untitled').slice(0,55));
+        const active=s.session_id===currentSessionId?' active':'';
+        return `<div class="session-item${active}" data-sid="${s.session_id}">
+          <input type="checkbox" class="sess-check" onchange="onSessCheckChange()" onclick="event.stopPropagation()">
+          <div class="sess-body" onclick="resumeSession('${s.session_id}')">
+            <span class="session-label">${label}</span>
+            <span class="session-meta">${s.turn_count} turn${s.turn_count!==1?'s':''} &middot; ${relTime(s.updated_at)}</span>
+          </div>
+          <button class="sess-rename-btn" onclick="startRenameSession('${s.session_id}',this)" title="Rename">✏</button>
+        </div>`;
+      }).join('');
     } catch{}
+  }
+
+  function onSessCheckChange() {
+    const checked=document.querySelectorAll('.sess-check:checked').length;
+    const btn=document.getElementById('sess-del-sel-btn');
+    if(btn) { btn.style.display=checked?'inline-block':'none'; btn.textContent=`Delete ${checked}`; }
+  }
+
+  function startRenameSession(sid, btn) {
+    const item=btn.closest('.session-item'); if(!item) return;
+    const body=item.querySelector('.sess-body'); if(!body) return;
+    const current=body.querySelector('.session-label')?.textContent||'';
+    body.innerHTML=`<input class="sess-rename-input" value="${esc(current)}" onclick="event.stopPropagation()">`;
+    const inp=body.querySelector('.sess-rename-input');
+    inp.focus(); inp.select();
+    const finish=async()=>{
+      const name=inp.value.trim();
+      try{ await fetch(`/sessions/${sid}/name`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})}); }catch{}
+      await loadSessionList();
+    };
+    inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){e.preventDefault();finish();} if(e.key==='Escape') loadSessionList(); });
+    inp.addEventListener('blur',()=>{ finish(); });
+  }
+
+  async function deleteSelectedSessions() {
+    const items=[...document.querySelectorAll('.sess-check:checked')];
+    if(!items.length) return;
+    for(const cb of items){
+      const sid=cb.closest('.session-item')?.dataset.sid; if(!sid) continue;
+      try{ await fetch(`/sessions/${sid}`,{method:'DELETE'}); }catch{}
+    }
+    if(currentSessionId && items.some(cb=>cb.closest('.session-item')?.dataset.sid===currentSessionId)) startNewSession();
+    document.getElementById('sess-del-sel-btn').style.display='none';
+    await loadSessionList();
+  }
+
+  function clearAllSessions() { document.getElementById('clear-sessions-overlay').style.display='flex'; }
+
+  async function confirmClearAllSessions() {
+    document.getElementById('clear-sessions-overlay').style.display='none';
+    try{
+      const resp=await fetch('/sessions',{method:'DELETE'});
+      if(resp.ok){ startNewSession(); await loadSessionList(); }
+    }catch{}
   }
 
   async function resumeSession(sessionId) {
@@ -752,7 +933,7 @@
     }).catch(() => {});
   }
 
-  function appendTurn(q,html,iters,ti,to,status,datasetsUsed,isBestEffort,steps,firedAt,elapsedMs) {
+  function appendTurn(q,html,iters,ti,to,status,datasetsUsed,isBestEffort,steps,firedAt,elapsedMs,suggestedQuestions) {
     const div=document.createElement('div');
     div.className='turn'+(status==='failed'?' failed':'');
     // timestamp + elapsed
@@ -785,6 +966,18 @@
       }
     }
     div.innerHTML=`<div class="turn-q">Q: ${esc(q)}</div>${tsLine}${badge}<div class="answer-body">${html}</div><div class="turn-meta">${meta}</div>${dsFooter}${stepsFooter}`;
+    if (suggestedQuestions && suggestedQuestions.length) {
+      const chipsDiv = document.createElement('div');
+      chipsDiv.className = 'followup-chips';
+      suggestedQuestions.forEach(sq => {
+        const btn = document.createElement('button');
+        btn.className = 'followup-chip';
+        btn.textContent = sq;
+        btn.addEventListener('click', () => fillQuestion(sq));
+        chipsDiv.appendChild(btn);
+      });
+      div.appendChild(chipsDiv);
+    }
     // C4: render Plotly charts from data-spec divs (client-side, no script injection needed)
     div.querySelectorAll('.answer-body .plotly-chart').forEach(el => {
       try {
@@ -838,7 +1031,7 @@
         currentSessionId=r.session_id;
         const dsUsed=r.datasets_used||[];
         if(dsUsed.length>1) document.getElementById('querying-label').textContent=`Querying ${dsUsed.length} datasets`;
-        appendTurn(q,r.answer_html||esc(r.answer_markdown||'(no answer)'),r.iteration_count,r.tokens_input,r.tokens_output,r.status,dsUsed,!!r.is_best_effort,r.steps||[],firedAt,Date.now()-firedAt.getTime());
+        appendTurn(q,r.answer_html||esc(r.answer_markdown||'(no answer)'),r.iteration_count,r.tokens_input,r.tokens_output,r.status,dsUsed,!!r.is_best_effort,r.steps||[],firedAt,Date.now()-firedAt.getTime(),r.suggested_questions||[]);
         if(typeof tuAddRun==='function') tuAddRun(r.tokens_input||0, r.tokens_output||0);
         qEl.value='';
         await loadSessionList();
@@ -849,6 +1042,112 @@
       progressRow.style.display='none';
       btn.disabled=false; btn.textContent='Ask';
     }
+  }
+
+  // ── Column expand ─────────────────────────────────────────────────────────────
+  function toggleColumns(id, event) {
+    event.preventDefault(); event.stopPropagation();
+    const panel=document.getElementById(`cols-${id}`); if(!panel) return;
+    const open=panel.style.display!=='none';
+    panel.style.display=open?'none':'flex';
+    const btn=event.target;
+    btn.textContent=open?'▸ cols':'▾ cols';
+    btn.style.color=open?'':'#1e40af';
+  }
+
+  // ── Fill question input from chip ─────────────────────────────────────────────
+  function fillQuestion(text) {
+    const el=document.getElementById('question'); if(!el) return;
+    el.value=text; el.focus();
+  }
+
+  // ── Persistent memory ─────────────────────────────────────────────────────────
+  async function openMemoryModal() {
+    document.getElementById('memory-status').textContent='';
+    try{
+      const body=await(await fetch('/memory')).json();
+      document.getElementById('memory-input').value=body.data?.content||'';
+    } catch{}
+    document.getElementById('memory-overlay').style.display='flex';
+  }
+  async function saveMemory() {
+    const content=document.getElementById('memory-input').value;
+    try{
+      const resp=await fetch('/memory',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({content})});
+      if(resp.ok){ document.getElementById('memory-status').textContent='Saved!'; setTimeout(()=>document.getElementById('memory-status').textContent='',2000); }
+    }catch(e){ document.getElementById('memory-status').textContent='Error: '+e.message; }
+  }
+
+  // ── NL data cleaning ──────────────────────────────────────────────────────────
+  let _cleanDatasetId='', _cleanCode='';
+
+  function openCleanModal(id, name, event) {
+    event.preventDefault(); event.stopPropagation();
+    _cleanDatasetId=id; _cleanCode='';
+    document.getElementById('clean-ds-name').textContent=name;
+    document.getElementById('clean-instruction').value='';
+    document.getElementById('clean-preview-area').style.display='none';
+    document.getElementById('clean-status').textContent='';
+    document.getElementById('clean-overlay').style.display='flex';
+  }
+  async function previewClean() {
+    const instruction=document.getElementById('clean-instruction').value.trim();
+    if(!instruction){ document.getElementById('clean-status').textContent='Enter an instruction first.'; return; }
+    const btn=document.getElementById('clean-preview-btn');
+    btn.disabled=true; btn.textContent='Generating…';
+    document.getElementById('clean-status').textContent='';
+    try{
+      const resp=await fetch(`/datasets/${_cleanDatasetId}/clean`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({instruction})});
+      const body=await resp.json();
+      if(!resp.ok){ document.getElementById('clean-status').textContent=body.detail?.message||'Error'; return; }
+      const d=body.data;
+      _cleanCode=d.code;
+      document.getElementById('clean-code-block').textContent=d.code;
+      document.getElementById('clean-before-count').textContent=`${d.row_count_before} rows × ${d.col_count_before} cols`;
+      document.getElementById('clean-after-count').textContent=`${d.row_count_after} rows × ${d.col_count_after} cols`;
+      document.getElementById('clean-preview-area').style.display='block';
+    }catch(e){ document.getElementById('clean-status').textContent='Error: '+e.message; }
+    finally{ btn.disabled=false; btn.textContent='Preview'; }
+  }
+  async function applyClean() {
+    if(!_cleanCode){ return; }
+    const btn=document.getElementById('clean-apply-btn');
+    btn.disabled=true; btn.textContent='Applying…';
+    try{
+      const resp=await fetch(`/datasets/${_cleanDatasetId}/clean/apply`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:_cleanCode})});
+      const body=await resp.json();
+      if(!resp.ok){ document.getElementById('clean-status').textContent=body.detail?.message||'Error'; return; }
+      const d=body.data;
+      // Update ds-row metadata in DOM
+      const row=document.querySelector(`.ds-row[data-id="${_cleanDatasetId}"]`);
+      if(row){ row.dataset.rowCount=d.row_count; row.dataset.colCount=d.col_count; }
+      const lbl=document.querySelector(`.ds-check[value="${_cleanDatasetId}"]`)?.parentElement?.querySelector('.row-cnt');
+      if(lbl) lbl.innerHTML=`(${d.row_count} rows &middot; ${d.col_count} cols)`;
+      // Refresh column chips
+      const colPanel=document.getElementById(`cols-${_cleanDatasetId}`);
+      if(colPanel) colPanel.innerHTML=(d.columns||[]).map(c=>`<span class="col-chip">${esc(c)}</span>`).join('');
+      document.getElementById('clean-status').textContent='Applied! Dataset updated.';
+      document.getElementById('clean-status').style.color='#16a34a';
+      document.getElementById('clean-apply-btn').style.display='none';
+      _updateStorageStat();
+    }catch(e){ document.getElementById('clean-status').textContent='Error: '+e.message; }
+    finally{ btn.disabled=false; btn.textContent='Apply changes'; }
+  }
+
+  // ── Export conversation as Markdown ───────────────────────────────────────────
+  function exportConversationMd() {
+    const turns=[...document.querySelectorAll('#thread .turn')];
+    if(!turns.length) return;
+    const lines=['# Conversation Export\n'];
+    turns.forEach((t,i)=>{
+      const q=t.querySelector('.turn-q')?.textContent?.replace(/^Q:\s*/,'').trim()||'';
+      const md=t.querySelector('.answer-body')?.innerText?.trim()||'';
+      lines.push(`## Q${i+1}: ${q}\n\n${md}\n`);
+    });
+    const blob=new Blob([lines.join('\n')],{type:'text/markdown'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download=`conversation-${new Date().toISOString().slice(0,10)}.md`;
+    a.click(); URL.revokeObjectURL(a.href);
   }
 
   document.addEventListener('DOMContentLoaded',()=>{

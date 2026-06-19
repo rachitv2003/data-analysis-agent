@@ -9,15 +9,21 @@ LangGraph `StateGraph` — ReAct (Reason + Act) loop.
 ```python
 class AgentState(TypedDict, total=False):
     run_id: str
-    dataset_id: str
+    dataset_ids: list[str]              # C14: one or more dataset UUIDs
+    dataset_context: str | None         # C12: combined context injected from all datasets
+    session_id: str | None
     question: str
-    action_history: list[dict]   # [{"action": str, "result": str, "is_error": bool}]
+    conversation_history: list[dict]    # C3: prior turns [{question, answer}]
+    action_history: list[dict]          # [{"action": str, "result": str, "is_error": bool}]
     iteration_count: int
-    llm_response: str            # raw last LLM output — router inspects for FINAL ANSWER
+    llm_response: str                   # raw last LLM output — router inspects for FINAL ANSWER
+    tokens_input: int
+    tokens_output: int
+    charts: list[str]                   # C4: Plotly JSON specs captured during this run
     answer: str | None
     error: str | None
-    status: str                  # completed | failed
-    selector_reasoning: str | None  # raw selector LLM output (C19); None if selection skipped
+    status: str                         # completed | failed
+    selector_reasoning: str | None      # C19: raw selector LLM output; None if selection skipped
 ```
 
 ## Nodes
@@ -32,14 +38,14 @@ class AgentState(TypedDict, total=False):
 | SQLite | fetch Dataset by dataset_id | fatal — set error, route to handle_error |
 
 ### `plan_action`
-**Reads from state:** `question`, `action_history`, `iteration_count`
-**Writes to state:** `llm_response`, `iteration_count` (+1)
+**Reads from state:** `question`, `action_history`, `iteration_count`, `conversation_history`, `dataset_context`
+**Writes to state:** `llm_response`, `iteration_count` (+1), `tokens_input`, `tokens_output`
 **External calls:**
 | System | Operation | On Failure |
 |--------|-----------|------------|
-| Gemini API | chat completion with `<node:plan>` tag injected | fatal on 5xx; recoverable on 4xx (append error, retry) |
+| LLM (Gemini / OpenRouter / stub) | chat completion with `<node:plan>` tag injected | fatal on 5xx; recoverable on 4xx (append error, retry) |
 
-**Behaviour:** Builds a prompt from the question + action_history, injects `<node:plan>` tag, calls Gemini. If `iteration_count >= max_iterations`, routes to `force_finalize` (not `handle_error`). When `iteration_count >= max_iterations - 2`, appends a wrap-up instruction to the prompt (no additional LLM call): "IMPORTANT: You have {remaining} iterations remaining. You MUST produce a FINAL ANSWER in this response or the next one. Summarize your best findings from the action history above, even if incomplete. Do not start a new line of investigation."
+**Behaviour:** Builds a prompt from the question + action_history + conversation_history + dataset_context + persistent memory, injects `<node:plan>` tag, calls the configured LLM. When `iteration_count >= max_iterations - 2`, appends a wrap-up instruction to the prompt (no additional LLM call): "IMPORTANT: You are running out of iterations. You MUST produce a FINAL ANSWER in this response or the next one. Summarise your best findings from the action history above, even if incomplete. Do not start a new line of investigation."
 
 ### `execute_action`
 **Reads from state:** `llm_response` (pandas expression)
@@ -76,13 +82,12 @@ setup → [error?] → handle_error → END
 setup → [ok]    → plan_action
 
 plan_action → [FINAL ANSWER]  → finalize       → END
-plan_action → [max_iter]      → force_finalize → END
 plan_action → [fatal error]   → handle_error   → END
 plan_action → [action]        → execute_action
 
-execute_action → [3 consec. errors] → force_finalize → END
-execute_action → [fatal error]      → handle_error   → END
-execute_action → [error / ok]       → plan_action     (error appended to history, self-correct)
+execute_action → [3 consec. errors OR max_iter] → force_finalize → END
+execute_action → [fatal error]                  → handle_error   → END
+execute_action → [error / ok]                   → plan_action     (error appended to history, self-correct)
 
 force_finalize → END
 ```
@@ -108,6 +113,6 @@ force_finalize → END
 
 ## Stub Provider
 
-When `GEMINI_API_KEY` is not set, the stub LLM branches on the prompt tag:
+When `DATA_ANALYST_GEMINI_API_KEY` is not set (and no other provider is configured), the stub LLM branches on the prompt tag:
 - `<node:plan>` — First call: returns `df.describe().to_string()` (a real pandas expression). Second call: returns `FINAL ANSWER: [stub] The dataset has {N} rows and {M} columns based on df.describe().`. Never returns identical output on two consecutive calls (iteration distinguishes them).
 - `<node:finalize>` — Returns a canned best-effort summary: `Based on the work done, here is a partial summary: [stub] The analysis reached the iteration limit. The dataset was loaded and partial results were computed.`

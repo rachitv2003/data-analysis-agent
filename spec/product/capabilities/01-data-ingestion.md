@@ -15,8 +15,10 @@ Accepts tabular data files from the browser, validates them, detects duplicates,
 | `.tsv`    | `pd.read_csv` with `sep="\t"` |
 | `.txt`    | `pd.read_csv` with `sep=None, engine="python"` (auto-detect delimiter) |
 | `.json`   | Custom: tries array-of-objects → first list value in a dict → column-keyed dict |
+| `.xlsx`   | `pd.read_excel(sheet_name=0)` |
+| `.xls`    | `pd.read_excel(sheet_name=0)` |
 
-`detect_format` in `src/data_analyst/utils/file_parser.py` maps the file extension to a format string and rejects anything not in `{.csv, .tsv, .txt, .json}`.
+`detect_format` in `src/data_analyst/utils/file_parser.py` maps the file extension to a format string and rejects anything not in `{.csv, .tsv, .txt, .json, .xlsx, .xls}`. Both Excel extensions map to the format token `"excel"`; the file is normalised to CSV on disk after parsing.
 
 ---
 
