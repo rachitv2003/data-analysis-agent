@@ -10,6 +10,7 @@ Before invoking the ReAct agent, a lightweight pre-flight LLM call determines wh
 ## When It Triggers
 
 The check runs before every `/ask` call **except** when:
+
 - No datasets are uploaded (will error for other reasons anyway).
 - `dataset_ids` or `dataset_id` are explicitly provided in the request (dataset ambiguity already resolved by caller).
 
@@ -19,7 +20,7 @@ When the check runs, the LLM is instructed to return "proceed" unless there is *
 
 ## Flow
 
-```
+```text
 POST /ask (no explicit dataset_ids)
   ↓
 C26 clarification check  ← new (one LLM call, <node:clarify> tag)
@@ -65,6 +66,8 @@ or
 
 On parse failure or LLM error → fall through to proceed (fail-open). Log at WARN level.
 
+**Timeout:** `check_clarification()` enforces a 60-second wall-clock timeout on the LLM call. On timeout → fail-open (same handling as parse failure): log at WARN level, return proceed. The 60-second limit ensures C26 never holds up a query longer than the ReAct loop itself.
+
 **Stub provider behaviour:** always returns `{"proceed": true}`. The clarification path is not exercised in stub/integration tests; unit tests mock the LLM call directly.
 
 ---
@@ -100,6 +103,7 @@ Sessions may include turns where `status="clarification"`. The `answer` field ho
 ## Token Tracking
 
 Clarification check tokens are recorded on the `QueryRunRow(status="clarification")`:
+
 - `tokens_input` — prompt tokens sent to LLM for the check.
 - `tokens_output` — completion tokens returned.
 
@@ -110,6 +114,7 @@ These are included in daily token stats (`GET /stats/daily`).
 ## `QueryRunRow` status extension
 
 `status` gains a new value: `"clarification"`. Existing values (`pending`, `running`, `completed`, `failed`) are unchanged. A clarification row has:
+
 - `question` — the user's original question.
 - `answer` — the clarification question the agent asked.
 - `status = "clarification"`.
@@ -127,7 +132,7 @@ The conversation thread renders a clarification turn as a distinct turn type: li
 ## Implementation
 
 | File | Role |
-|------|------|
+| ---- | ---- |
 | `src/data_analyst/graph/clarify.py` | `check_clarification(question, datasets, history) -> ClarifyResult` — LLM call + JSON parse |
 | `src/data_analyst/api/ask.py` | Call `check_clarification` before C19; return clarification response shape if needed; create thin QueryRunRow |
 | `src/data_analyst/db/models.py` | `QueryRunRow.status` accepts `"clarification"` |
