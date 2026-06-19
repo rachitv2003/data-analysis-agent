@@ -47,7 +47,7 @@ SQLite (data_analyst.db)
 ## Layers
 
 | Layer | Responsibility |
-|-------|----------------|
+| ----- | -------------- |
 | FastAPI routes | HTTP handling, multipart file upload, JSON request/response, error envelopes |
 | Pre-flight selector | One-shot LLM call that picks which datasets to load; runs before the graph |
 | LangGraph StateGraph | ReAct loop orchestration (setup → plan → execute → loop → finalize) |
@@ -72,7 +72,7 @@ SQLite (data_analyst.db)
 `execute_action` evaluates expressions in a Python `eval`/`exec` namespace:
 
 | Name | Value |
-|------|-------|
+| ---- | ----- |
 | `df` | First loaded DataFrame (alias) |
 | `df1`, `df2`, … | Per-dataset positional aliases |
 | `<filename_stem>` | Filename-derived variable name (e.g. `sales_data`) |
@@ -86,11 +86,12 @@ SQLite (data_analyst.db)
 | `stats` | `scipy.stats` (if installed) |
 | `sklearn` | `sklearn` top-level (if installed; import submodules as needed) |
 | `sm` | `statsmodels.api` (if installed) |
+| `save_dataset(df, name, desc)` | C25: materialise a DataFrame as a registered derived dataset; returns confirmation string |
 
 ## External Dependencies
 
 | Dependency | Purpose | Failure Mode |
-|------------|---------|--------------|
+| ---------- | ------- | ------------ |
 | Google Gemini API | LLM reasoning | Rate-limited: retries up to 3× with backoff; fatal 5xx → `handle_error` |
 | OpenRouter API | Alternative LLM provider | Same retry logic; disabled when key absent |
 | Local filesystem | CSV file storage (`uploads/`) | Upload fails with 500; existing datasets unaffected |

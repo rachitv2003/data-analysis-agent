@@ -10,3 +10,4 @@ All capabilities are implemented unless noted otherwise.
 | [04-response-rendering.md](04-response-rendering.md) | C6 rich text / Markdown → HTML, C4 Plotly charts embedded inline, C23 agent steps inspector | implemented |
 | [05-observability.md](05-observability.md) | C7 per-run token tracking, C18 token usage counter widget + daily stats, C22 query timer + live progress bar | implemented |
 | [06-llm-configuration.md](06-llm-configuration.md) | C21 multi-provider LLM (Gemini / OpenRouter / stub), C12 dataset context notes injected into prompts | implemented |
+| [08-derived-datasets.md](08-derived-datasets.md) | C25 autonomous derived dataset persistence (`save_dataset`), cross-query state continuity, lineage tracking, staleness detection | planned |
