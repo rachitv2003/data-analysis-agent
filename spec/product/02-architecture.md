@@ -2,7 +2,7 @@
 
 ## System Overview
 
-```
+```text
 Browser
   │
   ▼
@@ -22,12 +22,16 @@ FastAPI (port 8001)
   └── GET  /stats/daily                   → aggregated token usage for today (UTC)
   │
   ▼
-Pre-flight: dataset selector
+Pre-flight: clarification check (C26)
+  └── check_clarification() — one-shot LLM call; returns clarification question or proceeds; skipped when explicit IDs supplied
+  │
+  ▼
+Pre-flight: dataset selector (C19)
   └── select_datasets() — one-shot LLM call to pick relevant datasets; skipped when explicit IDs supplied
   │
   ▼
 LangGraph ReAct Agent (StateGraph)
-  ├── setup          → loads selected DataFrames from disk into module-level cache keyed by run_id
+  ├── setup          → checks session DataFrame cache (C27); loads from Parquet/CSV on miss; caches by session_id
   ├── plan_action    → builds prompt (schema + context + history), calls LLM, stores llm_response
   ├── execute_action → evals Python expression; captures Plotly figures as JSON; writes iteration_count to DB
   ├── finalize       → strips FINAL ANSWER prefix, appends chart divs, persists to DB, clears cache
@@ -58,10 +62,10 @@ SQLite (data_analyst.db)
 
 ## Data Flow
 
-1. **Upload:** Browser submits `multipart/form-data` → FastAPI computes SHA-256, checks duplicates, calls `parse_file`, saves CSV to `uploads/{id}.csv`, creates `DatasetRow`.
-2. **Ask:** Browser posts `{question, session_id?}` → `ask.py` resolves datasets (explicit IDs or C19 auto-select) → creates `QueryRunRow(status="running")` → calls `run_agent`.
+1. **Upload:** Browser submits `multipart/form-data` → FastAPI computes SHA-256, checks duplicates, calls `parse_file`, saves CSV to `uploads/{id}.csv`, writes Parquet to `uploads/{id}.parquet` (C27), creates `DatasetRow`.
+2. **Ask:** Browser posts `{question, session_id?}` → `ask.py` runs C26 clarification check (returns early if ambiguous) → resolves datasets (explicit IDs or C19 auto-select) → creates `QueryRunRow(status="running")` → calls `run_agent`.
 3. **Dataset selection (C19):** If no `dataset_ids` supplied, `select_datasets()` sends one LLM call with all dataset schemas; returns subset of IDs to load. Falls back to all datasets on failure.
-4. **Agent setup:** `setup` node reads each CSV from disk via `pd.read_csv`, stores DataFrames in `_dataframes[run_id]`, combines dataset context strings.
+4. **Agent setup (C27):** `setup` node checks `_session_cache[session_id]` for each dataset; on hit, uses cached DataFrame; on miss, reads from Parquet (`pd.read_parquet`) with CSV fallback, stores in session cache. Single-turn queries (no session_id) use run-scoped `_dataframes[run_id]` as before.
 5. **ReAct loop:** `plan_action` builds prompt → LLM → `execute_action` evals code → appends `{action, result, is_error}` to `action_history` → back to `plan_action`. Iteration count is written to DB on each execute so `GET /runs/current` reflects live progress.
 6. **Termination:** LLM emits `FINAL ANSWER: ...` → `finalize` strips prefix, appends chart divs, persists answer. Or: max iterations / 3 consecutive errors → `force_finalize` makes one synthesis LLM call and persists.
 7. **Response:** `ask.py` reads the completed `QueryRunRow` and returns `{run_id, session_id, dataset_ids, datasets_used, selector_reasoning, answer_markdown, answer_html, iteration_count, tokens_input, tokens_output, status, is_best_effort, steps}`.

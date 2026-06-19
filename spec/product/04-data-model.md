@@ -27,6 +27,7 @@ Metadata about an uploaded file.
 | `derived_from_run_id` | TEXT | yes | NULL | `query_runs.id` of the run that produced this dataset; NULL for uploaded datasets |
 | `derived_from_dataset_ids` | TEXT | yes | NULL | JSON array of parent `dataset_id`s used to produce this dataset; NULL for uploaded |
 | `derivation_code` | TEXT | yes | NULL | The pandas expression that produced this dataset; NULL for uploaded |
+| `parquet_path` | TEXT | yes | NULL | Absolute path to the pre-converted Parquet file (`uploads/{id}.parquet`); NULL if conversion failed or not yet run (C27) |
 | `created_at` | TIMESTAMP(tz) | no | `now(UTC)` | UTC creation timestamp |
 
 ### `query_runs`
@@ -40,7 +41,7 @@ A single question/answer pair produced by one agent invocation.
 | `session_id` | TEXT | yes | NULL | `conversation_sessions.id`; null for single-turn runs |
 | `question` | TEXT | no | — | User's natural language question |
 | `answer` | TEXT | yes | NULL | Agent's final answer in Markdown; null while running |
-| `status` | TEXT | no | `"pending"` | `pending`, `running`, `completed`, or `failed` |
+| `status` | TEXT | no | `"pending"` | `pending`, `running`, `completed`, `failed`, or `clarification` |
 | `error_message` | TEXT | yes | NULL | Set on failure or force-finalize (`"max_iterations"`, `"consecutive_errors"`) |
 | `action_history` | TEXT | yes | NULL | JSON array of `{action, result, is_error}` objects |
 | `iteration_count` | INTEGER | no | `0` | ReAct iterations completed; written mid-run for progress polling |

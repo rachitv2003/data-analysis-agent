@@ -70,7 +70,7 @@ REST. All routes return `{"data": ..., "error": null}` on success or raise HTTP 
 
 ### `POST /ask`
 
-**Purpose:** Ask a natural language question about a dataset. Runs the ReAct agent synchronously.
+**Purpose:** Ask a natural language question about a dataset. Runs a pre-flight clarification check (C26), then the ReAct agent.
 
 **Request:**
 ```json
@@ -106,6 +106,24 @@ REST. All routes return `{"data": ..., "error": null}` on success or raise HTTP 
   "error": null
 }
 ```
+
+**Clarification response (C26):** When the pre-flight check detects genuine ambiguity, `/ask` returns HTTP 200 with a distinct shape instead of running the agent:
+
+```json
+{
+  "data": {
+    "clarification_needed": true,
+    "clarification_question": "Which time period are you referring to — 2016, 2017, or 2018?",
+    "run_id": "uuid",
+    "session_id": "uuid",
+    "tokens_input": 45,
+    "tokens_output": 18
+  },
+  "error": null
+}
+```
+
+The `run_id` references a thin `QueryRunRow(status="clarification")`. The user answers in the thread; the frontend re-submits with the same `session_id` and the original question. The pre-flight check sees the clarification exchange in conversation history and proceeds.
 
 **Error cases:**
 | Status | Condition |

@@ -29,13 +29,18 @@ class AgentState(TypedDict, total=False):
 ## Nodes
 
 ### `setup`
-**Reads from state:** `run_id`, `dataset_ids`
-**Writes to state:** nothing (side effect: loads DataFrame into module-level cache keyed by `run_id`)
+**Reads from state:** `run_id`, `session_id`, `dataset_ids`
+**Writes to state:** nothing (side effect: populates DataFrame cache)
 **External calls:**
+
 | System | Operation | On Failure |
-|--------|-----------|------------|
-| filesystem | `pandas.read_csv(file_path)` | fatal — set error, route to handle_error |
+| ------ | --------- | ---------- |
+| memory | `_session_cache[session_id][dataset_id]` lookup (C27) | cache miss — fall through to disk |
+| filesystem | `pd.read_parquet(parquet_path)` (C27, preferred) | fall back to CSV |
+| filesystem | `pd.read_csv(file_path)` (fallback when no Parquet) | fatal — set error, route to handle_error |
 | SQLite | fetch Dataset by dataset_id | fatal — set error, route to handle_error |
+
+**Behaviour:** For each `dataset_id`, check `_session_cache[session_id]` first. On hit, use the cached DataFrame and update the LRU order. On miss, load from `parquet_path` if set, else from `file_path` (CSV); store result in session cache. Single-turn queries (no `session_id`) use the existing run-scoped `_dataframes[run_id]` dict instead of the session cache.
 
 ### `plan_action`
 **Reads from state:** `question`, `action_history`, `iteration_count`, `conversation_history`, `dataset_context`
