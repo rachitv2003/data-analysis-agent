@@ -14,7 +14,11 @@ def _stub_env(monkeypatch, tmp_path):
     db_path = tmp_path / "test.db"
     monkeypatch.setenv("DATA_ANALYST_DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("DATA_ANALYST_GEMINI_API_KEY", "")  # force stub
+    monkeypatch.setenv("DATA_ANALYST_LLM_PROVIDER", "stub")  # force stub — ignore real API keys
     monkeypatch.setenv("DATA_ANALYST_UPLOAD_DIR", str(tmp_path / "uploads"))
+    # Reset cached settings so the above env changes take effect
+    import data_analyst.config.settings as _settings_module
+    monkeypatch.setattr(_settings_module, "_settings", None)
 
 
 @pytest.fixture(autouse=True)
@@ -306,7 +310,8 @@ def test_upload_json_invalid_shape(client):
 
 
 def test_upload_unsupported_extension(client):
-    resp = client.post("/upload", files={"file": ("data.xlsx", io.BytesIO(b"pk"), "application/octet-stream")})
+    # xlsx/xls are now supported; use a truly unsupported type
+    resp = client.post("/upload", files={"file": ("data.parquet", io.BytesIO(b"PAR1"), "application/octet-stream")})
     assert resp.status_code == 400
     assert resp.json()["detail"]["code"] == "unsupported_format"
 
@@ -471,8 +476,9 @@ def test_multi_dataset_session_mismatch(client):
 
 
 def test_ask_no_dataset_id_returns_error(client):
+    # With no datasets uploaded, auto-select path raises 400 "no_datasets"
     resp = client.post("/ask", json={"question": "hello?"})
-    assert resp.status_code == 422  # pydantic validation error
+    assert resp.status_code == 400
 
 
 # ── C15: Dataset deletion ────────────────────────────────────────────────────
@@ -610,3 +616,224 @@ def test_daily_stats_after_query(client):
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert data["query_count"] >= 1
+
+
+# ── C20: force_finalize paths ─────────────────────────────────────────────────
+
+def test_force_finalize_max_iterations(client, monkeypatch):
+    """Agent reaching max_iterations should complete with is_best_effort=True."""
+    import data_analyst.graph.nodes as nodes_module
+    from data_analyst.llm.providers.base import LLMResponse
+    from data_analyst.llm.client import LLMClient
+
+    class AlwaysCodeProvider:
+        def complete(self, prompt: str) -> LLMResponse:
+            if "<node:finalize>" in prompt:
+                return LLMResponse(text="**Best effort summary.**", tokens_input=10, tokens_output=20)
+            return LLMResponse(text="df.shape", tokens_input=10, tokens_output=20)
+
+    monkeypatch.setattr(nodes_module, "_llm_client", LLMClient(AlwaysCodeProvider()))
+    monkeypatch.setenv("DATA_ANALYST_MAX_ITERATIONS", "1")
+
+    dataset_id = _upload(client)
+    resp = client.post("/ask", json={"dataset_id": dataset_id, "question": "Describe."})
+    assert resp.status_code == 200, resp.text
+    result = resp.json()["data"]
+    assert result["status"] == "completed"
+    assert result["is_best_effort"] is True
+
+
+def test_force_finalize_consecutive_errors(client, monkeypatch):
+    """3 consecutive execute errors should trigger force_finalize with is_best_effort=True."""
+    import data_analyst.graph.nodes as nodes_module
+    from data_analyst.llm.providers.base import LLMResponse
+    from data_analyst.llm.client import LLMClient
+
+    call_count = [0]
+
+    class ErrorThenFinalProvider:
+        def complete(self, prompt: str) -> LLMResponse:
+            if "<node:finalize>" in prompt:
+                return LLMResponse(text="**Best effort summary.**", tokens_input=10, tokens_output=20)
+            call_count[0] += 1
+            if call_count[0] <= 3:
+                return LLMResponse(text="this_undefined_var_xyz_does_not_exist_99", tokens_input=10, tokens_output=20)
+            return LLMResponse(text="FINAL ANSWER: done", tokens_input=10, tokens_output=20)
+
+    monkeypatch.setattr(nodes_module, "_llm_client", LLMClient(ErrorThenFinalProvider()))
+
+    dataset_id = _upload(client)
+    resp = client.post("/ask", json={"dataset_id": dataset_id, "question": "Test errors."})
+    assert resp.status_code == 200, resp.text
+    result = resp.json()["data"]
+    assert result["status"] == "completed"
+    assert result["is_best_effort"] is True
+
+
+# ── Session management endpoints ──────────────────────────────────────────────
+
+def test_session_rename(client):
+    dataset_id = _upload(client)
+    r = client.post("/ask", json={"dataset_id": dataset_id, "question": "rows?"})
+    session_id = r.json()["data"]["session_id"]
+
+    resp = client.patch(f"/sessions/{session_id}/name", json={"name": "My Session"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["name"] == "My Session"
+
+
+def test_session_rename_not_found(client):
+    resp = client.patch("/sessions/nonexistent/name", json={"name": "x"})
+    assert resp.status_code == 404
+
+
+def test_delete_single_session(client):
+    dataset_id = _upload(client)
+    r = client.post("/ask", json={"dataset_id": dataset_id, "question": "rows?"})
+    session_id = r.json()["data"]["session_id"]
+
+    resp = client.delete(f"/sessions/{session_id}")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["deleted"] == session_id
+
+    assert client.get(f"/sessions/{session_id}").status_code == 404
+
+
+def test_delete_single_session_not_found(client):
+    resp = client.delete("/sessions/nonexistent")
+    assert resp.status_code == 404
+
+
+def test_delete_all_sessions_endpoint(client):
+    dataset_id = _upload(client)
+    client.post("/ask", json={"dataset_id": dataset_id, "question": "q1"})
+    client.post("/ask", json={"dataset_id": dataset_id, "question": "q2"})
+
+    assert len(client.get("/sessions").json()["data"]) == 2
+
+    resp = client.delete("/sessions")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["deleted"] == "all"
+    assert client.get("/sessions").json()["data"] == []
+
+
+def test_get_runs_current_idle(client):
+    resp = client.get("/runs/current")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["status"] == "idle"
+    assert data["run_id"] is None
+
+
+def test_get_runs_current_after_query(client):
+    dataset_id = _upload(client)
+    client.post("/ask", json={"dataset_id": dataset_id, "question": "rows?"})
+    resp = client.get("/runs/current")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["run_id"] is not None
+    assert data["status"] == "completed"
+
+
+# ── Memory endpoints ──────────────────────────────────────────────────────────
+
+def test_get_memory_empty(client):
+    resp = client.get("/memory")
+    assert resp.status_code == 200
+    assert resp.json()["data"]["content"] == ""
+
+
+def test_update_and_get_memory(client):
+    resp = client.patch("/memory", json={"content": "Always respond in metric units."})
+    assert resp.status_code == 200
+    assert resp.json()["data"]["content"] == "Always respond in metric units."
+
+    resp2 = client.get("/memory")
+    assert resp2.status_code == 200
+    assert resp2.json()["data"]["content"] == "Always respond in metric units."
+
+
+def test_update_memory_twice(client):
+    client.patch("/memory", json={"content": "first"})
+    client.patch("/memory", json={"content": "second"})
+    resp = client.get("/memory")
+    assert resp.json()["data"]["content"] == "second"
+
+
+# ── Data cleaning endpoints ───────────────────────────────────────────────────
+
+def test_clean_preview(client, monkeypatch):
+    """preview_clean generates code via LLM and returns before/after row counts."""
+    import data_analyst.graph.nodes as nodes_module
+    from data_analyst.llm.providers.base import LLMResponse
+    from data_analyst.llm.client import LLMClient
+
+    class CleanProvider:
+        def complete(self, prompt: str) -> LLMResponse:
+            # Return valid pandas filter using variable name 'test' (for test.csv)
+            return LLMResponse(text="test[test['value'] > 10]", tokens_input=10, tokens_output=20)
+
+    monkeypatch.setattr(nodes_module, "_llm_client", LLMClient(CleanProvider()))
+
+    dataset_id = _upload(client)
+    resp = client.post(
+        f"/datasets/{dataset_id}/clean",
+        json={"instruction": "remove rows where value <= 10"},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert "code" in data
+    assert data["row_count_before"] == 3
+    assert data["row_count_after"] == 2  # bob (20) and carol (30) pass
+    assert "preview_before" in data
+    assert "preview_after" in data
+
+
+def test_clean_preview_unknown_dataset(client):
+    resp = client.post("/datasets/nonexistent/clean", json={"instruction": "drop nulls"})
+    assert resp.status_code == 404
+
+
+def test_clean_apply(client):
+    """apply_clean executes provided code and updates DB metadata."""
+    dataset_id = _upload(client)
+    # Filter to value > 10: bob (20) and carol (30) survive
+    code = "test[test['value'] > 10]"
+    resp = client.post(f"/datasets/{dataset_id}/clean/apply", json={"code": code})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["row_count"] == 2
+    assert data["col_count"] == 3
+
+
+def test_clean_apply_unknown_dataset(client):
+    resp = client.post("/datasets/nonexistent/clean/apply", json={"code": "df"})
+    assert resp.status_code == 404
+
+
+# ── C19: Auto dataset selection ───────────────────────────────────────────────
+
+def test_c19_auto_selector_single_dataset(client):
+    """With one dataset and no explicit IDs, selector is skipped and that dataset is used."""
+    dataset_id = _upload(client)
+    resp = client.post("/ask", json={"question": "How many rows?"})
+    assert resp.status_code == 200, resp.text
+    result = resp.json()["data"]
+    assert result["status"] == "completed"
+    assert dataset_id in result["dataset_ids"]
+    # selector skipped for single dataset — no reasoning stored
+    assert result["selector_reasoning"] is None
+
+
+def test_c19_auto_selector_multiple_datasets(client):
+    """With multiple datasets and no explicit IDs, stub selector picks the first one."""
+    id1 = _upload(client)
+    id2 = _upload_extra(client)
+
+    resp = client.post("/ask", json={"question": "How many rows?"})
+    assert resp.status_code == 200, resp.text
+    result = resp.json()["data"]
+    assert result["status"] == "completed"
+    # Stub selector picks first dataset; selector_reasoning should be present
+    assert result["selector_reasoning"] is not None
+    assert len(result["dataset_ids"]) >= 1

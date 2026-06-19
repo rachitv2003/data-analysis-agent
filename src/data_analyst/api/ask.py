@@ -89,7 +89,14 @@ def ask_question(
 
     is_best_effort = run.error_message in ("max_iterations", "consecutive_errors")
     steps = _json.loads(run.action_history) if run.action_history else []
-    suggested_questions = generate_suggestions(body.question, answer_md)
+    suggested_questions, sug_ti, sug_to = generate_suggestions(body.question, answer_md)
+
+    # Add suggestion-call tokens to the run totals
+    if sug_ti or sug_to:
+        run.tokens_input = (run.tokens_input or 0) + sug_ti
+        run.tokens_output = (run.tokens_output or 0) + sug_to
+        session.add(run)
+        session.commit()
 
     return ok({
         "run_id": run.id,

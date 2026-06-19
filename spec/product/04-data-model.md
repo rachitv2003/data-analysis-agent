@@ -21,7 +21,7 @@ Metadata about an uploaded file.
 | `col_count` | INTEGER | no | — | Number of columns |
 | `columns_json` | TEXT | no | — | JSON array of column name strings |
 | `content_hash` | TEXT | no | `""` | SHA-256 hex digest of raw uploaded bytes (empty string for rows created before C10) |
-| `format` | TEXT | no | `"csv"` | Source format: `csv`, `tsv`, `txt`, or `json` |
+| `format` | TEXT | no | `"csv"` | Source format: `csv`, `tsv`, `txt`, `json`, or `excel` |
 | `context` | TEXT | yes | NULL | User-provided notes injected into prompts (max 4 000 chars) |
 | `created_at` | TIMESTAMP(tz) | no | `now(UTC)` | UTC creation timestamp |
 

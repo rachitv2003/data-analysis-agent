@@ -37,6 +37,22 @@ _CHART_INSTRUCTION = (
     "- Do NOT use matplotlib. Keep titles concise (≤ 60 chars). Always set axis labels.\n"
 )
 
+_LIBRARIES_INSTRUCTION = (
+    "Pre-bound variables available in every code block (no imports needed):\n"
+    "- `pd` — pandas\n"
+    "- `np` — numpy\n"
+    "- `px` — plotly.express\n"
+    "- `go` — plotly.graph_objects\n"
+    "- `plt` — matplotlib.pyplot\n"
+    "- `sns` — seaborn\n"
+    "- `scipy` — scipy (also `stats` for scipy.stats)\n"
+    "- `sklearn` — scikit-learn (import specific submodules as needed, e.g. "
+    "`from sklearn.cluster import KMeans`)\n"
+    "- `sm` — statsmodels.api\n"
+    "You may still use `import` for submodules (e.g. `from sklearn.preprocessing import StandardScaler`), "
+    "but the top-level aliases above are already available.\n"
+)
+
 _MAX_ROWS = 100
 _MAX_COLS = 20
 
@@ -145,11 +161,19 @@ def _build_prompt(state: AgentState) -> str:
         f"{prior_context}"
         f"Current question: {state['question']}\n\n"
         f"Action history (this turn):\n{history_text}\n\n"
+        f"CRITICAL — output format (strictly one of these two, never mixed):\n"
+        f"  A) If you have enough information to answer: your ENTIRE response must be exactly "
+        f"'FINAL ANSWER: <your answer here>' — nothing before it, no code, no preamble.\n"
+        f"  B) If you need to compute something: your ENTIRE response must be Python code only "
+        f"— no 'FINAL ANSWER:', no explanatory prose, no markdown fences.\n"
+        f"  Mixing code and 'FINAL ANSWER:' in the same response will cause a syntax error. "
+        f"Never do it.\n\n"
         f"Instructions:\n"
         f"- Once you have enough information, respond with: FINAL ANSWER: <your answer>\n"
         f"- Your FINAL ANSWER must always contain substantive content — never leave it blank.\n"
         f"- {_MARKDOWN_INSTRUCTION}"
         f"{_CHART_INSTRUCTION}"
+        f"{_LIBRARIES_INSTRUCTION}"
         f"- If you still need data or need to produce a chart, respond with a Python code block "
         f"(one or more lines). The last line must be an expression whose value is the result "
         f"(a DataFrame, Series, scalar, or a Plotly `fig` object). Do NOT use print(). "
@@ -269,6 +293,11 @@ def _result_to_str(result) -> str:
 def _make_eval_ns(df_map: dict) -> dict:
     ns: dict = {**df_map, "pd": pd}
     try:
+        import numpy as np
+        ns["np"] = np
+    except ImportError:
+        pass
+    try:
         import plotly.express as px
         import plotly.graph_objects as go
         ns["px"] = px
@@ -280,6 +309,28 @@ def _make_eval_ns(df_map: dict) -> dict:
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         ns["plt"] = plt
+    except ImportError:
+        pass
+    try:
+        import seaborn as sns
+        ns["sns"] = sns
+    except ImportError:
+        pass
+    try:
+        import scipy
+        ns["scipy"] = scipy
+        import scipy.stats as stats
+        ns["stats"] = stats
+    except ImportError:
+        pass
+    try:
+        import sklearn
+        ns["sklearn"] = sklearn
+    except ImportError:
+        pass
+    try:
+        import statsmodels.api as sm
+        ns["sm"] = sm
     except ImportError:
         pass
     return ns
@@ -348,6 +399,11 @@ def execute_action(state: AgentState) -> AgentState:
     # Strip markdown code fences the LLM sometimes wraps code in
     expression = re.sub(r"^```[a-zA-Z]*\n?", "", expression)
     expression = re.sub(r"\n?```$", "", expression).strip()
+
+    # Safety net: strip any trailing "FINAL ANSWER: ..." the LLM mixed into the code block
+    mixed_match = re.search(r"\n\s*FINAL ANSWER\s*:", expression, re.IGNORECASE)
+    if mixed_match:
+        expression = expression[:mixed_match.start()].strip()
 
     eval_ns = _make_eval_ns(df_map)
 
@@ -438,11 +494,12 @@ def finalize(state: AgentState) -> AgentState:
     run_id = state["run_id"]
     raw = state.get("llm_response", "")
 
-    answer_md = raw
-    for prefix in ("FINAL ANSWER:", "final answer:"):
-        if answer_md.strip().lower().startswith(prefix.lower()):
-            answer_md = answer_md.strip()[len(prefix):].strip()
-            break
+    # Find FINAL ANSWER: anywhere in the response — LLM sometimes embeds it after code
+    idx = raw.upper().find("FINAL ANSWER:")
+    if idx != -1:
+        answer_md = raw[idx + len("FINAL ANSWER:"):].strip()
+    else:
+        answer_md = raw.strip()
 
     answer_md = _append_charts(answer_md, state)
     _dataframes.pop(run_id, None)
@@ -512,8 +569,11 @@ def force_finalize(state: AgentState) -> AgentState:
     return {**updated, "answer": answer_md, "status": "completed"}
 
 
-def generate_suggestions(question: str, answer: str) -> list[str]:
-    """Generate 3 follow-up question suggestions after an answer."""
+def generate_suggestions(question: str, answer: str) -> tuple[list[str], int, int]:
+    """Generate 3 follow-up question suggestions after an answer.
+
+    Returns (suggestions, tokens_input, tokens_output).
+    """
     prompt = (
         "You are a helpful data analysis assistant. Based on the question and answer below, "
         "generate exactly 3 short follow-up questions the user might want to ask next. "
@@ -530,10 +590,10 @@ def generate_suggestions(question: str, answer: str) -> list[str]:
         text = re.sub(r"\n?```$", "", text).strip()
         parsed = json.loads(text)
         if isinstance(parsed, list):
-            return [str(q).strip() for q in parsed[:3] if q]
+            return [str(q).strip() for q in parsed[:3] if q], resp.tokens_input, resp.tokens_output
     except Exception:
         pass
-    return []
+    return [], 0, 0
 
 
 def handle_error(state: AgentState) -> AgentState:

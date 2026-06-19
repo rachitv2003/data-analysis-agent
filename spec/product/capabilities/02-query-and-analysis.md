@@ -109,9 +109,15 @@ execute_action → [ok / error]       → plan_action
 | `df1`, `df2`, … | Per-dataset aliases |
 | `<filename_stem>` | Filename-derived variable (e.g. `sales_data`) |
 | `pd` | `pandas` module |
+| `np` | `numpy` (if available) |
 | `px` | `plotly.express` (if available) |
 | `go` | `plotly.graph_objects` (if available) |
 | `plt` | `matplotlib.pyplot` (if available) |
+| `sns` | `seaborn` (if available) |
+| `scipy` | `scipy` module (if available) |
+| `stats` | `scipy.stats` (if available) |
+| `sklearn` | `sklearn` top-level (if available; import submodules as needed) |
+| `sm` | `statsmodels.api` (if available) |
 
 ---
 

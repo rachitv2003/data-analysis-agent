@@ -77,9 +77,15 @@ SQLite (data_analyst.db)
 | `df1`, `df2`, … | Per-dataset positional aliases |
 | `<filename_stem>` | Filename-derived variable name (e.g. `sales_data`) |
 | `pd` | `pandas` module |
+| `np` | `numpy` (if installed) |
 | `px` | `plotly.express` (if installed) |
 | `go` | `plotly.graph_objects` (if installed) |
 | `plt` | `matplotlib.pyplot` (if installed) |
+| `sns` | `seaborn` (if installed) |
+| `scipy` | `scipy` module (if installed) |
+| `stats` | `scipy.stats` (if installed) |
+| `sklearn` | `sklearn` top-level (if installed; import submodules as needed) |
+| `sm` | `statsmodels.api` (if installed) |
 
 ## External Dependencies
 

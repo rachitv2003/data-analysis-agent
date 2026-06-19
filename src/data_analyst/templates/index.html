@@ -2,252 +2,298 @@
 {% block content %}
 
 <!-- Memory modal -->
-<div id="memory-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;align-items:center;justify-content:center;">
-  <div style="background:#fff;border-radius:10px;padding:28px 32px;max-width:520px;width:92%;box-shadow:0 8px 32px rgba(0,0,0,.2);">
-    <h3 style="margin:0 0 6px;font-size:16px;color:#1e3a5f;">Persistent Memory</h3>
-    <p style="font-size:13px;color:#6b7280;margin:0 0 12px;line-height:1.5;">Facts saved here are injected into every query. E.g. "Fiscal year starts in April", "Revenue is always in USD".</p>
-    <textarea id="memory-input" style="height:110px;font-size:13px;margin-bottom:12px;" placeholder="No memory saved yet. Add facts line by line…"></textarea>
-    <div style="display:flex;gap:10px;">
-      <button onclick="saveMemory()" style="background:#1e40af;">Save</button>
-      <button onclick="document.getElementById('memory-overlay').style.display='none'" style="background:#6b7280;">Close</button>
+<div id="memory-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="memory-title">
+  <div class="modal modal--md">
+    <button type="button" class="modal__close" onclick="closeModal('memory-modal')" aria-label="Close">&#10005;</button>
+    <h3 class="modal__title" id="memory-title">Persistent Memory</h3>
+    <p class="modal__desc">Facts saved here are injected into every query. E.g. "Fiscal year starts in April", "Revenue is always in USD".</p>
+    <label class="field-label" for="memory-input">Memory content</label>
+    <textarea id="memory-input" style="height:110px;font-size:13px;" placeholder="No memory saved yet. Add facts line by line…"></textarea>
+    <div class="modal__actions">
+      <button type="button" class="btn btn-primary" onclick="saveMemory()">Save</button>
+      <button type="button" class="btn btn-ghost" onclick="closeModal('memory-modal')">Close</button>
     </div>
-    <div id="memory-status" style="font-size:12px;color:#16a34a;margin-top:8px;"></div>
+    <div id="memory-status" class="msg-success" style="margin-top:8px;min-height:18px;"></div>
   </div>
 </div>
 
 <!-- Data cleaning modal -->
-<div id="clean-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;align-items:center;justify-content:center;">
-  <div style="background:#fff;border-radius:10px;padding:28px 32px;max-width:620px;width:92%;box-shadow:0 8px 32px rgba(0,0,0,.2);max-height:90vh;overflow-y:auto;">
-    <h3 style="margin:0 0 4px;font-size:16px;color:#1e3a5f;">Clean Dataset: <span id="clean-ds-name"></span></h3>
-    <p style="font-size:13px;color:#6b7280;margin:0 0 12px;">Describe the cleaning operation in plain English.</p>
+<div id="clean-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="clean-title">
+  <div class="modal modal--lg">
+    <button type="button" class="modal__close" onclick="closeModal('clean-modal')" aria-label="Close">&#10005;</button>
+    <h3 class="modal__title" id="clean-title">Clean Dataset: <span id="clean-ds-name"></span></h3>
+    <p class="modal__desc">Describe the cleaning operation in plain English.</p>
+    <label class="field-label" for="clean-instruction">Instruction</label>
     <textarea id="clean-instruction" style="height:64px;font-size:13px;margin-bottom:10px;" placeholder='e.g. "Remove rows where revenue is null", "Rename column X to Y"'></textarea>
     <div style="display:flex;gap:8px;margin-bottom:12px;">
-      <button id="clean-preview-btn" onclick="previewClean()">Preview</button>
-      <button onclick="document.getElementById('clean-overlay').style.display='none'" style="background:#6b7280;">Cancel</button>
+      <button type="button" id="clean-preview-btn" class="btn btn-primary btn-sm" onclick="previewClean()">Preview</button>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="closeModal('clean-modal')">Cancel</button>
     </div>
     <div id="clean-preview-area" style="display:none;">
-      <div id="clean-code-block" style="background:#1e293b;color:#e2e8f0;padding:10px 14px;border-radius:6px;font-size:12px;font-family:monospace;white-space:pre-wrap;word-break:break-all;margin-bottom:10px;"></div>
+      <pre id="clean-code-block" style="background:#1e293b;color:#e2e8f0;padding:10px 14px;border-radius:6px;font-size:12px;white-space:pre-wrap;word-break:break-all;margin-bottom:10px;"></pre>
       <div style="display:flex;gap:20px;font-size:12px;color:#374151;margin-bottom:8px;">
         <span>Before: <strong id="clean-before-count"></strong></span>
         <span>After: <strong id="clean-after-count"></strong></span>
       </div>
-      <button id="clean-apply-btn" onclick="applyClean()" style="background:#16a34a;margin-bottom:6px;">Apply changes</button>
+      <button type="button" id="clean-apply-btn" class="btn btn-primary btn-sm" style="background:#16a34a;margin-bottom:6px;" onclick="applyClean()">Apply changes</button>
     </div>
     <div id="clean-status" style="font-size:12px;margin-top:4px;"></div>
   </div>
 </div>
 
 <!-- Clear all sessions modal -->
-<div id="clear-sessions-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:100;align-items:center;justify-content:center;">
-  <div style="background:#fff;border-radius:10px;padding:28px 32px;max-width:400px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.18);">
-    <h3 style="margin:0 0 10px;font-size:16px;color:#b91c1c;">Delete all sessions?</h3>
-    <p style="font-size:14px;color:#374151;margin:0 0 20px;line-height:1.55;">This will permanently delete all conversation sessions. Datasets will not be affected.</p>
-    <div style="display:flex;gap:10px;">
-      <button onclick="confirmClearAllSessions()" style="background:#b91c1c;">Delete all</button>
-      <button onclick="document.getElementById('clear-sessions-overlay').style.display='none'" style="background:#6b7280;">Cancel</button>
+<div id="clear-sessions-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="cls-title">
+  <div class="modal modal--sm">
+    <h3 class="modal__title modal__title--danger" id="cls-title">Delete all sessions?</h3>
+    <p class="modal__desc">This will permanently delete all conversation sessions. Datasets will not be affected.</p>
+    <div class="modal__actions">
+      <button type="button" class="btn btn-danger" onclick="confirmClearAllSessions()">Delete all</button>
+      <button type="button" class="btn btn-ghost" onclick="closeModal('clear-sessions-modal')">Cancel</button>
     </div>
   </div>
 </div>
 
-<!-- Duplicate modal -->
-<div id="dup-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:100;align-items:center;justify-content:center;">
-  <div style="background:#fff;border-radius:10px;padding:28px 32px;max-width:440px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.18);">
-    <h3 style="margin:0 0 10px;font-size:16px;color:#1e3a5f;">Duplicate file detected</h3>
-    <p id="dup-msg" style="font-size:14px;color:#374151;margin:0 0 20px;line-height:1.55;"></p>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;">
-      <button style="background:#1e40af;" onclick="dupUseExisting()">Use existing</button>
-      <button style="background:#6b7280;" onclick="dupUploadAnyway()">Upload anyway</button>
-      <button style="background:none;color:#6b7280;border:1px solid #d1d5db;" onclick="document.getElementById('dup-overlay').style.display='none'">Cancel</button>
+<!-- Clear all datasets modal -->
+<div id="clear-all-datasets-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="cla-title">
+  <div class="modal modal--sm">
+    <h3 class="modal__title modal__title--danger" id="cla-title">Delete all datasets?</h3>
+    <p class="modal__desc" id="clear-all-msg"></p>
+    <div class="modal__actions">
+      <button type="button" class="btn btn-danger" onclick="confirmClearAll()">Delete all</button>
+      <button type="button" class="btn btn-ghost" onclick="closeModal('clear-all-datasets-modal')">Cancel</button>
     </div>
   </div>
 </div>
 
-<!-- C15: Clear all datasets modal -->
-<div id="clear-all-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:100;align-items:center;justify-content:center;">
-  <div style="background:#fff;border-radius:10px;padding:28px 32px;max-width:400px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.18);">
-    <h3 style="margin:0 0 10px;font-size:16px;color:#b91c1c;">Delete all datasets?</h3>
-    <p id="clear-all-msg" style="font-size:14px;color:#374151;margin:0 0 20px;line-height:1.55;"></p>
-    <div style="display:flex;gap:10px;">
-      <button onclick="confirmClearAll()" style="background:#b91c1c;">Delete all</button>
-      <button onclick="document.getElementById('clear-all-overlay').style.display='none'" style="background:#6b7280;">Cancel</button>
+<!-- Delete selected datasets modal -->
+<div id="del-sel-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="ds-title">
+  <div class="modal modal--sm">
+    <h3 class="modal__title modal__title--danger" id="ds-title">Delete selected datasets?</h3>
+    <p class="modal__desc" id="del-sel-desc"></p>
+    <div class="modal__actions">
+      <button type="button" class="btn btn-danger" id="del-sel-confirm-btn" onclick="_confirmDeleteSelected()">Delete</button>
+      <button type="button" class="btn btn-ghost" onclick="closeModal('del-sel-modal')">Cancel</button>
     </div>
   </div>
 </div>
 
-<!-- 4-column top row: sessions | datasets | upload | counter -->
-<div id="top-row" style="display:flex;gap:16px;align-items:stretch;margin-bottom:16px;">
+<!-- Delete selected sessions modal -->
+<div id="del-sel-sessions-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="dss-title">
+  <div class="modal modal--sm">
+    <h3 class="modal__title modal__title--danger" id="dss-title">Delete selected sessions?</h3>
+    <p class="modal__desc" id="del-sel-sessions-desc"></p>
+    <div class="modal__actions">
+      <button type="button" class="btn btn-danger" id="del-sel-sessions-confirm-btn" onclick="_confirmDeleteSelectedSessions()">Delete</button>
+      <button type="button" class="btn btn-ghost" onclick="closeModal('del-sel-sessions-modal')">Cancel</button>
+    </div>
+  </div>
+</div>
 
-  <!-- Col 1: Sessions -->
-  <div id="session-sidebar" style="flex:1;min-width:0;display:flex;flex-direction:column;">
-    <div class="card" style="margin-bottom:0;padding:16px;flex:1;display:flex;flex-direction:column;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-shrink:0;gap:6px;">
-        <h2 style="margin-bottom:0;">Sessions</h2>
-        <div style="display:flex;gap:6px;flex-shrink:0;">
-          <button id="sess-del-sel-btn" onclick="deleteSelectedSessions()" style="display:none;background:#b91c1c;font-size:11px;padding:3px 8px;">Delete sel.</button>
-          <button onclick="openMemoryModal()" style="background:#475569;font-size:11px;padding:4px 8px;" title="Persistent memory">Memory</button>
-          <button onclick="startNewSession()" style="background:#1e40af;font-size:12px;padding:4px 10px;">+ New</button>
+<!-- App shell -->
+<div class="app-shell">
+
+  <!-- ── Sidebar ─────────────────────────────────────────────────────────── -->
+  <aside class="sidebar" aria-label="Sessions and usage">
+
+    <div class="sidebar__sessions">
+      <div class="card-header" style="flex-shrink:0;">
+        <h2 class="card-title">Sessions</h2>
+        <div style="display:flex;gap:5px;flex-shrink:0;">
+          <button type="button" id="sess-del-sel-btn" class="btn btn-danger btn-xs"
+                  style="display:none;" onclick="deleteSelectedSessions()">Delete sel.</button>
+          <button type="button" class="btn btn-primary btn-xs" onclick="startNewSession()">+ New</button>
         </div>
       </div>
-      <div id="session-list" style="max-height:200px;overflow-y:auto;flex:1;">
-        <div id="no-sessions-msg" style="font-size:12px;color:#9ca3af;font-style:italic;padding:4px 0;">No sessions yet</div>
+      <div id="session-list" role="list" style="flex:1;overflow-y:auto;">
+        <div id="no-sessions-msg" class="empty-msg">No sessions yet</div>
       </div>
       <div id="sess-footer" style="display:none;padding-top:6px;border-top:1px solid #f3f4f6;margin-top:6px;flex-shrink:0;">
-        <button onclick="clearAllSessions()" style="background:none;color:#b91c1c;border:1px solid #fca5a5;font-size:11px;padding:2px 8px;border-radius:5px;">Clear all sessions</button>
+        <button type="button" class="btn btn-ghost-danger btn-xs" onclick="clearAllSessions()">Clear all sessions</button>
       </div>
     </div>
-  </div>
 
-  <!-- Col 2: Datasets -->
-  <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
-    <div class="card" style="margin-bottom:0;padding:16px;flex:1;display:flex;flex-direction:column;">
-      <h2 style="margin-bottom:6px;flex-shrink:0;">Datasets</h2>
-      <p style="font-size:11px;color:#6b7280;margin:0 0 8px;flex-shrink:0;">All datasets are queried automatically. Check to delete.</p>
-      <div id="dataset-list-wrap" style="border:1px solid #e5e7eb;border-radius:6px;padding:6px 10px;flex:1;overflow-y:auto;min-height:0;background:#fafafa;margin-bottom:8px;">
-        <div id="dataset-checkboxes">
-          {% for ds in datasets %}
-          <div class="ds-row" data-id="{{ ds.dataset_id }}" data-filename="{{ ds.filename }}" data-row-count="{{ ds.row_count }}" data-col-count="{{ ds.col_count }}">
-            <div class="ds-main-row">
-              <label><input type="checkbox" class="ds-check" value="{{ ds.dataset_id }}" onchange="onDatasetCheckChange()">
-                <span>{{ ds.filename }} <span class="row-cnt">({{ ds.row_count }} rows &middot; {{ ds.col_count }} cols)</span></span></label>
-              <div class="ds-actions">
-                <button class="ds-cols-btn" onclick="toggleColumns('{{ ds.dataset_id }}',event)" title="View columns">▸ cols</button>
-                <button class="ds-clean-btn" onclick="openCleanModal('{{ ds.dataset_id }}','{{ ds.filename }}',event)" title="Clean data">🧹</button>
-                <button class="del-btn" onclick="deleteDataset('{{ ds.dataset_id }}',event)" title="Delete">🗑</button>
+    <div class="sidebar__usage">
+      <div id="tu-model-name" class="tu-model-name">—</div>
+      <div class="tu-cols">
+        <div class="tu-section">
+          <div class="tu-section-title">This session</div>
+          <div class="tu-row"><span class="tu-key">In</span><span class="tu-val" id="ses-ti">0</span></div>
+          <div class="tu-row"><span class="tu-key">Out</span><span class="tu-val" id="ses-to">0</span></div>
+          <div class="tu-row"><span class="tu-key">Queries</span><span class="tu-val" id="ses-qc">0</span></div>
+          <div class="tu-row"><span class="tu-key">Cost</span><span class="tu-val cost" id="ses-cost">—</span></div>
+        </div>
+        <div class="tu-section">
+          <div class="tu-section-title">Today (UTC)</div>
+          <div class="tu-row"><span class="tu-key">In</span><span class="tu-val" id="day-ti">—</span></div>
+          <div class="tu-row"><span class="tu-key">Out</span><span class="tu-val" id="day-to">—</span></div>
+          <div class="tu-row"><span class="tu-key">Queries</span><span class="tu-val" id="day-qc">—</span></div>
+          <div class="tu-row"><span class="tu-key">Cost</span><span class="tu-val cost" id="day-cost">—</span></div>
+        </div>
+      </div>
+      <div class="tu-storage">
+        <span class="tu-key">Datasets:</span><span class="tu-val" id="stor-ds">0</span>
+        <span class="tu-key" style="margin-left:6px;">Rows:</span><span class="tu-val" id="stor-rows">0</span>
+      </div>
+    </div>
+
+  </aside><!-- /.sidebar -->
+
+  <!-- ── Main ───────────────────────────────────────────────────────────── -->
+  <main class="main" id="main-content">
+
+    <!-- Top row: datasets + upload -->
+    <div class="card-row">
+
+      <!-- Datasets card -->
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">Datasets</h2>
+          <div style="display:flex;gap:5px;flex-wrap:wrap;">
+            <button type="button" id="select-all-btn" class="btn btn-ghost btn-xs"
+                    style="display:{% if datasets %}inline-flex{% else %}none{% endif %};"
+                    onclick="toggleSelectAll()">Select all</button>
+            <button type="button" id="ds-del-sel-btn" class="btn btn-danger btn-xs"
+                    style="display:none;" onclick="deleteSelectedDatasets()">Delete selected</button>
+            <button type="button" id="clear-all-btn" class="btn btn-ghost-danger btn-xs"
+                    style="display:{% if datasets %}inline-flex{% else %}none{% endif %};"
+                    onclick="clearAllDatasets()">Clear all</button>
+          </div>
+        </div>
+        <p style="font-size:11px;color:#6b7280;margin:0 0 8px;">Check to select datasets for querying. Un-check to exclude.</p>
+        <div id="dataset-list-wrap"
+             style="border:1px solid #e5e7eb;border-radius:6px;padding:6px 10px;overflow-y:auto;min-height:60px;max-height:200px;background:#fafafa;margin-bottom:8px;"
+             role="list" aria-label="Uploaded datasets">
+          <div id="dataset-checkboxes">
+            {% for ds in datasets %}
+            <div class="ds-row" role="listitem"
+                 data-id="{{ ds.dataset_id }}" data-filename="{{ ds.filename }}"
+                 data-row-count="{{ ds.row_count }}" data-col-count="{{ ds.col_count }}">
+              <div class="ds-main-row">
+                <label><input type="checkbox" class="ds-check" value="{{ ds.dataset_id }}" onchange="onDatasetCheckChange()">
+                  <span>{{ ds.filename }} <span class="row-cnt">({{ ds.row_count }} rows &middot; {{ ds.col_count }} cols)</span></span>
+                </label>
+                <div class="ds-actions">
+                  <button type="button" class="ds-cols-btn" onclick="toggleColumns('{{ ds.dataset_id }}',event)" title="View columns" aria-label="Toggle columns for {{ ds.filename }}">▸ cols</button>
+                  <button type="button" class="ds-clean-btn" onclick="openCleanModal('{{ ds.dataset_id }}',event)" title="Clean data" aria-label="Clean {{ ds.filename }}">🧹</button>
+                  <button type="button" class="del-btn" onclick="deleteDataset('{{ ds.dataset_id }}',event)" title="Delete dataset" aria-label="Delete {{ ds.filename }}">🗑</button>
+                </div>
+              </div>
+              <div class="ds-cols-panel" id="cols-{{ ds.dataset_id }}" style="display:none;" aria-hidden="true">
+                {% for col in ds.columns %}<span class="col-chip">{{ col }}</span>{% endfor %}
               </div>
             </div>
-            <div class="ds-cols-panel" id="cols-{{ ds.dataset_id }}" style="display:none;">
-              {% for col in ds.columns %}<span class="col-chip">{{ col }}</span>{% endfor %}
+            {% endfor %}
+          </div>
+          <div id="no-datasets-msg" class="empty-msg" {% if datasets %}style="display:none;"{% endif %}>
+            Upload a file to get started.
+          </div>
+        </div>
+
+        <!-- Dataset notes panel -->
+        <div id="dataset-notes-panel" style="display:none;border-top:1px solid #f3f4f6;padding-top:10px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+            <span class="field-label" style="margin:0;">Dataset notes</span>
+            <button type="button" class="btn-icon" onclick="toggleCtxEdit()">Edit</button>
+          </div>
+          <div id="context-display" style="font-size:12px;color:#374151;background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px;padding:6px 10px;white-space:pre-wrap;line-height:1.55;max-height:80px;overflow-y:auto;"></div>
+          <div id="context-edit-area" style="display:none;">
+            <textarea id="context-edit-input" style="height:56px;font-size:12px;margin-top:6px;margin-bottom:0;" aria-label="Edit dataset notes"></textarea>
+            <div style="display:flex;gap:6px;margin-top:4px;">
+              <button type="button" class="btn btn-primary btn-xs" onclick="saveCtxEdit()">Save</button>
+              <button type="button" class="btn btn-ghost btn-xs" onclick="cancelCtxEdit()">Cancel</button>
             </div>
           </div>
-          {% endfor %}
         </div>
-        <div id="no-datasets-msg" style="font-size:13px;color:#9ca3af;font-style:italic;padding:4px 0;{% if datasets %}display:none;{% endif %}">
-          Upload a file to get started.
-        </div>
-      </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-shrink:0;gap:6px;flex-wrap:wrap;">
-        <button id="select-all-btn" onclick="toggleSelectAll()"
-          style="display:{% if datasets %}inline-block{% else %}none{% endif %};background:none;color:#1e40af;border:1px solid #bfdbfe;font-size:11px;padding:2px 8px;border-radius:5px;">
-          Select all
-        </button>
-        <button id="ds-del-sel-btn" onclick="deleteSelectedDatasets()"
-          style="display:none;background:#b91c1c;font-size:11px;padding:2px 8px;border-radius:5px;">
-          Delete selected
-        </button>
-        <button id="clear-all-btn" onclick="clearAllDatasets()"
-          style="display:{% if datasets %}inline-block{% else %}none{% endif %};background:none;color:#b91c1c;border:1px solid #fca5a5;font-size:11px;padding:2px 8px;border-radius:5px;">
-          Clear all
-        </button>
-      </div>
+      </div><!-- /.card datasets -->
 
-      <!-- C12: dataset notes panel -->
-      <div id="dataset-notes-panel" style="display:none;border-top:1px solid #f3f4f6;padding-top:10px;flex-shrink:0;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-          <span style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;">Dataset notes</span>
-          <button onclick="toggleCtxEdit()" style="background:none;color:#1e40af;border:none;font-size:11px;padding:2px 4px;cursor:pointer;text-decoration:underline;">Edit</button>
+      <!-- Upload card -->
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">Upload data files</h2>
         </div>
-        <div id="context-display" style="font-size:12px;color:#374151;background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px;padding:6px 10px;white-space:pre-wrap;line-height:1.55;max-height:80px;overflow-y:auto;"></div>
-        <div id="context-edit-area" style="display:none;">
-          <textarea id="context-edit-input" style="height:56px;font-size:12px;margin-top:6px;margin-bottom:0;"></textarea>
-          <div style="display:flex;gap:6px;margin-top:4px;">
-            <button onclick="saveCtxEdit()" style="font-size:11px;padding:3px 10px;">Save</button>
-            <button onclick="cancelCtxEdit()" style="background:#6b7280;font-size:11px;padding:3px 10px;">Cancel</button>
+
+        <div id="drop-zone" role="region" aria-label="File drop zone">
+          <div style="color:#6b7280;pointer-events:none;text-align:center;margin-bottom:12px;">
+            <div style="font-size:28px;margin-bottom:6px;">&#8659;</div>
+            <div id="drop-zone-text" style="font-size:14px;font-weight:600;margin-bottom:4px;">Drop files or a folder here</div>
+            <div style="font-size:12px;color:#9ca3af;">or click to browse (.csv &middot; .tsv &middot; .txt &middot; .json &middot; .xlsx &middot; .xls)</div>
+          </div>
+          <button type="button" class="btn btn-primary btn-sm"
+                  onclick="document.getElementById('file-input').click()"
+                  aria-label="Choose files to upload">Choose files</button>
+          <input type="file" id="file-input" accept=".csv,.tsv,.txt,.json,.xlsx,.xls"
+                 multiple style="display:none" onchange="onFilesSelected()">
+        </div>
+
+        <!-- Staged file list -->
+        <div id="staged-panel" style="display:none;margin-top:14px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <span style="font-size:13px;font-weight:600;color:#374151;" id="staged-header">0 files staged</span>
+            <button type="button" class="btn btn-ghost btn-xs" onclick="clearStaged()">Clear staged</button>
+          </div>
+          <div id="staged-rows"></div>
+          <div style="margin-top:10px;">
+            <button type="button" id="upload-staged-btn" class="btn btn-primary" onclick="uploadStaged()">
+              Upload <span id="upload-btn-count">0</span> file(s)
+            </button>
           </div>
         </div>
-      </div>
-    </div>
-  </div>
 
-  <!-- Col 3: Upload -->
-  <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
-    <div class="card" style="margin-bottom:0;padding:16px;flex:1;display:flex;flex-direction:column;">
-      <h2 style="flex-shrink:0;">Upload data files</h2>
+        <!-- Upload queue -->
+        <div id="upload-queue" style="display:none;margin-top:12px;" role="status" aria-live="polite"></div>
+        <div id="upload-status" style="margin-top:8px;" role="status"></div>
+      </div><!-- /.card upload -->
 
-      <!-- Drop zone (C17: always visible, stages files — no immediate upload) -->
-      <div id="drop-zone" style="flex:1;">
-        <div style="color:#6b7280; pointer-events:none; text-align:center; margin-bottom:12px;">
-          <div style="font-size:28px; margin-bottom:6px;">&#8659;</div>
-          <div id="drop-zone-text" style="font-size:14px; font-weight:600; margin-bottom:4px;">Drop files or a folder here</div>
-          <div style="font-size:12px; color:#9ca3af;">or click to browse (.csv · .tsv · .txt · .json · .xlsx)</div>
+    </div><!-- /.card-row -->
+
+    <!-- Conversation + query card -->
+    <div class="card" style="flex:1;display:flex;flex-direction:column;min-height:0;">
+
+      <!-- Thread -->
+      <div id="conversation" style="display:none;margin-bottom:16px;">
+        <div class="card-header">
+          <span id="querying-label" class="field-label" style="margin:0;">Conversation</span>
+          <button type="button" class="btn btn-ghost btn-xs"
+                  onclick="exportConversationMd()" title="Export as Markdown"
+                  aria-label="Export conversation as Markdown">&#11015; Export MD</button>
         </div>
-        <span class="pick-btn" onclick="document.getElementById('file-input').click()" style="background:#1e40af;color:#fff;border:none;border-radius:6px;padding:8px 18px;font-size:13px;font-weight:600;cursor:pointer;display:inline-block;">Choose files</span>
-        <input type="file" id="file-input" accept=".csv,.tsv,.txt,.json,.xlsx,.xls" multiple style="display:none" onchange="onFilesSelected()">
+        <div id="thread" role="log" aria-live="polite" aria-label="Conversation thread" aria-relevant="additions"></div>
       </div>
 
-      <!-- C17: Staged file list -->
-      <div id="staged-panel" style="display:none; margin-top:14px;flex-shrink:0;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-          <span style="font-size:13px; font-weight:600; color:#374151;" id="staged-header">0 files staged</span>
-          <button onclick="clearStaged()" style="background:none;color:#6b7280;border:1px solid #d1d5db;font-size:12px;padding:3px 10px;border-radius:5px;">Clear staged</button>
+      <!-- Query input -->
+      <div>
+        <label class="field-label" for="question">Your question</label>
+        <textarea id="question" rows="3"
+                  placeholder="e.g. What is the average rating by year?"
+                  aria-label="Enter your data question"></textarea>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap;">
+          <button type="button" id="ask-btn" class="btn btn-primary" onclick="askQuestion()">Ask</button>
+          <button type="button" id="stop-btn" class="btn btn-ghost" style="display:none;"
+                  onclick="cancelQuery()" aria-label="Stop the current query">&#9632; Stop</button>
+          <div id="ask-status" role="status" aria-live="polite"></div>
         </div>
-        <div id="staged-rows"></div>
-        <div style="margin-top:10px;">
-          <button id="upload-staged-btn" onclick="uploadStaged()">Upload <span id="upload-btn-count">0</span> file(s)</button>
+      </div>
+
+      <!-- Progress row -->
+      <div id="progress-row" style="display:none;align-items:center;gap:12px;margin-top:10px;padding:10px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;"
+           role="status" aria-live="polite">
+        <span id="prg-elapsed" style="font-size:12px;font-weight:600;color:#6b7280;flex-shrink:0;">&#9201; 0s</span>
+        <div style="flex:1;background:#e2e8f0;border-radius:4px;height:4px;overflow:hidden;" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="prg-bar">
+          <div id="prg-bar-fill" style="height:100%;background:#1e40af;border-radius:4px;width:0%;transition:width .4s ease;"></div>
         </div>
+        <span id="prg-step" style="font-size:12px;color:#6b7280;flex-shrink:0;">Step 0 / —</span>
       </div>
 
-      <!-- Upload queue (shown while uploading) -->
-      <div id="upload-queue" style="display:none; margin-top:12px;flex-shrink:0;"></div>
-      <div id="upload-status" style="margin-top:8px;flex-shrink:0;"></div>
-    </div>
-  </div>
+    </div><!-- /.card conversation -->
 
-  <!-- Col 4: Usage counter -->
-  <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
-    <div id="tu-widget" style="background:#1e293b;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.2);padding:16px;font-size:12px;user-select:none;flex:1;">
-      <div class="tu-model" id="tu-model-name">—</div>
-      <div class="tu-section">
-        <div class="tu-section-title">This session</div>
-        <div class="tu-row"><span class="tu-key">Tokens in</span><span class="tu-val" id="ses-ti">0</span></div>
-        <div class="tu-row"><span class="tu-key">Tokens out</span><span class="tu-val" id="ses-to">0</span></div>
-        <div class="tu-row"><span class="tu-key">Queries</span><span class="tu-val" id="ses-qc">0</span></div>
-        <div class="tu-row"><span class="tu-key">Est. cost</span><span class="tu-val cost" id="ses-cost">—</span></div>
-      </div>
-      <div class="tu-section">
-        <div class="tu-section-title">Today (UTC)</div>
-        <div class="tu-row"><span class="tu-key">Tokens in</span><span class="tu-val" id="day-ti">—</span></div>
-        <div class="tu-row"><span class="tu-key">Tokens out</span><span class="tu-val" id="day-to">—</span></div>
-        <div class="tu-row"><span class="tu-key">Queries</span><span class="tu-val" id="day-qc">—</span></div>
-        <div class="tu-row"><span class="tu-key">Est. cost</span><span class="tu-val cost" id="day-cost">—</span></div>
-      </div>
-      <div class="tu-section">
-        <div class="tu-section-title">Storage</div>
-        <div class="tu-row"><span class="tu-key">Datasets</span><span class="tu-val" id="stor-ds">0</span></div>
-        <div class="tu-row"><span class="tu-key">Total rows</span><span class="tu-val" id="stor-rows">0</span></div>
-      </div>
-    </div>
-  </div>
-
-</div><!-- /#top-row -->
-
-<!-- Full-width querying section -->
-<div class="card" style="margin-bottom:0;">
-  <div id="conversation" style="display:none;margin-bottom:16px;">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-      <div id="querying-label" style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;">Conversation</div>
-      <button onclick="exportConversationMd()" style="background:none;color:#6b7280;border:1px solid #d1d5db;font-size:11px;padding:2px 8px;border-radius:5px;" title="Export as Markdown">⬇ Export MD</button>
-    </div>
-    <div id="thread"></div>
-  </div>
-  <label for="question">Your question</label>
-  <textarea id="question" placeholder="e.g. What is the average rating by year?"></textarea>
-  <button id="ask-btn" onclick="askQuestion()">Ask</button>
-  <!-- C22: query progress row -->
-  <div id="progress-row" style="display:none;align-items:center;gap:12px;margin-top:10px;padding:10px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;">
-    <span id="prg-elapsed" style="font-size:12px;font-weight:600;color:#6b7280;flex-shrink:0;">&#9201; 0s</span>
-    <div style="flex:1;background:#e2e8f0;border-radius:4px;height:4px;overflow:hidden;">
-      <div id="prg-bar-fill" style="height:100%;background:#1e40af;border-radius:4px;width:0%;transition:width .4s ease;"></div>
-    </div>
-    <span id="prg-step" style="font-size:12px;color:#6b7280;flex-shrink:0;">Step 0 / —</span>
-  </div>
-  <div id="ask-status"></div>
-</div>
+  </main><!-- /.main -->
+</div><!-- /.app-shell -->
 
 <style>
   #drop-zone {
     border:2px dashed #d1d5db; border-radius:8px; padding:24px;
     background:#fafafa; cursor:pointer; transition:border-color .15s,background .15s;
-    display:flex; flex-direction:column; justify-content:center; align-items:center; min-height:120px;
+    display:flex; flex-direction:column; justify-content:center; align-items:center; min-height:110px;
   }
   #drop-zone.drag-over { border-color:#3b82f6; background:#eff6ff; }
   #drop-zone.has-staged { border-style:solid; border-color:#bfdbfe; padding:14px; }
@@ -276,7 +322,7 @@
   .ds-clean-btn:hover { opacity:1; }
   .ds-cols-panel { padding:4px 0 6px 22px; display:flex; flex-wrap:wrap; gap:4px; }
   .col-chip { background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; border-radius:4px; font-size:11px; padding:1px 6px; white-space:nowrap; }
-  .del-confirm { display:flex; align-items:center; gap:8px; font-size:13px; color:#374151; flex-wrap:wrap; padding:4px 0; }
+  .del-confirm { display:flex; align-items:center; gap:8px; font-size:13px; color:#374151; flex-wrap:wrap; padding:6px 0; }
 
   .session-item { padding:6px 8px; border-radius:6px; border:1px solid #e5e7eb; margin-bottom:5px; background:#fff; transition:background .12s; display:flex; align-items:center; gap:6px; }
   .session-item:hover { background:#eff6ff; border-color:#bfdbfe; }
@@ -297,9 +343,7 @@
   .queue-row:last-child { border-bottom:none; }
   .q-status { width:18px; text-align:center; flex-shrink:0; }
   .q-name { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .q-actions { display:flex; gap:4px; flex-shrink:0; }
-  .q-actions button { font-size:11px; padding:2px 8px; }
-
+  .q-actions { display:flex; gap:4px; flex-shrink:0; align-items:center; }
 
   .turn { border-left:3px solid #bfdbfe; padding:10px 14px; margin-bottom:12px; background:#f8fafc; border-radius:0 6px 6px 0; }
   .turn.failed { border-left-color:#fca5a5; background:#fff7f7; }
@@ -315,18 +359,15 @@
   .answer-body code { background:#f3f4f6; padding:1px 4px; border-radius:3px; font-size:12px; }
   .answer-body pre  { background:#f3f4f6; padding:10px; border-radius:4px; overflow-x:auto; font-size:12px; }
   .answer-body em   { color:#6b7280; }
-  .turn-meta { font-size:11px; color:#9ca3af; margin-top:6px; }
-  .turn-timestamp { font-size:11px; color:#cbd5e1; margin-bottom:6px; font-style:italic; }
+  .turn-meta { font-size:11px; color:#64748b; margin-top:8px; line-height:1.6; }
   .best-effort-badge { display:inline-block; background:#fef3c7; color:#92400e; font-size:11px; font-weight:600; padding:1px 7px; border-radius:4px; border:1px solid #fcd34d; margin-bottom:6px; }
-  .datasets-used-footer { font-size:11px; color:#9ca3af; margin-top:4px; }
+  .datasets-used-footer { font-size:11px; color:#64748b; margin-top:3px; }
   .datasets-used-footer summary { cursor:pointer; display:inline; }
   .datasets-used-footer span { margin-left:4px; }
   .fmt-badge { background:#e0f2fe; color:#0369a1; font-size:11px; padding:1px 6px; border-radius:3px; font-weight:600; text-transform:uppercase; }
-  /* C4: chart sizing */
   .answer-body .plotly-graph-div, .answer-body iframe { max-height:420px; width:100% !important; }
   .answer-body .plotly-graph-div + .plotly-graph-div, .answer-body .chart-gap { margin-top:16px; }
 
-  /* C23: steps inspector */
   .steps-footer { margin-top:8px; }
   .steps-toggle { background:none; color:#9ca3af; border:none; font-size:12px; cursor:pointer; padding:2px 0; }
   .steps-toggle:hover { color:#374151; }
@@ -345,8 +386,11 @@
 </style>
 
 <script>
-  // ── helpers ──────────────────────────────────────────────────────────────────
-  const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  // ── Helpers ───────────────────────────────────────────────────────────────────
+  const esc = s => String(s)
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+
   const relTime = iso => {
     const d = Math.floor((Date.now()-new Date(iso))/1000);
     if(d<60) return"just now"; if(d<3600) return`${Math.floor(d/60)}m ago`;
@@ -356,8 +400,8 @@
   const fmtExt = n => ({'.csv':'CSV','.tsv':'TSV','.txt':'TXT','.json':'JSON','.xlsx':'XLS','.xls':'XLS'})[n.slice(n.lastIndexOf('.')).toLowerCase()]||'FILE';
   const SUPPORTED = new Set(['.csv','.tsv','.txt','.json','.xlsx','.xls']);
 
-  // ── C17: staged state ────────────────────────────────────────────────────────
-  const _staged = new Map();   // id → {file, context, notesContent, notesFilename}
+  // ── Staged file state ─────────────────────────────────────────────────────────
+  const _staged = new Map();
   let _seq = 0;
 
   function stageFiles(files) {
@@ -366,9 +410,8 @@
     for (const f of files) {
       const ext = f.name.slice(f.name.lastIndexOf('.')).toLowerCase();
       if (!SUPPORTED.has(ext) || existing.has(f.name)) continue;
-      existing.add(f.name);
+      existing.add(f.name); added++;
       _staged.set(++_seq, {file:f, context:'', notesContent:'', notesFilename:'', renamedAs:''});
-      added++;
     }
     if (added) _renderStaged();
   }
@@ -379,7 +422,7 @@
       const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
       if (!SUPPORTED.has(ext) || existing.has(file.name)) continue;
       existing.add(file.name);
-      _staged.set(++_seq, {file, context, notesContent:'', notesFilename: context?'_folder_notes':'', renamedAs:''});
+      _staged.set(++_seq, {file, context, notesContent:'', notesFilename:context?'_folder_notes':'', renamedAs:''});
     }
     _renderStaged();
   }
@@ -388,25 +431,20 @@
     const panel = document.getElementById('staged-panel');
     const rowsEl = document.getElementById('staged-rows');
     const n = _staged.size;
-
     if (!n) {
       panel.style.display = 'none';
       document.getElementById('drop-zone').classList.remove('has-staged');
       document.getElementById('drop-zone-text').textContent = 'Drop files or a folder here';
       return;
     }
-
     panel.style.display = 'block';
     document.getElementById('drop-zone').classList.add('has-staged');
     document.getElementById('drop-zone-text').textContent = 'Drop more files to add to the list';
     document.getElementById('staged-header').textContent = `${n} file${n!==1?'s':''} staged — review before uploading`;
     document.getElementById('upload-btn-count').textContent = n;
-
-    // Existing dataset names for dup pre-warning
     const uploaded = new Set([...document.querySelectorAll('.ds-check')].map(c => {
       const s = c.parentElement?.querySelector('span'); return s?s.textContent.split(' (')[0]:'';
     }));
-
     rowsEl.innerHTML = '';
     for (const [id, item] of _staged) {
       const dup = uploaded.has(item.file.name);
@@ -419,17 +457,17 @@
           <input class="sr-rename" value="${esc(item.renamedAs||item.file.name)}" oninput="_updateRename(${id},this.value)" title="Rename before upload" style="flex:1;min-width:0;font-size:13px;font-weight:500;padding:2px 6px;border:1px solid #e5e7eb;border-radius:4px;background:#f9fafb;">
           <span class="sr-size">${fmtSize(item.file.size)}</span>
           <div class="sr-acts">
-            <button onclick="toggleNotes(${id})" style="background:#f3f4f6;color:#374151;border:1px solid #d1d5db;">📝 Notes</button>
+            <button type="button" onclick="toggleNotes(${id})" style="background:#f3f4f6;color:#374151;border:1px solid #d1d5db;">📝 Notes</button>
             ${notesAttached
               ? `<span style="font-size:11px;color:#16a34a;cursor:default;">📎 ${esc(item.notesFilename)}</span>`
               : `<label style="cursor:pointer;font-size:12px;color:#1e40af;text-decoration:underline;">📎 Notes file<input type="file" accept=".txt,.md" style="display:none" onchange="attachNotesFile(${id},this)"></label>`
             }
-            <button onclick="removeStagedFile(${id})" style="background:none;color:#9ca3af;border:none;font-size:18px;padding:0 6px;cursor:pointer;">✕</button>
+            <button type="button" onclick="removeStagedFile(${id})" style="background:none;color:#9ca3af;border:none;font-size:18px;padding:0 6px;cursor:pointer;" aria-label="Remove staged file">&#10005;</button>
           </div>
         </div>
         <div id="sr-notes-${id}" style="display:${item.context?'block':'none'};margin-top:8px;">
           <textarea id="sr-ta-${id}" placeholder="Notes about this dataset — column definitions, units, caveats…"
-            oninput="_updateContext(${id},this.value)" style="height:56px;font-size:13px;">${esc(item.context)}</textarea>
+            oninput="_updateContext(${id},this.value)" style="height:56px;font-size:13px;" aria-label="Notes for this file">${esc(item.context)}</textarea>
           ${item.notesContent ? `<div class="sr-preview">📎 ${esc(item.notesContent.slice(0,160))}${item.notesContent.length>160?'…':''}</div>` : ''}
         </div>
         ${dup?`<div class="sr-warn">⚠ A dataset with this filename already exists — you'll be asked when uploading.</div>`:''}
@@ -447,7 +485,7 @@
     if (el) el.style.display = el.style.display==='none'?'block':'none';
   }
   function _updateContext(id, val) { const s = _staged.get(id); if(s) s.context=val; }
-  function _updateRename(id, val) { const s = _staged.get(id); if(s) s.renamedAs=val.trim(); }
+  function _updateRename(id, val)  { const s = _staged.get(id); if(s) s.renamedAs=val.trim(); }
 
   async function attachNotesFile(id, input) {
     const f = input.files[0]; if(!f) return;
@@ -460,12 +498,11 @@
     } catch(e) { console.error(e); }
   }
 
-  // ── C17: Upload staged files ──────────────────────────────────────────────────
+  // ── Upload staged files ───────────────────────────────────────────────────────
   async function uploadStaged() {
     if (!_staged.size) return;
     const items = [..._staged.entries()];
     _staged.clear(); _renderStaged();
-
     const queueEl = document.getElementById('upload-queue');
     queueEl.style.display = 'block';
     queueEl.innerHTML = items.map(([id,item]) => `
@@ -476,7 +513,6 @@
         <span id="qerr-${id}" style="font-size:12px;color:#b91c1c;"></span>
         <span class="q-actions" id="qact-${id}"></span>
       </div>`).join('');
-
     let idx = 0;
     async function worker() {
       while (idx < items.length) {
@@ -490,9 +526,6 @@
   }
 
   // ── Drop zone ─────────────────────────────────────────────────────────────────
-  const dz = document.getElementById('drop-zone');
-  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
-  dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
   const _NOTES_NAMES = new Set(['context','readme','description','info','_notes','notes']);
   function _isNotesFile(filename) {
     const lo = filename.toLowerCase();
@@ -501,6 +534,9 @@
            (_NOTES_NAMES.has(stem) || lo.endsWith('.notes.txt') || lo.endsWith('.notes.md'));
   }
 
+  const dz = document.getElementById('drop-zone');
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
   dz.addEventListener('drop', async e => {
     e.preventDefault(); dz.classList.remove('drag-over');
     const dtItems = [...e.dataTransfer.items];
@@ -522,13 +558,9 @@
       const lo = f.name.toLowerCase();
       const ext = lo.slice(lo.lastIndexOf('.'));
       const isFolderNotes =
-        lo === '_notes.txt' || lo === '_notes.md' ||
-        lo === 'context.txt' || lo === 'context.md' ||
-        lo === 'readme.txt' || lo === 'readme.md' ||
-        lo === 'description.txt' || lo === 'description.md' ||
-        lo === 'info.txt' || lo === 'info.md';
+        ['_notes.txt','_notes.md','context.txt','context.md','readme.txt','readme.md',
+         'description.txt','description.md','info.txt','info.md'].includes(lo);
       const isStemNotes = lo.endsWith('.notes.txt') || lo.endsWith('.notes.md');
-
       if (isStemNotes) {
         notesMap[lo.replace(/\.notes\.(txt|md)$/, '')] = await f.text();
       } else if (isFolderNotes) {
@@ -552,40 +584,48 @@
 
   // ── Core upload ───────────────────────────────────────────────────────────────
   const _retry = {};
-  let _pendingDup = null;
 
   async function _doUpload(file, force, ctx, qIdx, renamedAs) {
     _qst(qIdx,'⏳','#6b7280');
     const fd = new FormData();
     const uploadFile = renamedAs && renamedAs !== file.name
-      ? new File([file], renamedAs, {type: file.type, lastModified: file.lastModified})
+      ? new File([file], renamedAs, {type:file.type, lastModified:file.lastModified})
       : file;
     fd.append('file', uploadFile);
     if (ctx) fd.append('context', ctx);
     try {
       const resp = await fetch(force?'/upload?force=true':'/upload', {method:'POST',body:fd});
       const body = await resp.json();
-      if (resp.status===409) {
+      if (resp.status === 409) {
         const det = body.detail;
         _qst(qIdx,'⚠','#d97706');
         const acts = document.getElementById(`qact-${qIdx}`);
-        if (acts) acts.innerHTML =
-          `<button onclick="qUseExisting('${det.existing_dataset_id}','${esc(det.existing_filename)}',${qIdx})" style="background:#1e40af;font-size:11px;padding:2px 6px;">Use existing</button>`+
-          `<button onclick="qUploadAnyway(${qIdx})" style="background:#6b7280;font-size:11px;padding:2px 6px;">Upload anyway</button>`;
-        _retry[qIdx]={file,ctx,renamedAs}; return;
+        if (acts) {
+          acts.innerHTML = '';
+          const useBtn = document.createElement('button');
+          useBtn.type = 'button'; useBtn.className = 'btn btn-primary btn-xs';
+          useBtn.textContent = 'Use existing';
+          useBtn.addEventListener('click', () => qUseExisting(det.existing_dataset_id, det.existing_filename, qIdx));
+          const upBtn = document.createElement('button');
+          upBtn.type = 'button'; upBtn.className = 'btn btn-ghost btn-xs';
+          upBtn.textContent = 'Upload anyway';
+          upBtn.addEventListener('click', () => qUploadAnyway(qIdx));
+          acts.append(useBtn, ' ', upBtn);
+        }
+        _retry[qIdx] = {file, ctx, renamedAs}; return;
       }
       if (!resp.ok) {
         _qst(qIdx,'✗','#b91c1c');
-        const err=document.getElementById(`qerr-${qIdx}`);
-        if(err) err.textContent=body.detail?.message||resp.statusText;
+        const err = document.getElementById(`qerr-${qIdx}`);
+        if (err) err.textContent = body.detail?.message || resp.statusText;
       } else {
         _qst(qIdx,'✓','#16a34a');
         _registerDataset(body.data);
       }
     } catch(e) {
       _qst(qIdx,'✗','#b91c1c');
-      const err=document.getElementById(`qerr-${qIdx}`);
-      if(err) err.textContent=e.message;
+      const err = document.getElementById(`qerr-${qIdx}`);
+      if (err) err.textContent = e.message;
     }
   }
 
@@ -593,22 +633,13 @@
 
   function qUseExisting(exId, exName, qIdx) {
     _qst(qIdx,'✓','#16a34a');
-    const a=document.getElementById(`qact-${qIdx}`); if(a) a.innerHTML='';
+    const a = document.getElementById(`qact-${qIdx}`); if(a) a.innerHTML='';
     _registerDataset({dataset_id:exId,filename:exName,format:'',row_count:'?',columns:[]});
   }
   async function qUploadAnyway(qIdx) {
-    const item=_retry[qIdx]; if(!item) return;
-    document.getElementById(`qact-${qIdx}`).innerHTML='';
-    await _doUpload(item.file,true,item.ctx,qIdx,item.renamedAs);
-  }
-
-  async function dupUseExisting() {
-    document.getElementById('dup-overlay').style.display='none';
-    if(_pendingDup?.existingId) _registerDataset({dataset_id:_pendingDup.existingId,filename:_pendingDup.existingName,format:'',row_count:'?',columns:[]});
-  }
-  async function dupUploadAnyway() {
-    document.getElementById('dup-overlay').style.display='none';
-    if(_pendingDup) await _doUpload(_pendingDup.file,true,_pendingDup.ctx,_pendingDup.qIdx||'_s');
+    const item = _retry[qIdx]; if(!item) return;
+    const acts = document.getElementById(`qact-${qIdx}`); if(acts) acts.innerHTML='';
+    await _doUpload(item.file, true, item.ctx, qIdx, item.renamedAs);
   }
 
   // ── Register dataset ──────────────────────────────────────────────────────────
@@ -619,101 +650,133 @@
     const colChips = (columns||[]).map(c=>`<span class="col-chip">${esc(c)}</span>`).join('');
     return `
       <div class="ds-main-row">
-        <label><input type="checkbox" class="ds-check" value="${id}" checked onchange="onDatasetCheckChange()">
-          <span>${esc(filename)} <span class="row-cnt">(${dims})</span></span></label>
+        <label><input type="checkbox" class="ds-check" value="${id}" checked onchange="onDatasetCheckChange()" aria-label="${esc(filename)}">
+          <span>${esc(filename)} <span class="row-cnt">(${dims})</span></span>
+        </label>
         <div class="ds-actions">
-          <button class="ds-cols-btn" onclick="toggleColumns('${id}',event)" title="View columns">▸ cols</button>
-          <button class="ds-clean-btn" onclick="openCleanModal('${id}','${esc(filename)}',event)" title="Clean data">🧹</button>
-          <button class="del-btn" onclick="deleteDataset('${id}',event)" title="Delete">🗑</button>
+          <button type="button" class="ds-cols-btn" data-id="${id}" aria-label="Toggle columns">▸ cols</button>
+          <button type="button" class="ds-clean-btn" data-id="${id}" aria-label="Clean dataset">🧹</button>
+          <button type="button" class="del-btn" data-id="${id}" aria-label="Delete dataset">🗑</button>
         </div>
       </div>
-      <div class="ds-cols-panel" id="cols-${id}" style="display:none;">${colChips}</div>`;
+      <div class="ds-cols-panel" id="cols-${id}" style="display:none;" aria-hidden="true">${colChips}</div>`;
+  }
+
+  function _attachDsRowListeners(row, id) {
+    row.querySelector('.ds-check')?.addEventListener('change', onDatasetCheckChange);
+    row.querySelector('.ds-cols-btn')?.addEventListener('click', e => toggleColumns(id, e));
+    row.querySelector('.ds-clean-btn')?.addEventListener('click', e => openCleanModal(id, e));
+    row.querySelector('.del-btn')?.addEventListener('click', e => deleteDataset(id, e));
   }
 
   function _registerDataset(ds) {
     if (!ds.dataset_id) return;
     if (document.querySelector(`.ds-check[value="${ds.dataset_id}"]`)) { onDatasetCheckChange(); return; }
     const div = document.createElement('div');
-    div.className='ds-row'; div.dataset.id=ds.dataset_id; div.dataset.filename=ds.filename; div.dataset.rowCount=ds.row_count; div.dataset.colCount=ds.col_count||'';
+    div.className = 'ds-row'; div.setAttribute('role', 'listitem');
+    div.dataset.id = ds.dataset_id; div.dataset.filename = ds.filename;
+    div.dataset.rowCount = ds.row_count; div.dataset.colCount = ds.col_count||'';
     div.innerHTML = _dsRowInner(ds.dataset_id, ds.filename, ds.row_count, ds.col_count, ds.columns||[]);
+    _attachDsRowListeners(div, ds.dataset_id);
     document.getElementById('dataset-checkboxes').appendChild(div);
-    document.getElementById('no-datasets-msg').style.display='none';
-    document.getElementById('clear-all-btn').style.display='inline-block';
-    document.getElementById('select-all-btn').style.display='inline-block';
-    if (ds.context) _ctxCache[ds.dataset_id]=ds.context;
+    document.getElementById('no-datasets-msg').style.display = 'none';
+    document.getElementById('clear-all-btn').style.display = 'inline-flex';
+    document.getElementById('select-all-btn').style.display = 'inline-flex';
+    if (ds.context) _ctxCache[ds.dataset_id] = ds.context;
     onDatasetCheckChange();
     _updateStorageStat();
   }
 
-  // ── C15: delete dataset ───────────────────────────────────────────────────────
+  // ── Delete dataset (DOM-based, no confirm() or onclick string injection) ───────
   function deleteDataset(datasetId, event) {
     event.preventDefault(); event.stopPropagation();
-    const row=document.querySelector(`.ds-row[data-id="${datasetId}"]`); if(!row) return;
-    const fn=row.dataset.filename||datasetId, rc=row.dataset.rowCount||'?', cc=row.dataset.colCount||'';
-    row.innerHTML=`<div class="del-confirm">Delete <strong>${esc(fn)}</strong> and all its sessions?
-      <button onclick="confirmDelete('${datasetId}')" style="background:#b91c1c;font-size:12px;padding:2px 8px;">Delete</button>
-      <button onclick="cancelDelete('${datasetId}','${esc(fn)}','${rc}','${cc}')" style="background:#6b7280;font-size:12px;padding:2px 8px;">Cancel</button>
-    </div>`;
-  }
+    const row = document.querySelector(`.ds-row[data-id="${datasetId}"]`); if (!row) return;
+    if (row.querySelector('.del-confirm')) return;
+    const mainRow = row.querySelector('.ds-main-row');
+    if (mainRow) mainRow.style.display = 'none';
 
-  function cancelDelete(id, fn, rc, cc) {
-    const row=document.querySelector(`.ds-row[data-id="${id}"]`); if(!row) return;
-    row.innerHTML=_dsRowInner(id,fn,rc,cc);
+    const confirmDiv = document.createElement('div');
+    confirmDiv.className = 'del-confirm';
+    const msg = document.createElement('span');
+    msg.textContent = `Delete "${row.dataset.filename || datasetId}" and all its sessions?`;
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button'; delBtn.className = 'btn btn-danger btn-xs';
+    delBtn.textContent = 'Delete';
+    delBtn.addEventListener('click', () => confirmDelete(datasetId));
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button'; cancelBtn.className = 'btn btn-ghost btn-xs';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => { confirmDiv.remove(); if (mainRow) mainRow.style.display = ''; });
+    confirmDiv.append(msg, ' ', delBtn, ' ', cancelBtn);
+    const colsPanel = row.querySelector('.ds-cols-panel');
+    if (colsPanel) row.insertBefore(confirmDiv, colsPanel);
+    else row.appendChild(confirmDiv);
   }
 
   async function confirmDelete(datasetId) {
     try {
-      const resp=await fetch(`/datasets/${datasetId}`,{method:'DELETE'});
-      const body=await resp.json();
+      const resp = await fetch(`/datasets/${datasetId}`, {method:'DELETE'});
+      const body = await resp.json();
       if (resp.ok) {
         document.querySelector(`.ds-row[data-id="${datasetId}"]`)?.remove();
         if (!document.querySelectorAll('.ds-check').length) {
-          document.getElementById('no-datasets-msg').style.display='block';
-          document.getElementById('clear-all-btn').style.display='none';
-          document.getElementById('select-all-btn').style.display='none';
+          document.getElementById('no-datasets-msg').style.display = 'block';
+          document.getElementById('clear-all-btn').style.display = 'none';
+          document.getElementById('select-all-btn').style.display = 'none';
         }
         if (!getSelectedDatasetIds().length) {
           startNewSession();
-          document.getElementById('dataset-notes-panel').style.display='none';
+          document.getElementById('dataset-notes-panel').style.display = 'none';
         }
         _updateStorageStat();
+        announce('Dataset deleted');
       } else {
-        const row=document.querySelector(`.ds-row[data-id="${datasetId}"]`);
-        if(row) {
-          const fn=row.dataset.filename||datasetId, rc=row.dataset.rowCount||'?', cc=row.dataset.colCount||'';
-          row.innerHTML=`<div class="del-confirm" style="color:#b91c1c;">Error: ${esc(body.detail?.message||'Delete failed')}
-            <button onclick="cancelDelete('${datasetId}','${esc(fn)}','${rc}','${cc}')" style="background:#6b7280;font-size:12px;padding:2px 8px;">Dismiss</button></div>`;
+        const row = document.querySelector(`.ds-row[data-id="${datasetId}"]`);
+        if (row) {
+          const mainRow = row.querySelector('.ds-main-row');
+          row.querySelector('.del-confirm')?.remove();
+          if (mainRow) mainRow.style.display = '';
+          const errDiv = document.createElement('div');
+          errDiv.className = 'del-confirm msg-error';
+          errDiv.textContent = `Error: ${body.detail?.message || 'Delete failed'}`;
+          const dismissBtn = document.createElement('button');
+          dismissBtn.type = 'button'; dismissBtn.className = 'btn btn-ghost btn-xs';
+          dismissBtn.textContent = 'Dismiss';
+          dismissBtn.addEventListener('click', () => errDiv.remove());
+          errDiv.appendChild(dismissBtn);
+          row.insertBefore(errDiv, row.querySelector('.ds-cols-panel'));
         }
       }
-    } catch(e){ console.error(e); }
+    } catch(e) { console.error(e); }
   }
 
   function clearAllDatasets() {
-    const count=document.querySelectorAll('.ds-check').length; if(!count) return;
-    document.getElementById('clear-all-msg').textContent=
+    const count = document.querySelectorAll('.ds-check').length; if(!count) return;
+    document.getElementById('clear-all-msg').textContent =
       `This will permanently delete all ${count} dataset${count>1?'s':''} and all their sessions. This cannot be undone.`;
-    document.getElementById('clear-all-overlay').style.display='flex';
+    openModal('clear-all-datasets-modal');
   }
 
   async function confirmClearAll() {
-    document.getElementById('clear-all-overlay').style.display='none';
+    closeModal('clear-all-datasets-modal');
     try {
-      const resp=await fetch('/datasets',{method:'DELETE'});
-      if(resp.ok){
-        document.getElementById('dataset-checkboxes').innerHTML='';
-        document.getElementById('no-datasets-msg').style.display='block';
-        document.getElementById('clear-all-btn').style.display='none';
-        document.getElementById('select-all-btn').style.display='none';
+      const resp = await fetch('/datasets', {method:'DELETE'});
+      if (resp.ok) {
+        document.getElementById('dataset-checkboxes').innerHTML = '';
+        document.getElementById('no-datasets-msg').style.display = 'block';
+        document.getElementById('clear-all-btn').style.display = 'none';
+        document.getElementById('select-all-btn').style.display = 'none';
         startNewSession();
-        document.getElementById('dataset-notes-panel').style.display='none';
-        document.getElementById('session-list').innerHTML=
-          '<div id="no-sessions-msg" style="font-size:12px;color:#9ca3af;font-style:italic;padding:4px 0;">No sessions yet</div>';
+        document.getElementById('dataset-notes-panel').style.display = 'none';
+        document.getElementById('session-list').innerHTML =
+          '<div id="no-sessions-msg" class="empty-msg">No sessions yet</div>';
         _updateStorageStat();
+        announce('All datasets deleted');
       }
-    } catch(e){ console.error(e); }
+    } catch(e) { console.error(e); }
   }
 
-  // ── C14: dataset checkbox change ──────────────────────────────────────────────
+  // ── Dataset checkbox / selection ──────────────────────────────────────────────
   function getSelectedDatasetIds() {
     return [...document.querySelectorAll('.ds-check:checked')].map(c=>c.value);
   }
@@ -727,77 +790,84 @@
   }
 
   function onDatasetCheckChange() {
-    const ids=getSelectedDatasetIds();
-    const checked=document.querySelectorAll('.ds-check:checked').length;
-    const total=document.querySelectorAll('.ds-check').length;
-    const delBtn=document.getElementById('ds-del-sel-btn');
-    if(delBtn){ delBtn.style.display=checked?'inline-block':'none'; delBtn.textContent=`Delete ${checked} selected`; }
+    const ids = getSelectedDatasetIds();
+    const checked = document.querySelectorAll('.ds-check:checked').length;
+    const delBtn = document.getElementById('ds-del-sel-btn');
+    if(delBtn){ delBtn.style.display=checked?'inline-flex':'none'; delBtn.textContent=`Delete ${checked} selected`; }
     startNewSession();
     if(ids.length) loadDatasetCtx(ids);
-    else document.getElementById('dataset-notes-panel').style.display='none';
+    else document.getElementById('dataset-notes-panel').style.display = 'none';
   }
 
-  async function deleteSelectedDatasets() {
-    const checked=[...document.querySelectorAll('.ds-check:checked')];
-    if(!checked.length) return;
-    if(!confirm(`Delete ${checked.length} dataset${checked.length!==1?'s':''} and all their sessions?`)) return;
-    for(const cb of checked){
-      const id=cb.value;
-      try{
-        const resp=await fetch(`/datasets/${id}`,{method:'DELETE'});
-        if(resp.ok) document.querySelector(`.ds-row[data-id="${id}"]`)?.remove();
-      }catch{}
+  function deleteSelectedDatasets() {
+    const checked = [...document.querySelectorAll('.ds-check:checked')]; if(!checked.length) return;
+    document.getElementById('del-sel-desc').textContent =
+      `Delete ${checked.length} dataset${checked.length!==1?'s':''} and all their sessions? This cannot be undone.`;
+    openModal('del-sel-modal');
+  }
+
+  async function _confirmDeleteSelected() {
+    closeModal('del-sel-modal');
+    const checked = [...document.querySelectorAll('.ds-check:checked')];
+    for (const cb of checked) {
+      const id = cb.value;
+      try {
+        const resp = await fetch(`/datasets/${id}`, {method:'DELETE'});
+        if (resp.ok) document.querySelector(`.ds-row[data-id="${id}"]`)?.remove();
+      } catch {}
     }
-    const remaining=document.querySelectorAll('.ds-check').length;
-    if(!remaining){
-      document.getElementById('no-datasets-msg').style.display='block';
-      document.getElementById('clear-all-btn').style.display='none';
-      document.getElementById('select-all-btn').style.display='none';
+    const remaining = document.querySelectorAll('.ds-check').length;
+    if (!remaining) {
+      document.getElementById('no-datasets-msg').style.display = 'block';
+      document.getElementById('clear-all-btn').style.display = 'none';
+      document.getElementById('select-all-btn').style.display = 'none';
     }
-    document.getElementById('ds-del-sel-btn').style.display='none';
+    const delBtn = document.getElementById('ds-del-sel-btn');
+    if (delBtn) delBtn.style.display = 'none';
     startNewSession();
-    document.getElementById('dataset-notes-panel').style.display='none';
+    document.getElementById('dataset-notes-panel').style.display = 'none';
     _updateStorageStat();
     await loadSessionList();
+    announce('Selected datasets deleted');
   }
 
-  // ── C12: context panel ────────────────────────────────────────────────────────
+  // ── Dataset notes panel ───────────────────────────────────────────────────────
   async function loadDatasetCtx(ids) {
     if(ids.length!==1){ document.getElementById('dataset-notes-panel').style.display='none'; return; }
-    const id=ids[0];
+    const id = ids[0];
     if(_ctxCache[id]!==undefined){ _showCtxPanel(id,_ctxCache[id]); return; }
-    try{
-      const body=await(await fetch('/datasets')).json();
-      for(const ds of body.data) _ctxCache[ds.dataset_id]=ds.context||'';
-      _showCtxPanel(id,_ctxCache[id]||'');
-    } catch{}
+    try {
+      const body = await(await fetch('/datasets')).json();
+      for (const ds of body.data) _ctxCache[ds.dataset_id] = ds.context||'';
+      _showCtxPanel(id, _ctxCache[id]||'');
+    } catch {}
   }
-  function _showCtxPanel(id,ctx) {
-    document.getElementById('context-display').textContent=ctx||'No notes added yet.';
-    document.getElementById('context-edit-input').value=ctx||'';
-    document.getElementById('context-edit-area').style.display='none';
-    document.getElementById('context-display').style.display='block';
-    document.getElementById('dataset-notes-panel').style.display='block';
+  function _showCtxPanel(id, ctx) {
+    document.getElementById('context-display').textContent = ctx||'No notes added yet.';
+    document.getElementById('context-edit-input').value = ctx||'';
+    document.getElementById('context-edit-area').style.display = 'none';
+    document.getElementById('context-display').style.display = 'block';
+    document.getElementById('dataset-notes-panel').style.display = 'block';
   }
   function toggleCtxEdit() {
     const ea=document.getElementById('context-edit-area'), cd=document.getElementById('context-display');
-    ea.style.display=ea.style.display==='none'?'block':'none';
-    cd.style.display=ea.style.display==='none'?'block':'none';
+    ea.style.display = ea.style.display==='none'?'block':'none';
+    cd.style.display = ea.style.display==='none'?'block':'none';
   }
   function cancelCtxEdit() {
-    document.getElementById('context-edit-area').style.display='none';
-    document.getElementById('context-display').style.display='block';
+    document.getElementById('context-edit-area').style.display = 'none';
+    document.getElementById('context-display').style.display = 'block';
   }
   async function saveCtxEdit() {
-    const ids=getSelectedDatasetIds(); if(ids.length!==1) return;
+    const ids = getSelectedDatasetIds(); if(ids.length!==1) return;
     const id=ids[0], ctx=document.getElementById('context-edit-input').value.trim();
-    try{
-      const resp=await fetch(`/datasets/${id}/context`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({context:ctx})});
+    try {
+      const resp = await fetch(`/datasets/${id}/context`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({context:ctx})});
       if(resp.ok){ _ctxCache[id]=ctx; _showCtxPanel(id,ctx); }
-    } catch{}
+    } catch {}
   }
 
-  // ── Storage stat ─────────────────────────────────────────────────────────────
+  // ── Storage stat ──────────────────────────────────────────────────────────────
   function _updateStorageStat() {
     const rows = document.querySelectorAll('.ds-row');
     let total = 0;
@@ -809,349 +879,386 @@
   }
 
   // ── Sessions ──────────────────────────────────────────────────────────────────
-  let currentSessionId=null;
+  let currentSessionId = null;
 
   async function loadSessionList() {
-    try{
-      const body=await(await fetch('/sessions')).json();
-      const sessions=body.data||[];
-      const listEl=document.getElementById('session-list');
-      const footer=document.getElementById('sess-footer');
+    try {
+      const body = await(await fetch('/sessions')).json();
+      const sessions = body.data || [];
+      const listEl = document.getElementById('session-list');
+      const footer = document.getElementById('sess-footer');
       if (!sessions.length) {
-        listEl.innerHTML='<div id="no-sessions-msg" style="font-size:12px;color:#9ca3af;font-style:italic;padding:4px 0;">No sessions yet</div>';
-        if(footer) footer.style.display='none';
+        listEl.innerHTML = '<div id="no-sessions-msg" class="empty-msg">No sessions yet</div>';
+        if(footer) footer.style.display = 'none';
         return;
       }
-      if(footer) footer.style.display='block';
-      listEl.innerHTML=sessions.map(s=>{
-        const label=esc((s.name||s.first_question||'Untitled').slice(0,55));
-        const active=s.session_id===currentSessionId?' active':'';
-        return `<div class="session-item${active}" data-sid="${s.session_id}">
-          <input type="checkbox" class="sess-check" onchange="onSessCheckChange()" onclick="event.stopPropagation()">
+      if(footer) footer.style.display = 'block';
+      listEl.innerHTML = sessions.map(s => {
+        const label = esc((s.name||s.first_question||'Untitled').slice(0,55));
+        const active = s.session_id===currentSessionId?' active':'';
+        return `<div class="session-item${active}" data-sid="${s.session_id}" role="listitem">
+          <input type="checkbox" class="sess-check" onchange="onSessCheckChange()" onclick="event.stopPropagation()" aria-label="Select session">
           <div class="sess-body" onclick="resumeSession('${s.session_id}')">
             <span class="session-label">${label}</span>
             <span class="session-meta">${s.turn_count} turn${s.turn_count!==1?'s':''} &middot; ${relTime(s.updated_at)}</span>
           </div>
-          <button class="sess-rename-btn" onclick="startRenameSession('${s.session_id}',this)" title="Rename">✏</button>
+          <button type="button" class="sess-rename-btn" onclick="startRenameSession('${s.session_id}',this)" title="Rename" aria-label="Rename session">&#9998;</button>
         </div>`;
       }).join('');
-    } catch{}
+    } catch {}
   }
 
   function onSessCheckChange() {
-    const checked=document.querySelectorAll('.sess-check:checked').length;
-    const btn=document.getElementById('sess-del-sel-btn');
-    if(btn) { btn.style.display=checked?'inline-block':'none'; btn.textContent=`Delete ${checked}`; }
+    const checked = document.querySelectorAll('.sess-check:checked').length;
+    const btn = document.getElementById('sess-del-sel-btn');
+    if(btn){ btn.style.display=checked?'inline-flex':'none'; btn.textContent=`Delete ${checked}`; }
   }
 
   function startRenameSession(sid, btn) {
-    const item=btn.closest('.session-item'); if(!item) return;
-    const body=item.querySelector('.sess-body'); if(!body) return;
-    const current=body.querySelector('.session-label')?.textContent||'';
-    body.innerHTML=`<input class="sess-rename-input" value="${esc(current)}" onclick="event.stopPropagation()">`;
-    const inp=body.querySelector('.sess-rename-input');
+    const item = btn.closest('.session-item'); if(!item) return;
+    const body = item.querySelector('.sess-body'); if(!body) return;
+    const current = body.querySelector('.session-label')?.textContent||'';
+    body.innerHTML = `<input class="sess-rename-input" value="${esc(current)}" onclick="event.stopPropagation()" aria-label="New session name">`;
+    const inp = body.querySelector('.sess-rename-input');
     inp.focus(); inp.select();
-    const finish=async()=>{
-      const name=inp.value.trim();
+    const finish = async() => {
+      const name = inp.value.trim();
       try{ await fetch(`/sessions/${sid}/name`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})}); }catch{}
       await loadSessionList();
     };
-    inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){e.preventDefault();finish();} if(e.key==='Escape') loadSessionList(); });
-    inp.addEventListener('blur',()=>{ finish(); });
+    inp.addEventListener('keydown', e=>{ if(e.key==='Enter'){e.preventDefault();finish();} if(e.key==='Escape') loadSessionList(); });
+    inp.addEventListener('blur', ()=>{ finish(); });
   }
 
-  async function deleteSelectedSessions() {
-    const items=[...document.querySelectorAll('.sess-check:checked')];
-    if(!items.length) return;
-    for(const cb of items){
-      const sid=cb.closest('.session-item')?.dataset.sid; if(!sid) continue;
+  function deleteSelectedSessions() {
+    const items = [...document.querySelectorAll('.sess-check:checked')]; if(!items.length) return;
+    const n = items.length;
+    const desc = document.getElementById('del-sel-sessions-desc');
+    if(desc) desc.textContent = `This will permanently delete ${n} session${n!==1?'s':''} and all their conversation history.`;
+    openModal('del-sel-sessions-modal');
+  }
+
+  async function _confirmDeleteSelectedSessions() {
+    closeModal('del-sel-sessions-modal');
+    const items = [...document.querySelectorAll('.sess-check:checked')];
+    for (const cb of items) {
+      const sid = cb.closest('.session-item')?.dataset.sid; if(!sid) continue;
       try{ await fetch(`/sessions/${sid}`,{method:'DELETE'}); }catch{}
     }
     if(currentSessionId && items.some(cb=>cb.closest('.session-item')?.dataset.sid===currentSessionId)) startNewSession();
-    document.getElementById('sess-del-sel-btn').style.display='none';
+    const btn = document.getElementById('sess-del-sel-btn');
+    if(btn) btn.style.display = 'none';
     await loadSessionList();
   }
 
-  function clearAllSessions() { document.getElementById('clear-sessions-overlay').style.display='flex'; }
+  function clearAllSessions() { openModal('clear-sessions-modal'); }
 
   async function confirmClearAllSessions() {
-    document.getElementById('clear-sessions-overlay').style.display='none';
-    try{
-      const resp=await fetch('/sessions',{method:'DELETE'});
-      if(resp.ok){ startNewSession(); await loadSessionList(); }
-    }catch{}
+    closeModal('clear-sessions-modal');
+    try {
+      const resp = await fetch('/sessions',{method:'DELETE'});
+      if(resp.ok){ startNewSession(); await loadSessionList(); announce('All sessions deleted'); }
+    } catch {}
   }
 
   async function resumeSession(sessionId) {
-    currentSessionId=sessionId;
-    document.getElementById('thread').innerHTML='';
-    document.getElementById('conversation').style.display='none';
+    currentSessionId = sessionId;
+    document.getElementById('thread').innerHTML = '';
+    document.getElementById('conversation').style.display = 'none';
     document.querySelectorAll('.session-item').forEach(el=>el.classList.toggle('active',el.dataset.sid===sessionId));
-    try{
-      const body=await(await fetch(`/sessions/${sessionId}`)).json();
-      for(const t of body.data.turns)
+    try {
+      const body = await(await fetch(`/sessions/${sessionId}`)).json();
+      for (const t of body.data.turns)
         appendTurn(t.question,t.answer_html||esc(t.answer_markdown||'(no answer)'),t.iteration_count,t.tokens_input,t.tokens_output,t.status,null,!!t.is_best_effort,t.steps||[],new Date(t.created_at),null);
-    } catch{}
+    } catch {}
   }
 
   function startNewSession() {
-    currentSessionId=null;
-    document.getElementById('thread').innerHTML='';
-    document.getElementById('conversation').style.display='none';
-    document.getElementById('ask-status').innerHTML='';
+    currentSessionId = null;
+    document.getElementById('thread').innerHTML = '';
+    document.getElementById('conversation').style.display = 'none';
+    document.getElementById('ask-status').innerHTML = '';
     document.querySelectorAll('.session-item').forEach(el=>el.classList.remove('active'));
-    document.getElementById('querying-label').textContent='Conversation';
+    document.getElementById('querying-label').textContent = 'Conversation';
   }
 
-  // C23: steps inspector helpers
+  // ── Steps inspector ───────────────────────────────────────────────────────────
   let _stepSeq = 0;
   function renderStep(step, n) {
     const isError = step.is_error;
     const result = step.result || '';
-    const truncated = result.length > 300 ? result.slice(0,300) + '... (truncated)' : result;
+    const truncated = result.length > 300 ? result.slice(0,300)+'... (truncated)' : result;
     const badge = isError ? ' <span class="step-error-badge">&#10005; Error</span>' : '';
     const resultClass = isError ? 'step-result-error' : 'step-result';
     const codeId = 'sc-' + (++_stepSeq);
     return `<div class="step-block">
-      <div class="step-header"><span class="step-num">Step ${n}${badge}</span><button class="step-copy-btn" onclick="copyStep(this,'${codeId}')">Copy</button></div>
+      <div class="step-header"><span class="step-num">Step ${n}${badge}</span><button type="button" class="step-copy-btn" onclick="copyStep(this,'${codeId}')">Copy</button></div>
       <pre id="${codeId}" class="step-code">${esc(step.action)}</pre>
       <pre class="${resultClass}">${esc(truncated)}</pre>
     </div>`;
   }
   function toggleSteps(btn, panelId) {
-    const panel = document.getElementById(panelId);
-    if (!panel) return;
-    const show = panel.style.display === 'none';
-    panel.style.display = show ? 'block' : 'none';
-    btn.innerHTML = btn.innerHTML.replace(show ? '&#9654;' : '&#9660;', show ? '&#9660;' : '&#9654;');
+    const panel = document.getElementById(panelId); if(!panel) return;
+    const show = panel.style.display==='none';
+    panel.style.display = show?'block':'none';
+    btn.innerHTML = btn.innerHTML.replace(show?'&#9654;':'&#9660;', show?'&#9660;':'&#9654;');
   }
   function copyStep(btn, codeId) {
-    const el = document.getElementById(codeId); if (!el) return;
-    navigator.clipboard.writeText(el.textContent).then(() => {
-      const orig = btn.textContent; btn.textContent = 'Copied!';
-      setTimeout(() => { btn.textContent = orig; }, 1500);
-    }).catch(() => {});
+    const el = document.getElementById(codeId); if(!el) return;
+    navigator.clipboard.writeText(el.textContent).then(()=>{
+      const orig = btn.textContent; btn.textContent='Copied!';
+      setTimeout(()=>{ btn.textContent=orig; },1500);
+    }).catch(()=>{});
   }
 
   function appendTurn(q,html,iters,ti,to,status,datasetsUsed,isBestEffort,steps,firedAt,elapsedMs,suggestedQuestions) {
-    const div=document.createElement('div');
-    div.className='turn'+(status==='failed'?' failed':'');
-    // timestamp + elapsed
+    const div = document.createElement('div');
+    div.className = 'turn'+(status==='failed'?' failed':'');
     const timeStr = firedAt ? firedAt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '';
-    const elapsedStr = elapsedMs!=null ? (elapsedMs>=1000 ? (elapsedMs/1000).toFixed(1)+'s' : elapsedMs+'ms') : '';
-    const tsLine = timeStr ? `<div class="turn-timestamp">Asked at ${timeStr}${elapsedStr?' &nbsp;&middot;&nbsp; completed in '+elapsedStr:''}</div>` : '';
-    let meta=`${iters} iteration${iters!==1?'s':''}`;
-    if(ti>0||to>0) meta+=` &nbsp;&middot;&nbsp; ${ti.toLocaleString()} in / ${to.toLocaleString()} out tokens`;
-    let dsFooter='';
+    const elapsedStr = elapsedMs!=null ? (elapsedMs>=1000?(elapsedMs/1000).toFixed(1)+'s':elapsedMs+'ms') : '';
+    const metaParts = [];
+    if (timeStr) metaParts.push(`Asked at ${timeStr}${elapsedStr ? ', completed in ' + elapsedStr : ''}`);
+    metaParts.push(`${iters} iteration${iters!==1?'s':''}`);
+    if (ti>0||to>0) metaParts.push(`${ti.toLocaleString()} in / ${to.toLocaleString()} out tokens`);
+    const meta = metaParts.join(' &nbsp;&middot;&nbsp; ');
+    let dsFooter = '';
     if(datasetsUsed&&datasetsUsed.length){
-      const names=datasetsUsed.map(d=>esc(d.filename)).join(', ');
-      dsFooter=`<details class="datasets-used-footer"><summary>Datasets used (${datasetsUsed.length})</summary><span>${names}</span></details>`;
+      const names = datasetsUsed.map(d=>esc(d.filename)).join(', ');
+      dsFooter = `<details class="datasets-used-footer"><summary>Datasets used (${datasetsUsed.length})</summary><span>${names}</span></details>`;
     }
-    const badge=isBestEffort?`<div class="best-effort-badge">&#9888; Best effort</div>`:'';
-    // C23: steps footer — always shown when steps provided
+    const badge = isBestEffort?`<div class="best-effort-badge">&#9888; Best effort</div>`:'';
     let stepsFooter = '';
     if (steps != null) {
       if (steps.length) {
-        const errCount = steps.filter(s => s.is_error).length;
-        const label = errCount > 0
+        const errCount = steps.filter(s=>s.is_error).length;
+        const label = errCount>0
           ? `${steps.length} steps &middot; ${errCount} error${errCount!==1?'s':''}`
           : `${steps.length} step${steps.length!==1?'s':''}`;
         const panelId = 'sp-' + (++_stepSeq);
         stepsFooter = `<div class="steps-footer">
-          <button class="steps-toggle" onclick="toggleSteps(this,'${panelId}')">&#9654; ${label}</button>
+          <button type="button" class="steps-toggle" onclick="toggleSteps(this,'${panelId}')">&#9654; ${label}</button>
           <div id="${panelId}" class="steps-panel" style="display:none;">${steps.map((s,i)=>renderStep(s,i+1)).join('')}</div>
         </div>`;
       } else {
         stepsFooter = `<div class="steps-footer"><span class="steps-zero">0 code steps — answered from schema</span></div>`;
       }
     }
-    div.innerHTML=`<div class="turn-q">Q: ${esc(q)}</div>${tsLine}${badge}<div class="answer-body">${html}</div><div class="turn-meta">${meta}</div>${dsFooter}${stepsFooter}`;
+    div.innerHTML = `<div class="turn-q">Q: ${esc(q)}</div>${badge}<div class="answer-body">${html}</div><div class="turn-meta">${meta}</div>${dsFooter}${stepsFooter}`;
     if (suggestedQuestions && suggestedQuestions.length) {
       const chipsDiv = document.createElement('div');
       chipsDiv.className = 'followup-chips';
       suggestedQuestions.forEach(sq => {
         const btn = document.createElement('button');
-        btn.className = 'followup-chip';
+        btn.type = 'button'; btn.className = 'followup-chip';
         btn.textContent = sq;
         btn.addEventListener('click', () => fillQuestion(sq));
         chipsDiv.appendChild(btn);
       });
       div.appendChild(chipsDiv);
     }
-    // C4: render Plotly charts from data-spec divs (client-side, no script injection needed)
     div.querySelectorAll('.answer-body .plotly-chart').forEach(el => {
       try {
         const spec = JSON.parse(el.getAttribute('data-spec'));
-        const layout = Object.assign({ autosize: true }, spec.layout || {});
-        Plotly.newPlot(el, spec.data || [], layout, { responsive: true, displayModeBar: true });
+        const layout = Object.assign({ autosize:true }, spec.layout||{});
+        Plotly.newPlot(el, spec.data||[], layout, {responsive:true, displayModeBar:true});
       } catch(e) { console.error('Plotly render error', e); }
     });
     document.getElementById('thread').appendChild(div);
-    document.getElementById('conversation').style.display='block';
+    document.getElementById('conversation').style.display = 'block';
     div.scrollIntoView({behavior:'smooth',block:'nearest'});
   }
 
-  // ── Ask ───────────────────────────────────────────────────────────────────────
-  async function askQuestion() {
-    const qEl=document.getElementById('question'), q=qEl.value.trim();
-    const status=document.getElementById('ask-status'), btn=document.getElementById('ask-btn');
-    if(!document.querySelectorAll('.ds-check').length){ status.innerHTML='<span class="error">Upload a dataset first.</span>'; return; }
-    if(!q){ status.innerHTML='<span class="error">Enter a question.</span>'; return; }
-    btn.disabled=true; btn.innerHTML='<span class="spinner"></span>Thinking...'; status.innerHTML='';
-    const firedAt=new Date();
+  // ── Ask (with AbortController) ────────────────────────────────────────────────
+  let _askController = null;
 
-    // C22: start progress display
-    const progressRow=document.getElementById('progress-row');
-    progressRow.style.display='flex';
-    let elapsed=0;
-    document.getElementById('prg-elapsed').textContent='⏱ 0s';
-    document.getElementById('prg-step').textContent='Step 0 / —';
-    document.getElementById('prg-bar-fill').style.width='0%';
-    const elapsedTimer=setInterval(()=>{ elapsed++; document.getElementById('prg-elapsed').textContent=`⏱ ${elapsed}s`; },1000);
-    const pollTimer=setInterval(async()=>{
-      try{
-        const pb=await(await fetch('/runs/current')).json();
-        const d=pb.data;
+  function cancelQuery() {
+    if (_askController) { _askController.abort(); }
+  }
+
+  async function askQuestion() {
+    const qEl = document.getElementById('question'), q = qEl.value.trim();
+    const status = document.getElementById('ask-status'), btn = document.getElementById('ask-btn');
+    if (!document.querySelectorAll('.ds-check').length) {
+      status.innerHTML = '<span class="msg-error">Upload a dataset first.</span>'; return;
+    }
+    if (!q) { status.innerHTML = '<span class="msg-error">Enter a question.</span>'; return; }
+
+    _askController = new AbortController();
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Thinking…';
+    status.innerHTML = '';
+    document.getElementById('stop-btn').style.display = 'inline-flex';
+    const firedAt = new Date();
+
+    const progressRow = document.getElementById('progress-row');
+    progressRow.style.display = 'flex';
+    let elapsed = 0;
+    document.getElementById('prg-elapsed').textContent = '⏱ 0s';
+    document.getElementById('prg-step').textContent = 'Step 0 / —';
+    document.getElementById('prg-bar-fill').style.width = '0%';
+    const elapsedTimer = setInterval(()=>{ elapsed++; document.getElementById('prg-elapsed').textContent=`⏱ ${elapsed}s`; },1000);
+    const pollTimer = setInterval(async()=>{
+      try {
+        const pb = await(await fetch('/runs/current')).json();
+        const d = pb.data;
         if(d&&d.run_id&&d.status==='running'){
           const mi=d.max_iterations||6, ic=d.iteration_count||0;
-          document.getElementById('prg-step').textContent=`Step ${ic} / ${mi}`;
-          document.getElementById('prg-bar-fill').style.width=Math.min(100,(ic/mi)*100)+'%';
+          document.getElementById('prg-step').textContent = `Step ${ic} / ${mi}`;
+          const pct = Math.min(100,(ic/mi)*100);
+          document.getElementById('prg-bar-fill').style.width = pct+'%';
+          document.getElementById('prg-bar').setAttribute('aria-valuenow', Math.round(pct));
         }
-      }catch{}
+      } catch {}
     },1000);
 
-    try{
-      const resp=await fetch('/ask',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({question:q,session_id:currentSessionId})});
-      const body=await resp.json();
-      if(!resp.ok){
-        status.innerHTML=`<span class="error">${esc(body.detail?.message||resp.statusText)}</span>`;
+    try {
+      const resp = await fetch('/ask',{
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({question:q, session_id:currentSessionId}),
+        signal: _askController.signal,
+      });
+      const body = await resp.json();
+      if (!resp.ok) {
+        status.innerHTML = `<span class="msg-error">${esc(body.detail?.message||resp.statusText)}</span>`;
       } else {
-        const r=body.data;
-        currentSessionId=r.session_id;
-        const dsUsed=r.datasets_used||[];
+        const r = body.data;
+        currentSessionId = r.session_id;
+        const dsUsed = r.datasets_used||[];
         if(dsUsed.length>1) document.getElementById('querying-label').textContent=`Querying ${dsUsed.length} datasets`;
         appendTurn(q,r.answer_html||esc(r.answer_markdown||'(no answer)'),r.iteration_count,r.tokens_input,r.tokens_output,r.status,dsUsed,!!r.is_best_effort,r.steps||[],firedAt,Date.now()-firedAt.getTime(),r.suggested_questions||[]);
         if(typeof tuAddRun==='function') tuAddRun(r.tokens_input||0, r.tokens_output||0);
-        qEl.value='';
+        qEl.value = '';
         await loadSessionList();
+        announce('Answer received');
       }
-    } catch(e){ status.innerHTML=`<span class="error">Network error: ${esc(e.message)}</span>`; }
-    finally{
+    } catch(e) {
+      if (e.name === 'AbortError') {
+        status.innerHTML = '<span style="color:#d97706;">Query cancelled.</span>';
+        announce('Query cancelled');
+      } else {
+        status.innerHTML = `<span class="msg-error">Network error: ${esc(e.message)}</span>`;
+      }
+    } finally {
       clearInterval(elapsedTimer); clearInterval(pollTimer);
-      progressRow.style.display='none';
-      btn.disabled=false; btn.textContent='Ask';
+      _askController = null;
+      progressRow.style.display = 'none';
+      document.getElementById('stop-btn').style.display = 'none';
+      btn.disabled = false; btn.textContent = 'Ask';
     }
   }
 
-  // ── Column expand ─────────────────────────────────────────────────────────────
+  // ── Column toggle ─────────────────────────────────────────────────────────────
   function toggleColumns(id, event) {
     event.preventDefault(); event.stopPropagation();
-    const panel=document.getElementById(`cols-${id}`); if(!panel) return;
-    const open=panel.style.display!=='none';
-    panel.style.display=open?'none':'flex';
-    const btn=event.target;
-    btn.textContent=open?'▸ cols':'▾ cols';
-    btn.style.color=open?'':'#1e40af';
+    const panel = document.getElementById(`cols-${id}`); if(!panel) return;
+    const open = panel.style.display !== 'none';
+    panel.style.display = open ? 'none' : 'flex';
+    panel.setAttribute('aria-hidden', open ? 'true' : 'false');
+    const btn = event.currentTarget || event.target;
+    btn.textContent = open ? '▸ cols' : '▾ cols';
+    btn.style.color = open ? '' : '#1e40af';
   }
 
-  // ── Fill question input from chip ─────────────────────────────────────────────
+  // ── Fill question from follow-up chip ─────────────────────────────────────────
   function fillQuestion(text) {
-    const el=document.getElementById('question'); if(!el) return;
-    el.value=text; el.focus();
+    const el = document.getElementById('question'); if(!el) return;
+    el.value = text; el.focus();
   }
 
   // ── Persistent memory ─────────────────────────────────────────────────────────
-  async function openMemoryModal() {
-    document.getElementById('memory-status').textContent='';
-    try{
-      const body=await(await fetch('/memory')).json();
-      document.getElementById('memory-input').value=body.data?.content||'';
-    } catch{}
-    document.getElementById('memory-overlay').style.display='flex';
+  async function loadMemory() {
+    document.getElementById('memory-status').textContent = '';
+    try {
+      const body = await(await fetch('/memory')).json();
+      document.getElementById('memory-input').value = body.data?.content || '';
+    } catch {}
   }
   async function saveMemory() {
-    const content=document.getElementById('memory-input').value;
-    try{
-      const resp=await fetch('/memory',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({content})});
-      if(resp.ok){ document.getElementById('memory-status').textContent='Saved!'; setTimeout(()=>document.getElementById('memory-status').textContent='',2000); }
-    }catch(e){ document.getElementById('memory-status').textContent='Error: '+e.message; }
+    const content = document.getElementById('memory-input').value;
+    try {
+      const resp = await fetch('/memory',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({content})});
+      if(resp.ok){
+        document.getElementById('memory-status').textContent = 'Saved!';
+        setTimeout(()=>document.getElementById('memory-status').textContent='', 2000);
+        announce('Memory saved');
+      }
+    } catch(e) { document.getElementById('memory-status').textContent = 'Error: '+e.message; }
   }
 
   // ── NL data cleaning ──────────────────────────────────────────────────────────
-  let _cleanDatasetId='', _cleanCode='';
+  let _cleanDatasetId = '', _cleanCode = '';
 
-  function openCleanModal(id, name, event) {
+  function openCleanModal(id, event) {
     event.preventDefault(); event.stopPropagation();
-    _cleanDatasetId=id; _cleanCode='';
-    document.getElementById('clean-ds-name').textContent=name;
-    document.getElementById('clean-instruction').value='';
-    document.getElementById('clean-preview-area').style.display='none';
-    document.getElementById('clean-status').textContent='';
-    document.getElementById('clean-overlay').style.display='flex';
+    _cleanDatasetId = id; _cleanCode = '';
+    const row = document.querySelector(`.ds-row[data-id="${id}"]`);
+    document.getElementById('clean-ds-name').textContent = row?.dataset.filename || id;
+    document.getElementById('clean-instruction').value = '';
+    document.getElementById('clean-preview-area').style.display = 'none';
+    document.getElementById('clean-status').textContent = '';
+    openModal('clean-modal');
   }
+
   async function previewClean() {
-    const instruction=document.getElementById('clean-instruction').value.trim();
+    const instruction = document.getElementById('clean-instruction').value.trim();
     if(!instruction){ document.getElementById('clean-status').textContent='Enter an instruction first.'; return; }
-    const btn=document.getElementById('clean-preview-btn');
+    const btn = document.getElementById('clean-preview-btn');
     btn.disabled=true; btn.textContent='Generating…';
-    document.getElementById('clean-status').textContent='';
-    try{
-      const resp=await fetch(`/datasets/${_cleanDatasetId}/clean`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({instruction})});
-      const body=await resp.json();
+    document.getElementById('clean-status').textContent = '';
+    try {
+      const resp = await fetch(`/datasets/${_cleanDatasetId}/clean`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({instruction})});
+      const body = await resp.json();
       if(!resp.ok){ document.getElementById('clean-status').textContent=body.detail?.message||'Error'; return; }
-      const d=body.data;
-      _cleanCode=d.code;
-      document.getElementById('clean-code-block').textContent=d.code;
-      document.getElementById('clean-before-count').textContent=`${d.row_count_before} rows × ${d.col_count_before} cols`;
-      document.getElementById('clean-after-count').textContent=`${d.row_count_after} rows × ${d.col_count_after} cols`;
-      document.getElementById('clean-preview-area').style.display='block';
-    }catch(e){ document.getElementById('clean-status').textContent='Error: '+e.message; }
+      const d = body.data;
+      _cleanCode = d.code;
+      document.getElementById('clean-code-block').textContent = d.code;
+      document.getElementById('clean-before-count').textContent = `${d.row_count_before} rows × ${d.col_count_before} cols`;
+      document.getElementById('clean-after-count').textContent = `${d.row_count_after} rows × ${d.col_count_after} cols`;
+      document.getElementById('clean-preview-area').style.display = 'block';
+    } catch(e){ document.getElementById('clean-status').textContent='Error: '+e.message; }
     finally{ btn.disabled=false; btn.textContent='Preview'; }
   }
+
   async function applyClean() {
-    if(!_cleanCode){ return; }
-    const btn=document.getElementById('clean-apply-btn');
+    if(!_cleanCode) return;
+    const btn = document.getElementById('clean-apply-btn');
     btn.disabled=true; btn.textContent='Applying…';
-    try{
-      const resp=await fetch(`/datasets/${_cleanDatasetId}/clean/apply`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:_cleanCode})});
-      const body=await resp.json();
+    try {
+      const resp = await fetch(`/datasets/${_cleanDatasetId}/clean/apply`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:_cleanCode})});
+      const body = await resp.json();
       if(!resp.ok){ document.getElementById('clean-status').textContent=body.detail?.message||'Error'; return; }
-      const d=body.data;
-      // Update ds-row metadata in DOM
-      const row=document.querySelector(`.ds-row[data-id="${_cleanDatasetId}"]`);
+      const d = body.data;
+      const row = document.querySelector(`.ds-row[data-id="${_cleanDatasetId}"]`);
       if(row){ row.dataset.rowCount=d.row_count; row.dataset.colCount=d.col_count; }
-      const lbl=document.querySelector(`.ds-check[value="${_cleanDatasetId}"]`)?.parentElement?.querySelector('.row-cnt');
+      const lbl = document.querySelector(`.ds-check[value="${_cleanDatasetId}"]`)?.parentElement?.querySelector('.row-cnt');
       if(lbl) lbl.innerHTML=`(${d.row_count} rows &middot; ${d.col_count} cols)`;
-      // Refresh column chips
-      const colPanel=document.getElementById(`cols-${_cleanDatasetId}`);
+      const colPanel = document.getElementById(`cols-${_cleanDatasetId}`);
       if(colPanel) colPanel.innerHTML=(d.columns||[]).map(c=>`<span class="col-chip">${esc(c)}</span>`).join('');
       document.getElementById('clean-status').textContent='Applied! Dataset updated.';
       document.getElementById('clean-status').style.color='#16a34a';
       document.getElementById('clean-apply-btn').style.display='none';
       _updateStorageStat();
-    }catch(e){ document.getElementById('clean-status').textContent='Error: '+e.message; }
+      announce('Dataset cleaning applied');
+    } catch(e){ document.getElementById('clean-status').textContent='Error: '+e.message; }
     finally{ btn.disabled=false; btn.textContent='Apply changes'; }
   }
 
   // ── Export conversation as Markdown ───────────────────────────────────────────
   function exportConversationMd() {
-    const turns=[...document.querySelectorAll('#thread .turn')];
-    if(!turns.length) return;
-    const lines=['# Conversation Export\n'];
-    turns.forEach((t,i)=>{
-      const q=t.querySelector('.turn-q')?.textContent?.replace(/^Q:\s*/,'').trim()||'';
-      const md=t.querySelector('.answer-body')?.innerText?.trim()||'';
+    const turns = [...document.querySelectorAll('#thread .turn')]; if(!turns.length) return;
+    const lines = ['# Conversation Export\n'];
+    turns.forEach((t,i) => {
+      const q = t.querySelector('.turn-q')?.textContent?.replace(/^Q:\s*/,'').trim()||'';
+      const md = t.querySelector('.answer-body')?.innerText?.trim()||'';
       lines.push(`## Q${i+1}: ${q}\n\n${md}\n`);
     });
-    const blob=new Blob([lines.join('\n')],{type:'text/markdown'});
-    const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
-    a.download=`conversation-${new Date().toISOString().slice(0,10)}.md`;
+    const blob = new Blob([lines.join('\n')],{type:'text/markdown'});
+    const a = document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download = `conversation-${new Date().toISOString().slice(0,10)}.md`;
     a.click(); URL.revokeObjectURL(a.href);
   }
 
-  document.addEventListener('DOMContentLoaded',()=>{
-    document.getElementById('question').addEventListener('keydown',e=>{
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('question').addEventListener('keydown', e => {
       if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); askQuestion(); }
     });
     _updateStorageStat();

@@ -29,7 +29,7 @@ class AgentState(TypedDict, total=False):
 ## Nodes
 
 ### `setup`
-**Reads from state:** `run_id`, `dataset_id`
+**Reads from state:** `run_id`, `dataset_ids`
 **Writes to state:** nothing (side effect: loads DataFrame into module-level cache keyed by `run_id`)
 **External calls:**
 | System | Operation | On Failure |
@@ -94,7 +94,7 @@ force_finalize → END
 
 ## Termination Signal
 
-`FINAL ANSWER:` prefix (case-insensitive). `plan_action` router checks `llm_response.strip().upper().startswith("FINAL ANSWER:")`. If yes → strip prefix → set `answer` → route to `finalize`.
+`FINAL ANSWER:` substring (case-insensitive). `plan_action` router checks `"FINAL ANSWER:" in llm_response.upper()`. If found → extract text after the marker → set `answer` → route to `finalize`. This tolerates models that embed `FINAL ANSWER:` after preamble rather than strictly at the start.
 
 ## Max Iterations
 
