@@ -50,9 +50,13 @@ class AgentState(TypedDict, total=False):
 ### `execute_action`
 **Reads from state:** `llm_response` (pandas expression)
 **Writes to state:** appends `{action, result, is_error}` to `action_history`
-**External calls:** none (pure pandas eval against cached DataFrame)
+**External calls:**
 
-**Behaviour:** `eval(llm_response, {"df": df})`, converts result to string. On exception, marks `is_error=True` and routes back to plan_action for self-correction.
+| System | Operation | On Failure |
+|--------|-----------|------------|
+| SQLite | `_update_iteration_count(run_id, n)` — writes `iteration_count` to `QueryRunRow` mid-run for live progress polling | non-fatal — ignored silently |
+
+**Behaviour:** `eval(llm_response, {"df": df})`, converts result to string. Calls `_update_iteration_count` after each successful eval so the progress bar stays current. On exception, marks `is_error=True` and routes back to plan_action for self-correction.
 
 ### `finalize`
 **Reads from state:** `llm_response` (after stripping `FINAL ANSWER:` prefix)

@@ -12,7 +12,7 @@ Upload a CSV, ask questions in plain English, get answers — powered by Google 
 
 ```
 # repo root
-python -m uv sync
+uv sync
 ```
 
 ### 2. Configure environment
@@ -117,7 +117,7 @@ reports/        ← Session logs
 | `DATA_ANALYST_DATABASE_URL` | `sqlite:///data_analyst.db` | SQLite database path |
 | `DATA_ANALYST_GEMINI_API_KEY` | *(empty)* | Gemini API key — leave blank for stub mode |
 | `DATA_ANALYST_LLM_MODEL` | `gemini-2.5-flash` | Gemini model name |
-| `DATA_ANALYST_MAX_ITERATIONS` | `10` | Max ReAct loop iterations |
+| `DATA_ANALYST_MAX_ITERATIONS` | `6` | Max ReAct loop iterations |
 | `DATA_ANALYST_LOG_LEVEL` | `INFO` | Logging level |
 | `PORT` | `8001` | HTTP server port |
 

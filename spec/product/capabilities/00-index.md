@@ -4,7 +4,7 @@ All capabilities are implemented unless noted otherwise.
 
 | File | Capabilities covered | Status |
 |------|---------------------|--------|
-| [01-data-ingestion.md](01-data-ingestion.md) | C1 CSV upload, C10 duplicate detection, C11 multi-format (CSV/TSV/TXT/JSON), C13 multi-file / folder drop, C16 notes file, C17 staged upload | implemented |
+| [01-data-ingestion.md](01-data-ingestion.md) | C1 CSV upload, C10 duplicate detection, C11 multi-format (CSV/TSV/TXT/JSON), C13 multi-file / folder drop, C16 notes file, C17 staged upload, C24 NL data cleaning (preview + apply) | implemented |
 | [02-query-and-analysis.md](02-query-and-analysis.md) | C2 NL Q&A / ReAct loop, C8 expanded result display (100 rows / 20 cols), C19 automatic dataset selection, C20 early exit / force-finalize | implemented |
 | [03-conversation.md](03-conversation.md) | C3 multi-turn conversation history, C9 session management UI, C14 multi-dataset querying, C15 dataset deletion + cascade | implemented |
 | [04-response-rendering.md](04-response-rendering.md) | C6 rich text / Markdown → HTML, C4 Plotly charts embedded inline, C23 agent steps inspector | implemented |

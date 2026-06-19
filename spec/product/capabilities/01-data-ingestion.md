@@ -93,11 +93,44 @@ Files are not uploaded immediately on selection. The UI stages them in a client-
 
 ---
 
+---
+
+## Data Cleaning (C24)
+
+A per-dataset NL data-cleaning flow exposed via two endpoints.
+
+### Preview (`POST /datasets/{dataset_id}/clean`)
+
+| Body field    | Type   | Description                                          |
+|---------------|--------|------------------------------------------------------|
+| `instruction` | string | Plain-English description of the cleaning to perform |
+
+1. Builds a prompt asking the LLM to generate a pandas expression that performs the described transformation on a `df` variable.
+2. Executes the code against an **in-memory copy** of the dataset (the on-disk file is untouched).
+3. Returns `before` (original) and `after` (transformed) row/column counts plus the generated code.
+
+### Apply (`POST /datasets/{dataset_id}/clean/apply`)
+
+| Body field | Type   | Description                                 |
+|------------|--------|---------------------------------------------|
+| `code`     | string | The pandas expression from the preview step |
+
+1. Executes the code against the live DataFrame.
+2. Overwrites the CSV on disk at `uploads/{dataset_id}.csv`.
+3. Updates `DatasetRow.row_count`, `col_count`, and `columns_json` in SQLite.
+
+### UI
+
+The 🧹 button per dataset opens the `clean-modal`. The user types an instruction, sees a before/after preview (row/column counts + generated code), and confirms to apply. The dataset list refreshes after apply to show the updated dimensions.
+
+---
+
 ## Implementation
 
 | File | Role |
 |------|------|
 | `src/data_analyst/api/upload.py` | Route handler: duplicate check, parse, persist |
+| `src/data_analyst/api/clean.py` | `POST /datasets/{id}/clean` and `/clean/apply` route handlers |
 | `src/data_analyst/utils/file_parser.py` | `compute_hash`, `detect_format`, `parse_file`, `_parse_json` |
 | `src/data_analyst/db/models.py` | `DatasetRow` ORM model |
-| `src/data_analyst/templates/index.html` | Drop zone, staged-file list, upload queue, duplicate modal |
+| `src/data_analyst/templates/index.html` | Drop zone, staged-file list, upload queue, duplicate modal, clean modal |
