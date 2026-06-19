@@ -61,12 +61,62 @@ REST. All routes return `{"data": ..., "error": null}` on success or raise HTTP 
       "row_count": 1000,
       "col_count": 8,
       "columns": ["date", "region", "revenue", "units"],
-      "created_at": "2026-06-17T12:00:00Z"
+      "created_at": "2026-06-17T12:00:00Z",
+      "origin": "uploaded",
+      "stale": false,
+      "derived_from_run_id": null,
+      "derived_from_dataset_ids": null,
+      "derivation_description": null
     }
   ],
   "error": null
 }
 ```
+
+`stale` is `true` when any parent dataset's `updated_at` is newer than the derived dataset's `created_at`; always `false` for uploaded datasets.
+
+### `GET /datasets/{dataset_id}`
+
+**Purpose:** Return full metadata for a single dataset, including per-column dtypes. Used by the Database tab schema panel.
+
+**Response:**
+
+```json
+{
+  "data": {
+    "dataset_id": "uuid",
+    "filename": "customers_clustered_10seg.csv",
+    "row_count": 95406,
+    "col_count": 9,
+    "columns": ["customer_id", "cluster", "total_spend"],
+    "columns_schema": [
+      {"name": "customer_id", "dtype": "object"},
+      {"name": "cluster",     "dtype": "int64"},
+      {"name": "total_spend", "dtype": "float64"}
+    ],
+    "created_at": "2026-06-20T04:00:00Z",
+    "format": "csv",
+    "context": "KMeans k=10 segmentation of olist_customers",
+    "origin": "derived",
+    "stale": false,
+    "derived_from_run_id": "uuid",
+    "derived_from_dataset_ids": ["uuid-a", "uuid-b"],
+    "derivation_description": "KMeans k=10 segmentation of olist_customers",
+    "derivation_code": "from sklearn.cluster import KMeans\ndf_result = ..."
+  },
+  "error": null
+}
+```
+
+`columns_schema` dtypes are read from the Parquet file if `parquet_path` is set, otherwise from `pd.read_csv(..., nrows=0).dtypes`. Uploaded datasets return `null` for all `derived_*` fields.
+
+**Error cases:**
+
+| Status | Condition |
+| ------ | --------- |
+| 404 | dataset_id not found |
+
+---
 
 ### `POST /ask`
 
@@ -169,6 +219,7 @@ The `run_id` references a thin `QueryRunRow(status="clarification")`. The user a
   "data": {
     "session_id": "uuid",
     "dataset_id": "uuid",
+    "dataset_ids": ["uuid", "uuid2"],
     "name": "Q2 Revenue Analysis",
     "turns": [
       {
@@ -235,11 +286,14 @@ The `run_id` references a thin `QueryRunRow(status="clarification")`. The user a
   "data": {
     "deleted_dataset_ids": ["uuid"],
     "deleted_session_count": 3,
-    "deleted_run_count": 12
+    "deleted_run_count": 12,
+    "derived_deleted": 2
   },
   "error": null
 }
 ```
+
+`derived_deleted` is the count of derived datasets recursively deleted because they depended on the deleted dataset.
 
 **Error cases:**
 | Status | Condition |
@@ -323,6 +377,33 @@ Response gains `context: string` field.
 **Request:** `{"content": "fiscal year starts in April; revenue is always in USD"}`
 
 **Response:** `{"data": {"content": "..."}, "error": null}`
+
+---
+
+### `POST /datasets/{dataset_id}/re-derive` *(C25)*
+
+**Purpose:** Re-execute the derivation code against the current versions of the parent datasets. Resolves stale status.
+
+**Request:** No body.
+
+**Response:** Same shape as `GET /datasets/{dataset_id}` with `stale: false` and updated `row_count`, `col_count`, `columns`, `columns_schema`.
+
+**Behaviour:**
+
+- Loads each parent from `derived_from_dataset_ids` (Parquet preferred, CSV fallback).
+- Executes `derivation_code` in the same sandboxed namespace as `execute_action`.
+- Overwrites `uploads/{dataset_id}.csv` with the result and regenerates `uploads/{dataset_id}.parquet`.
+- Calls `_invalidate_dataset(dataset_id)` to evict stale cache entries (C27).
+- Updates `row_count`, `col_count`, `columns_json`, `parquet_path`, `updated_at` in DB.
+
+**Error cases:**
+
+| Status | Condition |
+| ------ | --------- |
+| 404 | dataset not found |
+| 400 | `not_derived` — dataset has `origin="uploaded"` |
+| 404 | `parent_not_found` — one or more parent datasets deleted |
+| 400 | `re_derive_error` — `derivation_code` raised an exception; body includes `error_message` |
 
 ---
 
