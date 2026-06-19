@@ -11,7 +11,8 @@ def after_plan(state: AgentState) -> str:
     if state.get("error") or state.get("status") == "failed":
         return "handle_error"
     response = state.get("llm_response", "").strip()
-    if response.upper().startswith("FINAL ANSWER:"):
+    # Catch "FINAL ANSWER:" anywhere — LLM sometimes appends it after code
+    if "FINAL ANSWER:" in response.upper():
         return "finalize"
     return "execute_action"
 
