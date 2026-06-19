@@ -4,7 +4,8 @@
       "Edit",
       "Write",
       "Read",
-      "Bash(*)"
+      "Bash(*)",
+      "PowerShell(*)"
     ],
     "deny": []
   }

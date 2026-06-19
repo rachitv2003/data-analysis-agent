@@ -1,38 +1,12 @@
 # Capabilities Index
 
-> **Boilerplate status:** The spec-writer sub-agent creates one file per capability in this directory. Each file describes exactly one discrete thing the agent can do.
+All capabilities are implemented unless noted otherwise.
 
----
-
-## What Is a Capability?
-
-A capability is a single, discrete action or behavior the agent performs. Examples:
-- "Search the web for companies matching criteria X"
-- "Draft a personalized email given a lead profile"
-- "Send a Slack notification when a threshold is crossed"
-
-## Capabilities in This Project
-
-<!-- FILL IN: List capabilities here as they are defined. Each entry links to its spec file. -->
-
-| # | Capability | File |
-|---|-----------|------|
-| 1 | <!-- name --> | [01-name.md](01-name.md) |
-
-## How to Add a New Capability
-
-Run `/spec-new-capability [description]` or ask the spec-writer directly. The spec-writer will:
-1. Create a new file in this directory
-2. Update this index
-3. Flag any dependencies on existing capabilities
-4. The spec-reviewer will validate it fits the architecture
-
-## Capability File Template
-
-Each capability file should answer:
-- **What it does** (one sentence)
-- **Inputs** (what data it receives)
-- **Outputs** (what it produces)
-- **External calls** (APIs, LLMs, databases it touches)
-- **Error cases** (what can go wrong and how it's handled)
-- **Success criteria** (how we test it)
+| File | Capabilities covered | Status |
+|------|---------------------|--------|
+| [01-data-ingestion.md](01-data-ingestion.md) | C1 CSV upload, C10 duplicate detection, C11 multi-format (CSV/TSV/TXT/JSON), C13 multi-file / folder drop, C16 notes file, C17 staged upload | implemented |
+| [02-query-and-analysis.md](02-query-and-analysis.md) | C2 NL Q&A / ReAct loop, C8 expanded result display (100 rows / 20 cols), C19 automatic dataset selection, C20 early exit / force-finalize | implemented |
+| [03-conversation.md](03-conversation.md) | C3 multi-turn conversation history, C9 session management UI, C14 multi-dataset querying, C15 dataset deletion + cascade | implemented |
+| [04-response-rendering.md](04-response-rendering.md) | C6 rich text / Markdown → HTML, C4 Plotly charts embedded inline, C23 agent steps inspector | implemented |
+| [05-observability.md](05-observability.md) | C7 per-run token tracking, C18 token usage counter widget + daily stats, C22 query timer + live progress bar | implemented |
+| [06-llm-configuration.md](06-llm-configuration.md) | C21 multi-provider LLM (Gemini / OpenRouter / stub), C12 dataset context notes injected into prompts | implemented |
