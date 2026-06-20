@@ -81,18 +81,16 @@ When the check returns `proceed: false`, `/ask` returns HTTP 200 with a distinct
 ```json
 {
   "data": {
-    "clarification_needed": true,
+    "type": "clarification",
     "clarification_question": "Which time period are you referring to — 2016, 2017, or 2018?",
     "run_id": "uuid",
-    "session_id": "uuid",
-    "tokens_input": 45,
-    "tokens_output": 18
+    "session_id": "uuid"
   },
   "error": null
 }
 ```
 
-`run_id` references the thin `QueryRunRow(status="clarification")` created to record the exchange. `session_id` is created (or reused from the request) so the clarification turn appears in the thread on `GET /sessions/{id}`.
+`run_id` references the thin `QueryRunRow(status="clarification")` created to record the exchange. `session_id` is created (or reused from the request) so the clarification turn appears in the thread on `GET /sessions/{id}`. Tokens consumed by the clarification check are written to the `QueryRunRow` (not returned in the response body) and are included in `GET /stats/daily`.
 
 ### `GET /sessions/{session_id}` — clarification turns
 

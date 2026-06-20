@@ -1,5 +1,10 @@
 # C29 — Live Context Window Display
 
+**Status:** implemented
+**Covers:** C29 (live context window display)
+
+---
+
 ## Overview
 
 Surfaces real-time token budget awareness in the UI:
@@ -28,14 +33,25 @@ A hard-coded mapping of known models to their context windows, stored in both th
 
 | Model | Tokens |
 |-------|--------|
+| `gemini-3.1-flash-lite` | 1,000,000 |
+| `gemini-3.1-flash` | 1,000,000 |
+| `gemini-3.1-pro` | 1,000,000 |
+| `gemini-2.5-flash-lite` | 1,000,000 |
 | `gemini-2.5-flash` | 1,000,000 |
 | `gemini-2.5-pro` | 1,000,000 |
+| `gemini-2.0-flash` | 1,000,000 |
 | `gemini-1.5-pro` | 2,097,152 |
 | `gemini-1.5-flash` | 1,048,576 |
 | `claude-opus-4` | 200,000 |
 | `claude-sonnet-4` | 200,000 |
 | `claude-haiku-4` | 200,000 |
+| `claude-3-5-sonnet` | 200,000 |
+| `claude-3-5-haiku` | 200,000 |
+| `claude-3-opus` | 200,000 |
 | `gpt-4o` | 128,000 |
+| `gpt-4o-mini` | 128,000 |
+| `gpt-4-turbo` | 128,000 |
+| _(unknown Gemini)_ | 1,000,000 (catch-all) |
 | _(unknown)_ | 128,000 (fallback) |
 
 The active model name is read from `GET /stats/daily` (already returned). The JS widget looks up the limit against this table and shows `used / limit` tokens in the sidebar.

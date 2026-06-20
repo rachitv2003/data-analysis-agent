@@ -79,13 +79,9 @@ The existing `context` column is unchanged (still stores the final human-readabl
 
 ## API Changes
 
-### `POST /upload` response
-
-Gains `"auto_notes_status": "pending"` (always `"pending"` on upload since the task has just been queued).
-
 ### `GET /datasets/{dataset_id}` response
 
-Gains `"auto_notes_status": "pending" | "done" | "failed" | null`.
+Includes `"auto_notes_status": "pending" | "done" | "failed" | null`.
 
 ### `POST /datasets/{dataset_id}/describe` *(new)*
 

@@ -28,9 +28,10 @@ Metadata about an uploaded file.
 | `derived_from_dataset_ids` | TEXT | yes | NULL | JSON array of parent `dataset_id`s used to produce this dataset; NULL for uploaded |
 | `derivation_code` | TEXT | yes | NULL | The pandas expression that produced this dataset; NULL for uploaded |
 | `parquet_path` | TEXT | yes | NULL | Absolute path to the pre-converted Parquet file (`uploads/{id}.parquet`); NULL if conversion failed or not yet run (C27) |
-| `auto_notes_status` | TEXT | yes | NULL | C30: `"pending"` while auto-notes background task runs; `"done"` on success; `"failed"` on error; NULL for datasets created before C30 |
+| `auto_notes_status` | TEXT | yes | NULL | C30: `"pending"` while notes generation task runs; `"done"` on success; `"failed"` on error; NULL until first generation is triggered |
 | `context_facts` | TEXT | yes | NULL | C31: JSON array of extracted fact strings distilled from `context`; NULL until first C31 compression completes |
 | `created_at` | TIMESTAMP(tz) | no | `now(UTC)` | UTC creation timestamp |
+| `updated_at` | TIMESTAMP(tz) | no | `now(UTC)` | UTC; `onupdate=_now` — set by Clean and re-derive operations |
 
 ### `query_runs`
 
