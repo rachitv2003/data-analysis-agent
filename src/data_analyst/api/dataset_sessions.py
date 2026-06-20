@@ -20,7 +20,10 @@ def list_dataset_sessions(
 
     sessions = (
         session.query(ConversationSessionRow)
-        .filter(ConversationSessionRow.dataset_id == dataset_id)
+        .filter(
+            (ConversationSessionRow.dataset_id == dataset_id) |
+            ConversationSessionRow.dataset_ids_json.contains(f'"{dataset_id}"')
+        )
         .order_by(ConversationSessionRow.updated_at.desc())
         .all()
     )

@@ -21,10 +21,12 @@ These are independent; either can be active without the other, but together they
 _session_cache: dict[str, dict[str, pd.DataFrame]] = {}
 # key: session_id → {dataset_id: DataFrame}
 
-_cache_lru: collections.OrderedDict  # session_id → insertion order
-_cache_bytes: dict[str, int]         # session_id → bytes currently held
+_cache_lru: list[tuple[str, str]] = []
+# ordered list of (session_id, dataset_id) pairs, newest-last
+# per-DataFrame granularity — evicts the least-recently-used individual DataFrame
 
-_CACHE_LIMIT_BYTES: int = 1 * 1024 ** 3  # 1 GB, configurable via DATA_ANALYST_CACHE_LIMIT_MB
+_cache_bytes: int = 0  # total bytes across all cached DataFrames
+# configurable limit via DATA_ANALYST_CACHE_LIMIT_MB (default 1024 MB)
 ```
 
 DataFrame memory is estimated via `df.memory_usage(deep=True).sum()`.
@@ -43,15 +45,16 @@ Single-turn queries (no `session_id`) bypass the session cache entirely and use 
 After every cache write:
 
 ```
-while sum(_cache_bytes.values()) > _CACHE_LIMIT_BYTES:
-    oldest_session = next(iter(_cache_lru))   # OrderedDict: first = least recently used
-    evict(_session_cache[oldest_session])
-    del _session_cache[oldest_session]
-    del _cache_bytes[oldest_session]
-    _cache_lru.popitem(last=False)
+while _cache_bytes > limit:
+    oldest_session, oldest_dataset = _cache_lru.pop(0)   # list[0] = least recently used
+    evicted = _session_cache[oldest_session].pop(oldest_dataset, None)
+    if evicted is not None:
+        _cache_bytes -= df_bytes(evicted)
+    if not _session_cache[oldest_session]:
+        del _session_cache[oldest_session]
 ```
 
-On every cache **read**, the session is moved to the end of `_cache_lru` (mark as most recently used).
+On every cache **read**, the `(session_id, dataset_id)` pair is moved to the end of `_cache_lru` (mark as most recently used). Eviction is at DataFrame granularity — a single DataFrame is evicted per step, not an entire session.
 
 ### Session-delete eviction
 

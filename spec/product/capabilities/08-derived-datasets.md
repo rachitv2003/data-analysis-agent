@@ -37,7 +37,7 @@ Injected into the `execute_action` eval namespace alongside `pd`, `px`, etc.
   - `derived_from_run_id = current_run_id`
   - `derived_from_dataset_ids = JSON(current_sandbox_dataset_ids)`
   - `derivation_code = last_executed_code_block`
-- Returns a string: `"Dataset '{name}' saved [{new_id}] — {rows} rows × {cols} cols"`.
+- Returns a string: `"Dataset '{name}' saved — {rows} rows × {cols} cols (id: {new_id}). Variable '{var}' now available."` where `{var}` is the snake_case variable name derived from the filename.
 - The return string is captured as the action result and appended to `action_history`, so the agent sees it on the next iteration.
 
 **Naming convention (enforced via prompt):** snake_case, descriptive, e.g. `customers_clustered_10seg`, `orders_features`, `high_value_cohort`. Duplicate names are allowed — they create new dataset IDs each time.

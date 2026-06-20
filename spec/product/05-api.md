@@ -108,7 +108,7 @@ REST. All routes return `{"data": ..., "error": null}` on success or raise HTTP 
 }
 ```
 
-`columns_schema` dtypes are read from the Parquet file if `parquet_path` is set, otherwise from `pd.read_csv(..., nrows=0).dtypes`. Uploaded datasets return `null` for all `derived_*` fields.
+`columns_schema` dtypes are read from the Parquet file if `parquet_path` is set, otherwise from `pd.read_csv(..., nrows=200).dtypes` (200 rows gives pandas enough data to infer numeric and date types). Dtypes are mapped to human-readable aliases: `object`/`string` → `"text"`, `int*`/`uint*` → `"integer"`, `float*` → `"float"`, `datetime*` → `"datetime"`, `bool` → `"boolean"`, `timedelta*` → `"duration"`, `category` → `"category"`. Uploaded datasets return `null` for all `derived_*` fields.
 
 **Error cases:**
 
@@ -128,19 +128,24 @@ REST. All routes return `{"data": ..., "error": null}` on success or raise HTTP 
   "dataset_id": "uuid (optional — backward compat; treated as dataset_ids: [uuid])",
   "dataset_ids": ["uuid", "uuid2"],
   "question": "What is the total revenue by region?",
-  "session_id": "uuid (optional — omit to start a new session)"
+  "session_id": "uuid (optional — omit to start a new session)",
+  "skip_clarification": false
 }
 ```
 
 `dataset_id` and `dataset_ids` are both optional. If neither is supplied, C19 auto-selects from all uploaded datasets.
 
-**Response:**
+`skip_clarification` (default `false`) bypasses the C26 pre-flight check entirely. The frontend sets this to `true` when re-submitting after a clarification turn, so the second request runs the agent directly without triggering another clarification.
+
+**Response — answer (normal path):**
 ```json
 {
   "data": {
+    "type": "answer",
     "run_id": "uuid",
     "session_id": "uuid",
     "dataset_ids": ["uuid"],
+    "derived_dataset_ids": ["uuid3"],
     "datasets_used": [{"id": "uuid", "filename": "sales.csv"}],
     "selector_reasoning": "null or raw LLM text from C19 selector",
     "answer_markdown": "The total revenue by region is:\n\n| Region | Revenue |\n|--------|--------|\n| North | **$1.2M** |\n| South | **$0.8M** |",
@@ -157,23 +162,23 @@ REST. All routes return `{"data": ..., "error": null}` on success or raise HTTP 
 }
 ```
 
-**Clarification response (C26):** When the pre-flight check detects genuine ambiguity, `/ask` returns HTTP 200 with a distinct shape instead of running the agent:
+`derived_dataset_ids` is the list of dataset IDs created by `save_dataset()` calls during this run (C25). Empty list when none were created.
+
+**Response — clarification (C26):** When the pre-flight check detects genuine ambiguity, `/ask` returns HTTP 200 with a distinct shape instead of running the agent:
 
 ```json
 {
   "data": {
-    "clarification_needed": true,
+    "type": "clarification",
     "clarification_question": "Which time period are you referring to — 2016, 2017, or 2018?",
     "run_id": "uuid",
-    "session_id": "uuid",
-    "tokens_input": 45,
-    "tokens_output": 18
+    "session_id": "uuid"
   },
   "error": null
 }
 ```
 
-The `run_id` references a thin `QueryRunRow(status="clarification")`. The user answers in the thread; the frontend re-submits with the same `session_id` and the original question. The pre-flight check sees the clarification exchange in conversation history and proceeds.
+The `run_id` references a thin `QueryRunRow(status="clarification")`. The user answers in the thread; the frontend re-submits with the same `session_id`, combining the original question and the user's clarification, and sets `skip_clarification: true` so the pre-flight check is not re-run.
 
 **Error cases:**
 | Status | Condition |

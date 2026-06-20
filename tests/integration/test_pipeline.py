@@ -839,3 +839,151 @@ def test_c19_auto_selector_multiple_datasets(client):
     # Stub selector picks first dataset; selector_reasoning should be present
     assert result["selector_reasoning"] is not None
     assert len(result["dataset_ids"]) >= 1
+
+
+# ── C26: Clarification response shape ────────────────────────────────────────
+
+def test_clarification_response_shape(client, monkeypatch):
+    """C26: When check_clarification returns needs_clarification=True, /ask returns type=clarification."""
+    class _FakeClarify:
+        needs_clarification = True
+        question = "Do you mean 2023 or 2024?"
+        tokens_input = 5
+        tokens_output = 3
+
+    monkeypatch.setattr("data_analyst.graph.clarify.check_clarification", lambda *a, **kw: _FakeClarify())
+
+    _upload(client)
+    resp = client.post("/ask", json={"question": "What is the revenue?"})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["type"] == "clarification"
+    assert data["clarification_question"] == "Do you mean 2023 or 2024?"
+    assert "run_id" in data
+    assert "session_id" in data
+
+
+def test_skip_clarification_bypasses_preflight(client, monkeypatch):
+    """skip_clarification=True must not call check_clarification even on the auto-select path."""
+    called = []
+
+    def _spy(*a, **kw):
+        called.append(True)
+        class _R:
+            needs_clarification = False
+            question = ""
+            tokens_input = tokens_output = 0
+        return _R()
+
+    monkeypatch.setattr("data_analyst.graph.clarify.check_clarification", _spy)
+
+    _upload(client)
+    resp = client.post("/ask", json={"question": "rows?", "skip_clarification": True})
+    assert resp.status_code == 200, resp.text
+    assert called == [], "check_clarification should not be called when skip_clarification=True"
+
+
+# ── C27: columns_schema dtype inference ──────────────────────────────────────
+
+def test_get_dataset_columns_schema_friendly_dtypes(client):
+    """GET /datasets/{id} returns columns_schema with friendly dtype aliases."""
+    dataset_id = _upload(client)
+    resp = client.get(f"/datasets/{dataset_id}")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert "columns_schema" in data
+    schema = {c["name"]: c["dtype"] for c in data["columns_schema"]}
+    # _make_csv has: name (str→text), value (int→integer), region (str→text)
+    assert schema["name"] == "text"
+    assert schema["value"] == "integer"
+    assert schema["region"] == "text"
+
+
+def test_get_dataset_not_found(client):
+    resp = client.get("/datasets/nonexistent")
+    assert resp.status_code == 404
+
+
+# ── C25: re-derive error cases ────────────────────────────────────────────────
+
+def test_re_derive_uploaded_dataset_returns_400(client):
+    """POST /datasets/{id}/re-derive on an uploaded (non-derived) dataset returns 400."""
+    dataset_id = _upload(client)
+    resp = client.post(f"/datasets/{dataset_id}/re-derive")
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["code"] == "not_derived"
+
+
+def test_re_derive_unknown_dataset_returns_404(client):
+    resp = client.post("/datasets/nonexistent/re-derive")
+    assert resp.status_code == 404
+
+
+# ── C15: Recursive cascade delete ────────────────────────────────────────────
+
+def test_delete_cascades_derived_recursive(client):
+    """Deleting a parent cascades through derived-of-derived chains (recursive)."""
+    import json as _json
+    from data_analyst.db.models import DatasetRow
+    from data_analyst.db import session as session_module
+
+    parent_id = _upload(client)
+
+    # Insert a child derived from parent, and a grandchild derived from child
+    factory = session_module._get_session_factory()
+    with factory() as db:
+        child = DatasetRow(
+            id="test-child-001",
+            filename="child.csv",
+            format="csv",
+            file_path="/tmp/child.csv",
+            row_count=3,
+            col_count=3,
+            columns_json=_json.dumps(["name", "value", "region"]),
+            origin="derived",
+            derived_from_dataset_ids=_json.dumps([parent_id]),
+        )
+        grandchild = DatasetRow(
+            id="test-grandchild-001",
+            filename="grandchild.csv",
+            format="csv",
+            file_path="/tmp/grandchild.csv",
+            row_count=3,
+            col_count=3,
+            columns_json=_json.dumps(["name", "value", "region"]),
+            origin="derived",
+            derived_from_dataset_ids=_json.dumps(["test-child-001"]),
+        )
+        db.add(child)
+        db.add(grandchild)
+        db.commit()
+
+    resp = client.delete(f"/datasets/{parent_id}")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["derived_deleted"] == 2  # child + grandchild
+
+    remaining = client.get("/datasets").json()["data"]
+    assert remaining == []
+
+
+# ── C3: Multi-dataset sessions in secondary dataset listing ───────────────────
+
+def test_multi_dataset_session_appears_in_secondary(client):
+    """A session that uses a dataset as secondary must appear in that dataset's session list."""
+    id1 = _upload(client)
+    id2 = _upload_extra(client)
+
+    r = client.post("/ask", json={"dataset_ids": [id1, id2], "question": "How many rows?"})
+    assert r.status_code == 200, r.text
+    session_id = r.json()["data"]["session_id"]
+
+    # Session must appear under primary dataset
+    r1 = client.get(f"/datasets/{id1}/sessions")
+    assert r1.status_code == 200
+    assert session_id in {s["session_id"] for s in r1.json()["data"]}
+
+    # Session must also appear under secondary dataset
+    r2 = client.get(f"/datasets/{id2}/sessions")
+    assert r2.status_code == 200
+    assert session_id in {s["session_id"] for s in r2.json()["data"]}

@@ -17,7 +17,7 @@ _CONTEXT_MAX_LEN = 4000
 
 def _friendly_dtype(dtype_str: str) -> str:
     s = dtype_str.lower()
-    if s in ("object", "string"): return "text"
+    if s in ("object", "string", "str", "large_string"): return "text"
     if s.startswith("int"): return "integer"
     if s.startswith("uint"): return "integer"
     if s.startswith("float"): return "float"
@@ -266,18 +266,25 @@ def _cascade_delete(db: Session, dataset_ids: list[str]) -> dict:
 
     # C25: recursively collect derived datasets that depend on any deleted dataset
     def _collect_derived(ids: set[str]) -> set[str]:
-        derived_ids: set[str] = set()
-        all_derived = db.query(DatasetRow).filter(DatasetRow.origin == "derived").all()
-        for d in all_derived:
-            if not d.derived_from_dataset_ids:
-                continue
-            try:
-                parents = set(json.loads(d.derived_from_dataset_ids))
-            except Exception:
-                continue
-            if parents & ids:
-                derived_ids.add(d.id)
-        return derived_ids
+        collected: set[str] = set()
+        to_expand = set(ids)
+        while to_expand:
+            all_derived = db.query(DatasetRow).filter(DatasetRow.origin == "derived").all()
+            next_expand: set[str] = set()
+            for d in all_derived:
+                if d.id in collected:
+                    continue
+                if not d.derived_from_dataset_ids:
+                    continue
+                try:
+                    parents = set(json.loads(d.derived_from_dataset_ids))
+                except Exception:
+                    continue
+                if parents & to_expand:
+                    collected.add(d.id)
+                    next_expand.add(d.id)
+            to_expand = next_expand
+        return collected
 
     extra = _collect_derived(id_set)
     all_ids = id_set | extra

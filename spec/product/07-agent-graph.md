@@ -117,8 +117,9 @@ force_finalize → END
 
 ## Setup / Cleanup
 
-- `setup` loads CSV via `pandas.read_csv(dataset.file_path)`, stores DataFrame in `_dataframes: dict[str, pd.DataFrame]` module-level dict keyed by `run_id`
-- `finalize` and `handle_error` both pop `run_id` from `_dataframes` (release memory)
+- `setup` checks `_session_cache[session_id][dataset_id]` first (C27). On hit, reuses the cached DataFrame. On miss, loads from `parquet_path` (preferred) or `file_path` (CSV fallback), then stores in `_session_cache` and the per-run `_dataframes[run_id]` dict.
+- Single-turn queries (no `session_id`) bypass the session cache and use `_dataframes[run_id]` only.
+- `finalize` and `handle_error` both pop `run_id` from `_dataframes` (release run-scoped memory). The session cache (`_session_cache`) is not cleared on finalize — it persists across turns in the same session and is only evicted by LRU pressure or `DELETE /sessions/{id}`.
 
 ## Stub Provider
 
