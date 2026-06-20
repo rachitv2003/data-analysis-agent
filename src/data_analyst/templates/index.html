@@ -156,6 +156,14 @@
         <span class="tu-key">Datasets:</span><span class="tu-val" id="stor-ds">0</span>
         <span class="tu-key" style="margin-left:6px;">Rows:</span><span class="tu-val" id="stor-rows">0</span>
       </div>
+      <!-- C29: context window bar -->
+      <div class="cw-wrap" id="ctx-bar-wrap" style="display:none;">
+        <div class="cw-header">
+          <span class="cw-label">Context window</span>
+          <span class="cw-count" id="cw-count">—</span>
+        </div>
+        <div class="cw-track"><div id="cw-fill" class="cw-fill" style="width:0%;"></div></div>
+      </div>
     </div>
 
   </aside><!-- /.sidebar -->
@@ -230,8 +238,14 @@
         <!-- Dataset notes panel -->
         <div id="dataset-notes-panel" style="display:none;border-top:1px solid #f3f4f6;padding-top:10px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-            <span class="field-label" style="margin:0;">Dataset notes</span>
-            <button type="button" class="btn-icon" onclick="toggleCtxEdit()">Edit</button>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <span class="field-label" style="margin:0;">Dataset notes</span>
+              <span id="notes-gen-status" class="notes-gen-badge" style="display:none;"><span class="spinner" style="width:10px;height:10px;border-width:1.5px;"></span> Generating…</span>
+            </div>
+            <div style="display:flex;gap:4px;align-items:center;">
+              <button type="button" id="notes-regen-btn" class="btn-icon" style="display:none;" onclick="regenerateNotes()">Regenerate</button>
+              <button type="button" id="notes-edit-btn" class="btn-icon" onclick="toggleCtxEdit()">Edit</button>
+            </div>
           </div>
           <div id="context-display" style="font-size:12px;color:#374151;background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px;padding:6px 10px;white-space:pre-wrap;line-height:1.55;max-height:80px;overflow-y:auto;"></div>
           <div id="context-edit-area" style="display:none;">
@@ -762,6 +776,41 @@
     await _doUpload(item.file, true, item.ctx, qIdx, item.renamedAs);
   }
 
+  // ── C29: context window bar ───────────────────────────────────────────────────
+  let _ctxLimit = 0;
+
+  function _renderBreakdown(bd) {
+    if (!bd) return '';
+    const keys = [
+      ['system_overhead','System overhead'],['dataset_schemas','Dataset schemas'],
+      ['dataset_notes','Dataset notes'],['memory','Memory'],
+      ['history','History'],['action_history','Steps (this run)'],
+    ];
+    const rows = keys.filter(([k])=>bd[k]).map(([k,label])=>
+      `<div class="bd-row"><span class="bd-key">${label}</span><span class="bd-val">${bd[k].toLocaleString()} tok</span></div>`
+    ).join('');
+    const total = bd.total_prompt
+      ? `<div class="bd-row bd-total"><span class="bd-key">Total (actual)</span><span class="bd-val">${bd.total_prompt.toLocaleString()} tok</span></div>`
+      : '';
+    return `<div class="bd-wrap"><div class="bd-title">Prompt breakdown</div>${rows}${total}</div>`;
+  }
+
+  function _updateCtxBar() {
+    const wrap = document.getElementById('ctx-bar-wrap');
+    if (!wrap || !_ctxLimit) { if (wrap) wrap.style.display = 'none'; return; }
+    const ids = getSelectedDatasetIds();
+    const estimated = 500 + ids.length * 150;
+    const pct = Math.min(100, Math.round(estimated / _ctxLimit * 100));
+    const fill = document.getElementById('cw-fill');
+    const count = document.getElementById('cw-count');
+    if (!fill || !count) return;
+    fill.style.width = pct + '%';
+    fill.className = 'cw-fill' + (pct >= 90 ? ' danger' : pct >= 70 ? ' warn' : '');
+    const fmtK = n => n >= 1000 ? Math.round(n / 1000) + 'k' : n;
+    count.textContent = `~${fmtK(estimated)} / ${fmtK(_ctxLimit)}`;
+    wrap.style.display = 'block';
+  }
+
   // ── Register dataset ──────────────────────────────────────────────────────────
   const _ctxCache = {};
 
@@ -968,7 +1017,8 @@
     if(delBtn){ delBtn.style.display=checked?'inline-flex':'none'; delBtn.textContent=`Delete ${checked} selected`; }
     startNewSession();
     if(ids.length) loadDatasetCtx(ids);
-    else document.getElementById('dataset-notes-panel').style.display = 'none';
+    else { document.getElementById('dataset-notes-panel').style.display = 'none'; _stopNotesPolling(); }
+    _updateCtxBar();
   }
 
   function deleteSelectedDatasets() {
@@ -1004,23 +1054,50 @@
   }
 
   // ── Dataset notes panel ───────────────────────────────────────────────────────
+  let _notesPollingTimer = null;
+
+  function _stopNotesPolling() {
+    if (_notesPollingTimer) { clearInterval(_notesPollingTimer); _notesPollingTimer = null; }
+  }
+
+  function _startNotesPolling(id) {
+    _stopNotesPolling();
+    _notesPollingTimer = setInterval(async () => {
+      try {
+        const ds = (await (await fetch(`/datasets/${id}`)).json()).data;
+        if (!ds || ds.auto_notes_status === 'pending') return;
+        _stopNotesPolling();
+        _ctxCache[id] = ds.context || '';
+        _showCtxPanel(id, _ctxCache[id], ds.auto_notes_status);
+      } catch {}
+    }, 2000);
+  }
+
   async function loadDatasetCtx(ids) {
-    if(ids.length!==1){ document.getElementById('dataset-notes-panel').style.display='none'; return; }
+    if(ids.length!==1){ document.getElementById('dataset-notes-panel').style.display='none'; _stopNotesPolling(); return; }
     const id = ids[0];
-    if(_ctxCache[id]!==undefined){ _showCtxPanel(id,_ctxCache[id]); return; }
     try {
-      const body = await(await fetch('/datasets')).json();
-      for (const ds of body.data) _ctxCache[ds.dataset_id] = ds.context||'';
-      _showCtxPanel(id, _ctxCache[id]||'');
+      const ds = (await (await fetch(`/datasets/${id}`)).json()).data;
+      if (ds) { _ctxCache[id] = ds.context||''; _showCtxPanel(id, _ctxCache[id], ds.auto_notes_status); }
     } catch {}
   }
-  function _showCtxPanel(id, ctx) {
+
+  function _showCtxPanel(id, ctx, autoNotesStatus) {
     document.getElementById('context-display').textContent = ctx||'No notes added yet.';
     document.getElementById('context-edit-input').value = ctx||'';
     document.getElementById('context-edit-area').style.display = 'none';
     document.getElementById('context-display').style.display = 'block';
     document.getElementById('dataset-notes-panel').style.display = 'block';
+    const badge = document.getElementById('notes-gen-status');
+    const regenBtn = document.getElementById('notes-regen-btn');
+    const editBtn = document.getElementById('notes-edit-btn');
+    const isPending = autoNotesStatus === 'pending';
+    if (badge) badge.style.display = isPending ? 'inline-flex' : 'none';
+    if (regenBtn) regenBtn.style.display = isPending ? 'none' : 'inline-block';
+    if (editBtn) editBtn.disabled = isPending;
+    if (isPending) _startNotesPolling(id); else _stopNotesPolling();
   }
+
   function toggleCtxEdit() {
     const ea=document.getElementById('context-edit-area'), cd=document.getElementById('context-display');
     ea.style.display = ea.style.display==='none'?'block':'none';
@@ -1035,7 +1112,16 @@
     const id=ids[0], ctx=document.getElementById('context-edit-input').value.trim();
     try {
       const resp = await fetch(`/datasets/${id}/context`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({context:ctx})});
-      if(resp.ok){ _ctxCache[id]=ctx; _showCtxPanel(id,ctx); }
+      if(resp.ok){ _ctxCache[id]=ctx; _showCtxPanel(id, ctx, 'done'); }
+    } catch {}
+  }
+
+  async function regenerateNotes() {
+    const ids = getSelectedDatasetIds(); if(ids.length!==1) return;
+    const id = ids[0];
+    try {
+      const resp = await fetch(`/datasets/${id}/describe`, {method:'POST'});
+      if(resp.ok) _showCtxPanel(id, _ctxCache[id]||'', 'pending');
     } catch {}
   }
 
@@ -1148,7 +1234,7 @@
           _pendingQuestion = t.question;
           appendClarification(t.answer_markdown || t.answer_html || '');
         } else {
-          appendTurn(t.question,t.answer_html||esc(t.answer_markdown||'(no answer)'),t.iteration_count,t.tokens_input,t.tokens_output,t.status,null,!!t.is_best_effort,t.steps||[],new Date(t.created_at),null);
+          appendTurn(t.question,t.answer_html||esc(t.answer_markdown||'(no answer)'),t.iteration_count,t.tokens_input,t.tokens_output,t.status,null,!!t.is_best_effort,t.steps||[],new Date(t.created_at),null,null,t.prompt_breakdown);
         }
       }
     } catch {}
@@ -1193,7 +1279,7 @@
     }).catch(()=>{});
   }
 
-  function appendTurn(q,html,iters,ti,to,status,datasetsUsed,isBestEffort,steps,firedAt,elapsedMs,suggestedQuestions) {
+  function appendTurn(q,html,iters,ti,to,status,datasetsUsed,isBestEffort,steps,firedAt,elapsedMs,suggestedQuestions,breakdown) {
     const div = document.createElement('div');
     div.className = 'turn'+(status==='failed'?' failed':'');
     const timeStr = firedAt ? firedAt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '';
@@ -1219,7 +1305,7 @@
         const panelId = 'sp-' + (++_stepSeq);
         stepsFooter = `<div class="steps-footer">
           <button type="button" class="steps-toggle" onclick="toggleSteps(this,'${panelId}')">&#9654; ${label}</button>
-          <div id="${panelId}" class="steps-panel" style="display:none;">${steps.map((s,i)=>renderStep(s,i+1)).join('')}</div>
+          <div id="${panelId}" class="steps-panel" style="display:none;">${_renderBreakdown(breakdown)}${steps.map((s,i)=>renderStep(s,i+1)).join('')}</div>
         </div>`;
       } else {
         stepsFooter = `<div class="steps-footer"><span class="steps-zero">0 code steps — answered from schema</span></div>`;
@@ -1318,7 +1404,7 @@
         } else {
           const dsUsed = r.datasets_used||[];
           if(dsUsed.length>1) document.getElementById('querying-label').textContent=`Querying ${dsUsed.length} datasets`;
-          appendTurn(q,r.answer_html||esc(r.answer_markdown||'(no answer)'),r.iteration_count,r.tokens_input,r.tokens_output,r.status,dsUsed,!!r.is_best_effort,r.steps||[],firedAt,Date.now()-firedAt.getTime(),r.suggested_questions||[]);
+          appendTurn(q,r.answer_html||esc(r.answer_markdown||'(no answer)'),r.iteration_count,r.tokens_input,r.tokens_output,r.status,dsUsed,!!r.is_best_effort,r.steps||[],firedAt,Date.now()-firedAt.getTime(),r.suggested_questions||[],r.prompt_breakdown);
           if(typeof tuAddRun==='function') tuAddRun(r.tokens_input||0, r.tokens_output||0);
           // Include derived dataset IDs created this run so "This session" filter shows them
           const allSessionIds = [...(r.dataset_ids||dsUsed.map(d=>d.id)||[]), ...(r.derived_dataset_ids||[])];

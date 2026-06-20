@@ -194,4 +194,5 @@ def ask_question(
         "is_best_effort": is_best_effort,
         "steps": steps,
         "suggested_questions": suggested_questions,
+        "prompt_breakdown": _json.loads(run.prompt_breakdown) if run.prompt_breakdown else None,
     })

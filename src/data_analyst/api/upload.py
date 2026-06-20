@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, UploadFile, File, Form, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, UploadFile, File, Form, Depends, Query
 from sqlalchemy.orm import Session
 
 from data_analyst.api._common import ok, api_error
@@ -18,6 +18,7 @@ _NOTES_EXTS = {".txt", ".md"}
 
 @router.post("/upload")
 def upload_file(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     context: str = Form(default=""),
     notes_file: Optional[UploadFile] = File(default=None),
@@ -103,6 +104,7 @@ def upload_file(
     upload_dir = Path(get_settings().upload_dir)
     upload_dir.mkdir(exist_ok=True)
 
+    has_user_notes = bool(context.strip())
     dataset = DatasetRow(
         filename=file.filename,
         file_path="",
@@ -113,6 +115,7 @@ def upload_file(
         format=fmt,
         context=context.strip() or None,
         origin="uploaded",
+        auto_notes_status=None if has_user_notes else "pending",
     )
     session.add(dataset)
     session.flush()
@@ -129,11 +132,23 @@ def upload_file(
     except Exception:
         pass
 
+    # C30 / C31: queue background tasks
+    if has_user_notes:
+        # User supplied notes — skip generation, compress what we have (C31)
+        dataset.auto_notes_status = "done"
+        from data_analyst.graph.compress import compress_dataset_context
+        background_tasks.add_task(compress_dataset_context, dataset.id)
+    else:
+        # No notes yet — auto-generate (C30), which triggers C31 on completion
+        from data_analyst.graph.describe import generate_dataset_notes
+        background_tasks.add_task(generate_dataset_notes, dataset.id, False)
+
     return ok({
         "dataset_id": dataset.id,
         "filename": file.filename,
         "format": fmt,
         "context": dataset.context or "",
+        "auto_notes_status": dataset.auto_notes_status,
         "row_count": len(df),
         "col_count": len(df.columns),
         "columns": df.columns.tolist(),

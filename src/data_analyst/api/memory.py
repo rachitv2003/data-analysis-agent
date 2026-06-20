@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -22,11 +22,20 @@ def get_memory(session: Session = Depends(get_session)):
 
 
 @router.patch("/memory")
-def update_memory(body: MemoryUpdate, session: Session = Depends(get_session)):
+def update_memory(
+    body: MemoryUpdate,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_session),
+):
     row = session.get(SettingsRow, _MEMORY_KEY)
     if row is None:
         row = SettingsRow(key=_MEMORY_KEY, value=body.content)
         session.add(row)
     else:
         row.value = body.content
+
+    # C31: compress memory facts in background
+    from data_analyst.graph.compress import compress_memory
+    background_tasks.add_task(compress_memory)
+
     return ok({"content": row.value})

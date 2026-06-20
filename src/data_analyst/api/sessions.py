@@ -89,6 +89,7 @@ def get_session_turns(
                 "is_best_effort": r.error_message in ("max_iterations", "consecutive_errors"),
                 "steps": _json.loads(r.action_history) if r.action_history else [],
                 "created_at": r.created_at.isoformat(),
+                "prompt_breakdown": _json.loads(r.prompt_breakdown) if r.prompt_breakdown else None,
             }
             for r in turns
         ],

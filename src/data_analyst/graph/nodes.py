@@ -168,7 +168,28 @@ def _var_name(filename: str) -> str:
 _ALIAS_RE = re.compile(r"^df\d*$")
 
 
-def _build_prompt(state: AgentState) -> str:
+def _dataset_context_text(row, multi: bool) -> str:
+    """C31: return compressed facts if available, else raw context text."""
+    if row.context_facts:
+        try:
+            facts = json.loads(row.context_facts)
+            if facts:
+                lines = "\n".join(f"  - {f}" for f in facts)
+                label = f"[{row.filename}] Key facts:" if multi else "Key facts:"
+                return f"{label}\n{lines}"
+        except Exception:
+            pass
+    if row.context:
+        prefix = f"[{row.filename}]" if multi else ""
+        return f"{prefix} {row.context}".strip()
+    return ""
+
+
+def _tok(text: str) -> int:
+    return max(0, len(text) // 4)
+
+
+def _build_prompt(state: AgentState) -> tuple[str, dict]:
     full_map = _dataframes.get(state["run_id"], {})
 
     # Only show original filename-derived vars in schema; skip df/df1/df2 aliases
@@ -200,21 +221,29 @@ def _build_prompt(state: AgentState) -> str:
         if ctx else ""
     )
 
-    # Persistent agent memory
+    # Persistent agent memory — C31: try facts first
     memory_text = ""
+    memory_label = "Persistent memory (always treat as authoritative background knowledge)"
     try:
         from data_analyst.db.session import create_db_session
         from data_analyst.db.models import SettingsRow
         with create_db_session() as _db:
-            _mem = _db.get(SettingsRow, "global_memory")
-            if _mem and _mem.value and _mem.value.strip():
-                memory_text = _mem.value.strip()
+            _facts_row = _db.get(SettingsRow, "global_memory_facts")
+            if _facts_row and _facts_row.value:
+                try:
+                    facts = json.loads(_facts_row.value)
+                    if facts:
+                        memory_text = "\n".join(f"- {f}" for f in facts)
+                        memory_label = "Memory (key facts)"
+                except Exception:
+                    pass
+            if not memory_text:
+                _mem = _db.get(SettingsRow, "global_memory")
+                if _mem and _mem.value and _mem.value.strip():
+                    memory_text = _mem.value.strip()
     except Exception:
         pass
-    memory_block = (
-        f"Persistent memory (always treat as authoritative background knowledge):\n{memory_text}\n\n"
-        if memory_text else ""
-    )
+    memory_block = f"{memory_label}:\n{memory_text}\n\n" if memory_text else ""
 
     # Prior conversation
     conv_history = state.get("conversation_history", [])
@@ -274,7 +303,7 @@ def _build_prompt(state: AgentState) -> str:
         if derived_lines else ""
     )
 
-    return (
+    prompt = (
         f"<node:plan>\n"
         f"You are a data analysis assistant.\n"
         f"{df_description}\n\n"
@@ -310,6 +339,24 @@ def _build_prompt(state: AgentState) -> str:
         f"(a DataFrame, Series, scalar, or a Plotly `fig` object). Do NOT use print(). "
         f"Do NOT wrap the code in markdown fences. Use the variable names shown above.\n"
     )
+
+    # C29: per-section token estimates (4 chars ≈ 1 token)
+    schema_toks = _tok(df_description) + _tok(derived_block)
+    notes_toks = _tok(context_block)
+    mem_toks = _tok(memory_block)
+    hist_toks = _tok(prior_context)
+    action_toks = _tok(history_text)
+    system_toks = max(0, _tok(prompt) - schema_toks - notes_toks - mem_toks - hist_toks - action_toks)
+    breakdown = {
+        "system_overhead": system_toks,
+        "dataset_schemas": schema_toks,
+        "dataset_notes": notes_toks,
+        "memory": mem_toks,
+        "history": hist_toks,
+        "action_history": action_toks,
+    }
+
+    return prompt, breakdown
 
 
 def setup(state: AgentState) -> AgentState:
@@ -354,9 +401,10 @@ def setup(state: AgentState) -> AgentState:
                         _store_in_cache(session_id, did, df)
 
                 df_map[var] = df
-                if row.context:
-                    prefix = f"[{row.filename}]" if len(dataset_ids) > 1 else ""
-                    context_parts.append(f"{prefix} {row.context}".strip())
+                # C31: use compressed facts if available, else raw context
+                ctx_text = _dataset_context_text(row, len(dataset_ids) > 1)
+                if ctx_text:
+                    context_parts.append(ctx_text)
 
         # Always provide df / df1 / df2 / … aliases
         final_map: dict[str, pd.DataFrame] = {}
@@ -393,6 +441,19 @@ _WRAPUP_INSTRUCTION = (
 )
 
 
+def _update_prompt_breakdown(run_id: str, breakdown: dict) -> None:
+    """C29: write prompt_breakdown to DB mid-run (overwrites on each iteration)."""
+    try:
+        from data_analyst.db.session import create_db_session
+        from data_analyst.db.models import QueryRunRow
+        with create_db_session() as db:
+            run = db.get(QueryRunRow, run_id)
+            if run:
+                run.prompt_breakdown = json.dumps(breakdown)
+    except Exception:
+        pass
+
+
 def plan_action(state: AgentState) -> AgentState:
     from data_analyst.config.settings import get_settings
 
@@ -401,12 +462,14 @@ def plan_action(state: AgentState) -> AgentState:
     max_iter = get_settings().max_iterations
 
     try:
-        prompt = _build_prompt(state)
+        prompt, breakdown = _build_prompt(state)
         if iteration_count >= max_iter - 2:
             prompt = prompt + f"\n{_WRAPUP_INSTRUCTION}\n"
         llm = _get_llm()
         resp = llm.complete(prompt)
+        breakdown["total_prompt"] = resp.tokens_input
         logger.info("plan_action.response", run_id=run_id, iteration=iteration_count, preview=resp.text[:80])
+        _update_prompt_breakdown(run_id, breakdown)
         return {
             **state,
             "llm_response": resp.text,

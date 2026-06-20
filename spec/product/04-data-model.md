@@ -28,6 +28,8 @@ Metadata about an uploaded file.
 | `derived_from_dataset_ids` | TEXT | yes | NULL | JSON array of parent `dataset_id`s used to produce this dataset; NULL for uploaded |
 | `derivation_code` | TEXT | yes | NULL | The pandas expression that produced this dataset; NULL for uploaded |
 | `parquet_path` | TEXT | yes | NULL | Absolute path to the pre-converted Parquet file (`uploads/{id}.parquet`); NULL if conversion failed or not yet run (C27) |
+| `auto_notes_status` | TEXT | yes | NULL | C30: `"pending"` while auto-notes background task runs; `"done"` on success; `"failed"` on error; NULL for datasets created before C30 |
+| `context_facts` | TEXT | yes | NULL | C31: JSON array of extracted fact strings distilled from `context`; NULL until first C31 compression completes |
 | `created_at` | TIMESTAMP(tz) | no | `now(UTC)` | UTC creation timestamp |
 
 ### `query_runs`
@@ -47,6 +49,7 @@ A single question/answer pair produced by one agent invocation.
 | `iteration_count` | INTEGER | no | `0` | ReAct iterations completed; written mid-run for progress polling |
 | `tokens_input` | INTEGER | no | `0` | Total prompt tokens across all LLM calls for this run |
 | `tokens_output` | INTEGER | no | `0` | Total completion tokens across all LLM calls for this run |
+| `prompt_breakdown` | TEXT | yes | NULL | C29: JSON object with per-component token counts for the last plan_action call in this run |
 | `dataset_ids_json` | TEXT | yes | NULL | JSON array of all session dataset IDs; null for single-dataset runs |
 | `selector_reasoning` | TEXT | yes | NULL | Raw LLM output from C19 selector call; null when selection was skipped |
 | `created_at` | TIMESTAMP(tz) | no | `now(UTC)` | UTC creation timestamp |
@@ -71,9 +74,17 @@ Single-row key-value store for app-wide configuration and persistent memory.
 
 | Column | SQLAlchemy type | Nullable | Default | Description |
 | ------ | --------------- | -------- | ------- | ----------- |
-| `key` | TEXT PK | no | — | Setting key (e.g. `global_memory`) |
+| `key` | TEXT PK | no | — | Setting key (e.g. `global_memory`, `global_memory_facts`) |
 | `value` | TEXT | yes | NULL | Setting value |
 | `updated_at` | TIMESTAMP(tz) | no | `now(UTC)` | UTC; `onupdate=_now` |
+
+**Reserved setting keys:**
+
+| Key | Description |
+| --- | ----------- |
+| `global_memory` | User's global persistent memory text (C12) |
+| `global_memory_facts` | C31: JSON array of facts extracted from `global_memory`; NULL until first compression |
+| `llm_model` | Active LLM model name — read by `GET /stats/daily` |
 
 ---
 

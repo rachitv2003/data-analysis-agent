@@ -156,10 +156,24 @@ REST. All routes return `{"data": ..., "error": null}` on success or raise HTTP 
     "status": "completed",
     "is_best_effort": false,
     "steps": [{"action": "df.groupby('region')['revenue'].sum()", "result": "...", "is_error": false}],
-    "suggested_questions": ["What is the revenue trend over time?", "Which product has the highest margin?", "How does North compare to South YoY?"]
+    "suggested_questions": ["What is the revenue trend over time?", "Which product has the highest margin?", "How does North compare to South YoY?"],
+    "prompt_breakdown": {
+      "system_overhead": 812,
+      "dataset_schemas": 3201,
+      "history": 2089,
+      "memory": 441,
+      "dataset_notes": 7392,
+      "action_history": 1740,
+      "total_prompt": 15675
+    }
   },
   "error": null
 }
+```
+
+`prompt_breakdown` (C29) records per-component token counts from the last `plan_action` call. `null` for runs before C29.
+
+```json
 ```
 
 `derived_dataset_ids` is the list of dataset IDs created by `save_dataset()` calls during this run (C25). Empty list when none were created.
@@ -328,7 +342,7 @@ The `run_id` references a thin `QueryRunRow(status="clarification")`. The user a
 
 ---
 
-### `GET /stats/daily` *(C18)*
+### `GET /stats/daily` *(C18, C29)*
 
 **Purpose:** Return aggregated token usage statistics and the active model name for the current UTC calendar day. Used by the token usage counter widget.
 
@@ -342,11 +356,14 @@ The `run_id` references a thin `QueryRunRow(status="clarification")`. The user a
     "model": "gemini-2.5-flash",
     "tokens_input": 3100,
     "tokens_output": 2410,
-    "query_count": 11
+    "query_count": 11,
+    "context_limit": 1000000
   },
   "error": null
 }
 ```
+
+`context_limit` is the context window size (tokens) for the active model, looked up from the hard-coded model table in C29. Used by the sidebar token budget widget to render the used/total bar. Returns `128000` for unknown models.
 
 **Implementation notes:**
 - Aggregates `query_runs` rows where `status = 'completed'` and `DATE(created_at) = <today UTC>`.
@@ -357,13 +374,13 @@ The `run_id` references a thin `QueryRunRow(status="clarification")`. The user a
 
 ---
 
-### `POST /upload` — extended fields *(C12, C16)*
+### `POST /upload` — extended fields *(C12, C16, C30)*
 
 In addition to `file`, accepts:
 - `context` (form field, string, optional) — typed dataset notes, max 4 000 chars
 - `notes_file` (file, optional) — `.txt` or `.md` file whose content is used as (or appended to) `context`
 
-Response gains `context: string` field.
+Response gains `context: string` and `auto_notes_status: "pending"` fields. Status is always `"pending"` on upload since the C30 background task has just been queued (or `null` if no LLM provider is configured).
 
 ---
 
@@ -382,6 +399,37 @@ Response gains `context: string` field.
 **Request:** `{"content": "fiscal year starts in April; revenue is always in USD"}`
 
 **Response:** `{"data": {"content": "..."}, "error": null}`
+
+---
+
+### `POST /datasets/{dataset_id}/describe` *(C30)*
+
+**Purpose:** Trigger (or re-trigger) auto-generation of context notes for a dataset. Sets `auto_notes_status = "pending"` and enqueues the background LLM call, which overwrites `context` regardless of current value.
+
+**Request:** No body.
+
+**Response:**
+```json
+{"data": {"dataset_id": "uuid", "auto_notes_status": "pending"}, "error": null}
+```
+
+**Error cases:**
+
+| Status | Condition |
+| ------ | --------- |
+| 404 | dataset not found |
+
+---
+
+### `GET /datasets/{dataset_id}` — additional fields *(C29, C30)*
+
+The response additionally includes:
+
+```json
+"auto_notes_status": "pending" | "done" | "failed" | null
+```
+
+`null` for datasets created before C30.
 
 ---
 

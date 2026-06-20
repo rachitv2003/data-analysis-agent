@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -64,6 +64,7 @@ def _row_dict(row: DatasetRow, db: Session) -> dict:
             if row.derived_from_dataset_ids else None
         ),
         "derivation_description": row.context if row.origin == "derived" else None,
+        "auto_notes_status": row.auto_notes_status,
     }
 
 
@@ -118,6 +119,7 @@ class ContextUpdate(BaseModel):
 def update_context(
     dataset_id: str,
     body: ContextUpdate,
+    background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
 ):
     if len(body.context) > _CONTEXT_MAX_LEN:
@@ -128,7 +130,32 @@ def update_context(
         raise api_error("dataset_not_found", f"Dataset {dataset_id} not found.", 404)
 
     row.context = body.context.strip() or None
+    # C31: compress updated notes into facts in background
+    if row.context:
+        from data_analyst.graph.compress import compress_dataset_context
+        background_tasks.add_task(compress_dataset_context, dataset_id)
+    else:
+        # Notes cleared — clear facts too
+        row.context_facts = None
+
     return ok({"dataset_id": dataset_id, "context": row.context or ""})
+
+
+@router.post("/datasets/{dataset_id}/describe")
+def describe_dataset(
+    dataset_id: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_session),
+):
+    """C30: Trigger (re-)generation of auto-notes for a dataset."""
+    row = session.get(DatasetRow, dataset_id)
+    if row is None:
+        raise api_error("dataset_not_found", f"Dataset {dataset_id} not found.", 404)
+
+    row.auto_notes_status = "pending"
+    from data_analyst.graph.describe import generate_dataset_notes
+    background_tasks.add_task(generate_dataset_notes, dataset_id, True)
+    return ok({"dataset_id": dataset_id, "auto_notes_status": "pending"})
 
 
 @router.post("/datasets/{dataset_id}/re-derive")

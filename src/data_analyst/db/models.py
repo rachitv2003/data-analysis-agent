@@ -42,6 +42,10 @@ class DatasetRow(Base):
     derivation_code: Mapped[str | None] = mapped_column(Text, nullable=True)
     # C27: Parquet path for fast reloading
     parquet_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # C30: auto-notes generation status
+    auto_notes_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # C31: semantic compression — JSON array of extracted facts
+    context_facts: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class ConversationSessionRow(Base):
@@ -84,6 +88,8 @@ class QueryRunRow(Base):
     iteration_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     tokens_input: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     tokens_output: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # C29: per-component token breakdown from last plan_action call
+    prompt_breakdown: Mapped[str | None] = mapped_column(Text, nullable=True)
     dataset_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     selector_reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

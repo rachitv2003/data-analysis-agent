@@ -145,6 +145,29 @@
     .msg-success { color: #16a34a; font-size: 13px; }
     .empty-msg   { font-size: 12px; color: #9ca3af; font-style: italic; padding: 4px 0; }
 
+    /* ── Context window bar (C29) ────────────────────────────────────────── */
+    .cw-wrap { margin-top:10px; padding-top:10px; border-top:1px solid #f3f4f6; }
+    .cw-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:5px; }
+    .cw-label { font-size:10px; font-weight:700; color:#9ca3af; text-transform:uppercase; letter-spacing:.07em; }
+    .cw-count { font-size:11px; font-weight:600; color:#6b7280; font-variant-numeric:tabular-nums; }
+    .cw-track { background:#f3f4f6; border-radius:4px; height:5px; overflow:hidden; }
+    .cw-fill  { height:100%; border-radius:4px; background:#1e40af; transition:width .35s ease; }
+    .cw-fill.warn   { background:#d97706; }
+    .cw-fill.danger { background:#dc2626; }
+
+    /* ── Prompt breakdown panel (C29) ────────────────────────────────────── */
+    .bd-wrap  { background:#f1f5f9; border:1px solid #e2e8f0; border-radius:6px; padding:10px 12px; margin-bottom:12px; }
+    .bd-title { font-size:10px; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; }
+    .bd-row   { display:flex; justify-content:space-between; padding:2px 0; }
+    .bd-key   { font-size:12px; color:#6b7280; }
+    .bd-val   { font-size:12px; font-weight:600; color:#374151; font-variant-numeric:tabular-nums; }
+    .bd-total { margin-top:4px; padding-top:4px; border-top:1px solid #dde1e7; }
+    .bd-total .bd-key { color:#374151; font-weight:600; }
+    .bd-total .bd-val { color:#1e40af; }
+
+    /* ── Auto-notes badge (C30) ──────────────────────────────────────────── */
+    .notes-gen-badge { display:inline-flex; align-items:center; gap:4px; font-size:11px; color:#6b7280; font-style:italic; }
+
     /* ── Token usage widget (light) ───────────────────────────────────────── */
     .tu-model-name {
       font-size: 11px; font-weight: 700; color: #1e40af;
@@ -362,7 +385,14 @@
     }
 
     async function tuRefreshDaily() {
-      try { _tuRenderDaily((await (await fetch('/stats/daily')).json()).data); }
+      try {
+        const d = (await (await fetch('/stats/daily')).json()).data;
+        _tuRenderDaily(d);
+        if (d && d.context_limit) {
+          _ctxLimit = d.context_limit;
+          if (typeof _updateCtxBar === 'function') _updateCtxBar();
+        }
+      }
       catch { _tuRenderDaily(null); }
     }
 

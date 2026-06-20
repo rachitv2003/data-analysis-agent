@@ -13,3 +13,6 @@ All capabilities are implemented unless noted otherwise.
 | [08-derived-datasets.md](08-derived-datasets.md) | C25 autonomous derived dataset persistence (`save_dataset`), cross-query state continuity, lineage tracking, staleness detection | implemented |
 | [09-clarification.md](09-clarification.md) | C26 pre-flight clarification check — lightweight LLM call before agent loop; asks user when question is genuinely ambiguous | implemented |
 | [10-dataframe-cache.md](10-dataframe-cache.md) | C27 session-scoped DataFrame cache (LRU 1 GB) + Parquet pre-conversion on upload — eliminates repeated disk I/O across queries | implemented |
+| [11-context-window.md](11-context-window.md) | C29 live context window display — sidebar token budget estimate at rest + steps-inspector per-component breakdown after each run | planned |
+| [12-auto-dataset-notes.md](12-auto-dataset-notes.md) | C30 auto-generated dataset notes — background LLM call post-upload; pre-fills editable context/notes field with column descriptions + quality observations | planned |
+| [13-semantic-compression.md](13-semantic-compression.md) | C31 semantic context compression — LLM structured fact extraction for dataset notes and global memory; compact facts replace raw text in agent prompts | planned |
