@@ -210,15 +210,17 @@
                  data-stale="{{ 'true' if ds.stale else 'false' }}"
                  data-derived-from="{{ ds.derived_from_dataset_ids|tojson if ds.derived_from_dataset_ids else '[]' }}">
               <div class="ds-main-row">
-                <label><input type="checkbox" class="ds-check" value="{{ ds.dataset_id }}" onchange="onDatasetCheckChange()">
+                <label><input type="checkbox" class="ds-check" value="{{ ds.dataset_id }}" checked onchange="onDatasetCheckChange()">
                   <span>{{ ds.filename }} <span class="row-cnt">({{ ds.row_count }} rows &middot; {{ ds.col_count }} cols)</span></span>
                   {% if ds.origin == 'derived' %}<span class="ds-badge ds-badge--derived">derived</span>{% endif %}
                   {% if ds.stale %}<span class="ds-badge ds-badge--stale">⚠ stale</span>{% endif %}
+                  {% if ds.auto_notes_status == 'pending' %}<span class="ds-badge ds-badge--notes" title="Auto-generating notes…">✍ noting</span>{% endif %}
                 </label>
                 <div class="ds-actions">
                   {% if ds.origin == 'derived' and ds.stale %}
                   <button type="button" class="ds-rederive-btn" onclick="rederiveDataset('{{ ds.dataset_id }}',event)" title="Re-derive from parents" aria-label="Re-derive {{ ds.filename }}">🔄</button>
                   {% endif %}
+                  <button type="button" class="ds-notes-btn" onclick="showNotesForDataset('{{ ds.dataset_id }}',event)" title="View/edit dataset notes" aria-label="Notes for {{ ds.filename }}">📝</button>
                   <button type="button" class="ds-cols-btn" onclick="toggleColumns('{{ ds.dataset_id }}',event)" title="View columns" aria-label="Toggle columns for {{ ds.filename }}">▸ cols</button>
                   <button type="button" class="ds-clean-btn" onclick="openCleanModal('{{ ds.dataset_id }}',event)" title="Clean data" aria-label="Clean {{ ds.filename }}">🧹</button>
                   <button type="button" class="del-btn" onclick="deleteDataset('{{ ds.dataset_id }}',event)" title="Delete dataset" aria-label="Delete {{ ds.filename }}">🗑</button>
@@ -800,16 +802,23 @@
     const wrap = document.getElementById('ctx-bar-wrap');
     if (!wrap) return;
     const ids = getSelectedDatasetIds();
-    if (!_ctxLimit || !ids.length) { wrap.style.display = 'none'; return; }
-    const estimated = 500 + ids.length * 200;
-    const pct = Math.min(100, Math.round(estimated / _ctxLimit * 100));
+    if (!ids.length) { wrap.style.display = 'none'; return; }
     const fill = document.getElementById('cw-fill');
     const count = document.getElementById('cw-count');
     if (!fill || !count) return;
-    fill.style.width = Math.max(pct, 1) + '%';
-    fill.className = 'cw-fill' + (pct >= 90 ? ' danger' : pct >= 70 ? ' warn' : '');
+    const estimated = 500 + ids.length * 200;
     const fmtK = n => n >= 1000 ? Math.round(n / 1000) + 'k' : String(n);
-    count.textContent = `~${fmtK(estimated)} / ${fmtK(_ctxLimit)}`;
+    const limit = _ctxLimit || window._ctxLimit || 0;
+    if (limit) {
+      const pct = Math.min(100, Math.round(estimated / limit * 100));
+      fill.style.width = Math.max(pct, 1) + '%';
+      fill.className = 'cw-fill' + (pct >= 90 ? ' danger' : pct >= 70 ? ' warn' : '');
+      count.textContent = `~${fmtK(estimated)} / ${fmtK(limit)}`;
+    } else {
+      fill.style.width = '2%';
+      fill.className = 'cw-fill';
+      count.textContent = `~${fmtK(estimated)} tok`;
+    }
     wrap.style.display = 'block';
   }
 
@@ -835,6 +844,7 @@
         </label>
         <div class="ds-actions">
           ${rederiveBtn}
+          <button type="button" class="ds-notes-btn" data-id="${id}" aria-label="Dataset notes">📝</button>
           <button type="button" class="ds-cols-btn" data-id="${id}" aria-label="Toggle columns">▸ cols</button>
           <button type="button" class="ds-clean-btn" data-id="${id}" aria-label="Clean dataset">🧹</button>
           <button type="button" class="del-btn" data-id="${id}" aria-label="Delete dataset">🗑</button>
@@ -847,6 +857,7 @@
     row.querySelector('.ds-check')?.addEventListener('change', onDatasetCheckChange);
     row.querySelector('.ds-cols-btn')?.addEventListener('click', e => toggleColumns(id, e));
     row.querySelector('.ds-clean-btn')?.addEventListener('click', e => openCleanModal(id, e));
+    row.querySelector('.ds-notes-btn')?.addEventListener('click', e => showNotesForDataset(id, e));
     row.querySelector('.ds-rederive-btn')?.addEventListener('click', e => rederiveDataset(id, e));
     row.querySelector('.del-btn')?.addEventListener('click', e => deleteDataset(id, e));
   }
@@ -1060,6 +1071,7 @@
 
   // ── Dataset notes panel ───────────────────────────────────────────────────────
   let _notesPollingTimer = null;
+  let _activeNotesId = null; // tracks which dataset the notes panel is showing
 
   function _stopNotesPolling() {
     if (_notesPollingTimer) { clearInterval(_notesPollingTimer); _notesPollingTimer = null; }
@@ -1091,6 +1103,7 @@
   }
 
   function _showCtxPanel(id, ctx, autoNotesStatus) {
+    _activeNotesId = id;
     document.getElementById('context-display').textContent = ctx||'No notes added yet.';
     document.getElementById('context-edit-input').value = ctx||'';
     document.getElementById('context-edit-area').style.display = 'none';
@@ -1116,8 +1129,8 @@
     document.getElementById('context-display').style.display = 'block';
   }
   async function saveCtxEdit() {
-    const ids = getSelectedDatasetIds(); if(ids.length!==1) return;
-    const id=ids[0], ctx=document.getElementById('context-edit-input').value.trim();
+    const id = _activeNotesId || getSelectedDatasetIds()[0]; if(!id) return;
+    const ctx=document.getElementById('context-edit-input').value.trim();
     try {
       const resp = await fetch(`/datasets/${id}/context`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({context:ctx})});
       if(resp.ok){ _ctxCache[id]=ctx; _showCtxPanel(id, ctx, 'done'); }
@@ -1125,11 +1138,21 @@
   }
 
   async function regenerateNotes() {
-    const ids = getSelectedDatasetIds(); if(ids.length!==1) return;
-    const id = ids[0];
+    const id = _activeNotesId || getSelectedDatasetIds()[0]; if(!id) return;
     try {
       const resp = await fetch(`/datasets/${id}/describe`, {method:'POST'});
       if(resp.ok) _showCtxPanel(id, _ctxCache[id]||'', 'pending');
+    } catch {}
+  }
+
+  async function showNotesForDataset(id, event) {
+    if (event) event.stopPropagation();
+    try {
+      const ds = (await (await fetch(`/datasets/${id}`)).json()).data;
+      if (ds) {
+        _ctxCache[id] = ds.context || '';
+        _showCtxPanel(id, _ctxCache[id], ds.auto_notes_status);
+      }
     } catch {}
   }
 
@@ -1558,6 +1581,8 @@
     _updateStorageStat();
     loadSessionList();
     _initDagPanZoom();
+    // Sync initial state from server-rendered checked checkboxes
+    onDatasetCheckChange();
   });
 
   // ── Clarification turn (C26) ──────────────────────────────────────────────
