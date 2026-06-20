@@ -16,4 +16,4 @@ All capabilities are implemented unless noted otherwise.
 | [11-context-window.md](11-context-window.md) | C29 live context window display — sidebar token budget estimate at rest + steps-inspector per-component breakdown after each run | implemented |
 | [12-auto-dataset-notes.md](12-auto-dataset-notes.md) | C30 on-demand dataset notes generation — user-triggered LLM call from Database tab; pre-fills editable context/notes field with column descriptions + quality observations | implemented |
 | [13-semantic-compression.md](13-semantic-compression.md) | C31 semantic context compression — LLM structured fact extraction for dataset notes and global memory; compact facts replace raw text in agent prompts | implemented |
-| [14-collapsible-turns.md](14-collapsible-turns.md) | C32 collapsible conversation turns — per-turn collapse/expand toggle + "Collapse all / Expand all"; pure client-side; state in sessionStorage | planned |
+| [14-collapsible-turns.md](14-collapsible-turns.md) | C32 collapsible conversation turns — per-turn collapse/expand toggle + "Collapse all / Expand all"; pure client-side; state in sessionStorage | implemented |

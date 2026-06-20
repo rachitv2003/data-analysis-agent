@@ -130,6 +130,14 @@ def delete_session(
 
 @router.delete("/sessions")
 def delete_all_sessions(session: Session = Depends(get_session)):
+    session_ids = [s.id for s in session.query(ConversationSessionRow.id).all()]
     session.query(QueryRunRow).filter(QueryRunRow.session_id.isnot(None)).delete()
     session.query(ConversationSessionRow).delete()
+    # C27: evict all session DataFrame caches
+    try:
+        from data_analyst.graph.nodes import _evict_session
+        for sid in session_ids:
+            _evict_session(sid)
+    except Exception:
+        pass
     return ok({"deleted": "all"})

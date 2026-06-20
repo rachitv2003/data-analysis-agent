@@ -55,20 +55,20 @@ Input to the check:
 Expected JSON response from the LLM:
 
 ```json
-{"proceed": true}
+{"needs_clarification": false}
 ```
 
 or
 
 ```json
-{"proceed": false, "question": "Which time period are you referring to — 2016, 2017, or 2018?"}
+{"needs_clarification": true, "question": "Which time period are you referring to — 2016, 2017, or 2018?"}
 ```
 
 On parse failure or LLM error → fall through to proceed (fail-open). Log at WARN level.
 
 **Timeout:** `check_clarification()` enforces a 60-second wall-clock timeout on the LLM call. On timeout → fail-open (same handling as parse failure): log at WARN level, return proceed. The 60-second limit ensures C26 never holds up a query longer than the ReAct loop itself.
 
-**Stub provider behaviour:** always returns `{"proceed": true}`. The clarification path is not exercised in stub/integration tests; unit tests mock the LLM call directly.
+**Stub provider behaviour:** always returns `{"needs_clarification": false}` (fall-open via JSON parse failure on the stub's generic response). The clarification path is not exercised in stub/integration tests; unit tests mock the LLM call directly.
 
 ---
 

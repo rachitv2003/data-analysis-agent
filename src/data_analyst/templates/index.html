@@ -287,6 +287,7 @@
                   onclick="exportConversationMd()" title="Export as Markdown"
                   aria-label="Export conversation as Markdown">&#11015; Export MD</button>
         </div>
+        <div id="thread-toolbar" class="thread-toolbar"><button type="button" class="btn-collapse-all" onclick="_collapseAll()">Collapse all</button></div>
         <div id="thread" role="log" aria-live="polite" aria-label="Conversation thread" aria-relevant="additions"></div>
       </div>
 
@@ -496,6 +497,20 @@
   /* ── Clarification turn (C26) ───────────────────────────── */
   .clarification-turn { border-left:3px solid #f59e0b; background:#fffbeb; }
   .clarification-label { display:inline-block; background:#fef3c7; color:#92400e; font-size:11px; font-weight:600; padding:1px 7px; border-radius:4px; border:1px solid #fcd34d; margin-bottom:6px; }
+
+  /* ── C32 Collapsible turns ─────────────────────────────── */
+  .turn-header { display:flex; align-items:flex-start; gap:8px; margin-bottom:6px; }
+  .turn-header .turn-q { flex:1; margin-bottom:0; }
+  .turn-header .best-effort-badge { flex-shrink:0; margin-bottom:0; margin-top:1px; }
+  .turn-collapse-btn { flex-shrink:0; background:none; border:none; cursor:pointer; color:#94a3b8; font-size:13px; padding:0; line-height:1; margin-top:2px; transition:color .15s; }
+  .turn-collapse-btn:hover { color:#475569; }
+  .turn.collapsed .turn-body { display:none; }
+  .turn.collapsed .turn-hint { display:block; }
+  .turn-hint { display:none; font-size:12px; color:#9ca3af; padding:2px 0 4px; font-style:italic; cursor:pointer; }
+  .turn-hint:hover { color:#64748b; }
+  .thread-toolbar { display:none; justify-content:flex-end; margin-bottom:8px; }
+  .btn-collapse-all { background:none; border:1px solid #e2e8f0; border-radius:5px; font-size:11px; color:#64748b; padding:3px 10px; cursor:pointer; font-family:inherit; transition:background .15s,color .15s; }
+  .btn-collapse-all:hover { background:#f8fafc; color:#374151; }
 </style>
 
 <script>
@@ -1178,6 +1193,7 @@
     _updateSessionDatasetIds([]);
     document.getElementById('thread').innerHTML = '';
     document.getElementById('conversation').style.display = 'none';
+    _updateCollapseToolbar();
     document.getElementById('ask-status').innerHTML = '';
     document.querySelectorAll('.session-item').forEach(el=>el.classList.remove('active'));
     document.getElementById('querying-label').textContent = 'Conversation';
@@ -1256,7 +1272,8 @@
         </div>`;
       }
     }
-    div.innerHTML = `<div class="turn-q">Q: ${esc(q)}</div>${badge}<div class="answer-body">${html}</div><div class="turn-meta">${meta}</div>${dsFooter}${stepsFooter}`;
+    div.innerHTML = `<div class="turn-header"><div class="turn-q">Q: ${esc(q)}</div>${badge}<button type="button" class="turn-collapse-btn" onclick="_toggleTurn(this)" aria-label="Collapse turn" title="Collapse">&#9660;</button></div><div class="turn-body"><div class="answer-body">${html}</div><div class="turn-meta">${meta}</div>${dsFooter}${stepsFooter}</div><div class="turn-hint">&#9654;&nbsp;[answer truncated &mdash; click to expand]</div>`;
+    div.querySelector('.turn-hint').addEventListener('click', () => _toggleTurn(div.querySelector('.turn-collapse-btn')));
     if (suggestedQuestions && suggestedQuestions.length) {
       const chipsDiv = document.createElement('div');
       chipsDiv.className = 'followup-chips';
@@ -1267,7 +1284,7 @@
         btn.addEventListener('click', () => fillQuestion(sq));
         chipsDiv.appendChild(btn);
       });
-      div.appendChild(chipsDiv);
+      (div.querySelector('.turn-body') || div).appendChild(chipsDiv);
     }
     div.querySelectorAll('.answer-body .plotly-chart').forEach(el => {
       try {
@@ -1279,6 +1296,41 @@
     document.getElementById('thread').appendChild(div);
     document.getElementById('conversation').style.display = 'block';
     div.scrollIntoView({behavior:'smooth',block:'nearest'});
+    _updateCollapseToolbar();
+  }
+
+  function _toggleTurn(btn) {
+    const turn = btn.closest('.turn'); if(!turn) return;
+    const collapsed = turn.classList.toggle('collapsed');
+    btn.textContent = collapsed ? '▶' : '▼';
+    btn.setAttribute('aria-label', collapsed ? 'Expand turn' : 'Collapse turn');
+    btn.title = collapsed ? 'Expand' : 'Collapse';
+    _updateCollapseToolbar();
+  }
+  function _collapseAll() {
+    document.querySelectorAll('#thread .turn:not(.clarification-turn)').forEach(turn => {
+      turn.classList.add('collapsed');
+      const btn = turn.querySelector('.turn-collapse-btn');
+      if(btn){ btn.textContent='▶'; btn.setAttribute('aria-label','Expand turn'); btn.title='Expand'; }
+    });
+    _updateCollapseToolbar();
+  }
+  function _expandAll() {
+    document.querySelectorAll('#thread .turn:not(.clarification-turn)').forEach(turn => {
+      turn.classList.remove('collapsed');
+      const btn = turn.querySelector('.turn-collapse-btn');
+      if(btn){ btn.textContent='▼'; btn.setAttribute('aria-label','Collapse turn'); btn.title='Collapse'; }
+    });
+    _updateCollapseToolbar();
+  }
+  function _updateCollapseToolbar() {
+    const toolbar = document.getElementById('thread-toolbar'); if(!toolbar) return;
+    const turns = document.querySelectorAll('#thread .turn:not(.clarification-turn)');
+    if(turns.length < 2){ toolbar.style.display='none'; return; }
+    toolbar.style.display='flex';
+    const allCollapsed = [...turns].every(t=>t.classList.contains('collapsed'));
+    const btn = toolbar.querySelector('.btn-collapse-all');
+    if(btn){ btn.textContent = allCollapsed ? 'Expand all' : 'Collapse all'; btn.onclick = allCollapsed ? _expandAll : _collapseAll; }
   }
 
   // ── Ask (with AbortController) ────────────────────────────────────────────────

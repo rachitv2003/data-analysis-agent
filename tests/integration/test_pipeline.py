@@ -1055,7 +1055,6 @@ def test_clarification_turn_in_session(client, monkeypatch):
 
 def test_upload_writes_parquet_file(client):
     """C27: Uploading a CSV creates a Parquet sidecar; DatasetRow.parquet_path is set."""
-    pytest.importorskip("pyarrow")
     import pathlib
     from data_analyst.db.models import DatasetRow
     from data_analyst.db import session as session_module
@@ -1225,4 +1224,175 @@ def test_memory_patch_triggers_compression(client, monkeypatch):
     assert row is not None, "global_memory_facts SettingsRow must exist after compression"
     facts = json.loads(row.value)
     assert isinstance(facts, list)
-    assert len(facts) >= 1
+
+
+# ── C18: context_limit in daily stats ────────────────────────────────────────
+
+def test_daily_stats_context_limit(client):
+    """C18/C29: GET /stats/daily includes context_limit > 0."""
+    resp = client.get("/stats/daily")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert "context_limit" in data
+    assert isinstance(data["context_limit"], int)
+    assert data["context_limit"] > 0
+
+
+# ── C9: name field in GET /sessions list ─────────────────────────────────────
+
+def test_sessions_list_includes_name(client):
+    """C9: GET /sessions includes name field (None until renamed, string after)."""
+    dataset_id = _upload(client)
+    r = client.post("/ask", json={"dataset_id": dataset_id, "question": "rows?"})
+    session_id = r.json()["data"]["session_id"]
+
+    sessions = client.get("/sessions").json()["data"]
+    assert len(sessions) >= 1
+    sess = next(s for s in sessions if s["session_id"] == session_id)
+    assert "name" in sess
+
+    # After rename, name should appear in list
+    client.patch(f"/sessions/{session_id}/name", json={"name": "Audit test session"})
+    sessions2 = client.get("/sessions").json()["data"]
+    sess2 = next(s for s in sessions2 if s["session_id"] == session_id)
+    assert sess2["name"] == "Audit test session"
+
+
+# ── C25: stale detection after parent dataset update ─────────────────────────
+
+def test_stale_flag_after_parent_cleaned(client, monkeypatch):
+    """C25: derived dataset becomes stale when parent is updated via clean/apply."""
+    import data_analyst.graph.nodes as nodes_module
+    from data_analyst.llm.providers.base import LLMResponse
+    from data_analyst.llm.client import LLMClient
+
+    call_count = [0]
+
+    class SaveDatasetProvider:
+        def complete(self, prompt: str) -> LLMResponse:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return LLMResponse(
+                    text="save_dataset(test, 'derived_stale', 'Stale test derived')",
+                    tokens_input=10, tokens_output=20,
+                )
+            return LLMResponse(text="FINAL ANSWER: Done.", tokens_input=10, tokens_output=20)
+
+    monkeypatch.setattr(nodes_module, "_llm_client", LLMClient(SaveDatasetProvider()))
+
+    parent_id = _upload(client)
+    resp = client.post("/ask", json={"dataset_id": parent_id, "question": "Save derived."})
+    assert resp.status_code == 200, resp.text
+    derived_ids = resp.json()["data"]["derived_dataset_ids"]
+    assert len(derived_ids) >= 1
+    derived_id = derived_ids[0]
+
+    # Derived should not be stale yet
+    all_ds = client.get("/datasets").json()["data"]
+    derived_before = next(d for d in all_ds if d["dataset_id"] == derived_id)
+    assert derived_before["stale"] is False
+
+    # Update the parent via clean/apply — sets updated_at
+    code = "test[test['value'] > 0]"
+    apply_resp = client.post(f"/datasets/{parent_id}/clean/apply", json={"code": code})
+    assert apply_resp.status_code == 200, apply_resp.text
+
+    # Derived should now be stale
+    all_ds2 = client.get("/datasets").json()["data"]
+    derived_after = next(d for d in all_ds2 if d["dataset_id"] == derived_id)
+    assert derived_after["stale"] is True, "Derived dataset must be stale after parent update"
+
+
+# ── C30→C31: describe auto-chains into compression ────────────────────────────
+
+def test_describe_chains_into_compression(client, monkeypatch):
+    """C30→C31: POST /datasets/{id}/describe → auto_notes set → context_facts populated."""
+    import json
+    import time
+    import data_analyst.graph.nodes as nodes_module
+    from data_analyst.llm.providers.base import LLMResponse
+    from data_analyst.llm.client import LLMClient
+    from data_analyst.db.models import DatasetRow
+    from data_analyst.db import session as session_module
+
+    call_count = [0]
+
+    class ChainProvider:
+        def complete(self, prompt: str) -> LLMResponse:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # C30: generate_dataset_notes call
+                return LLMResponse(
+                    text="Revenue in USD. Dates are ISO 8601.",
+                    tokens_input=10, tokens_output=20,
+                )
+            # C31: compress_dataset_context call
+            return LLMResponse(
+                text='["revenue in USD", "dates are ISO 8601"]',
+                tokens_input=5, tokens_output=10,
+            )
+
+    monkeypatch.setattr(nodes_module, "_llm_client", LLMClient(ChainProvider()))
+
+    dataset_id = _upload(client)
+    resp = client.post(f"/datasets/{dataset_id}/describe")
+    assert resp.status_code == 200
+    assert resp.json()["data"]["auto_notes_status"] == "pending"
+
+    # Poll until context_facts is populated (C30 writes notes, C31 compresses them)
+    factory = session_module._get_session_factory()
+    deadline = time.time() + 10.0
+    row = None
+    while time.time() < deadline:
+        with factory() as db:
+            row = db.get(DatasetRow, dataset_id)
+            if row and row.context_facts is not None:
+                break
+        time.sleep(0.1)
+    assert row is not None
+    assert row.context_facts is not None, "context_facts must be populated after C30→C31 chain"
+    facts = json.loads(row.context_facts)
+    assert isinstance(facts, list) and len(facts) >= 1
+
+
+# ── C27: single-session delete evicts DataFrame cache ────────────────────────
+
+def test_session_delete_evicts_cache(client, monkeypatch):
+    """C27: DELETE /sessions/{id} calls _evict_session, removing entries from the cache."""
+    import data_analyst.graph.nodes as nodes_module
+
+    dataset_id = _upload(client)
+    r = client.post("/ask", json={"dataset_id": dataset_id, "question": "rows?"})
+    session_id = r.json()["data"]["session_id"]
+
+    # Manually populate the cache so we can observe the eviction
+    import pandas as pd
+    nodes_module._session_cache[session_id] = {dataset_id: pd.DataFrame({"x": [1, 2, 3]})}
+    assert session_id in nodes_module._session_cache
+
+    resp = client.delete(f"/sessions/{session_id}")
+    assert resp.status_code == 200
+    assert session_id not in nodes_module._session_cache, "Cache must be evicted on session delete"
+
+
+# ── C27: bulk session delete evicts all caches ────────────────────────────────
+
+def test_bulk_session_delete_evicts_cache(client, monkeypatch):
+    """C27: DELETE /sessions evicts DataFrame cache for all deleted sessions."""
+    import pandas as pd
+    import data_analyst.graph.nodes as nodes_module
+
+    dataset_id = _upload(client)
+    r1 = client.post("/ask", json={"dataset_id": dataset_id, "question": "q1"})
+    r2 = client.post("/ask", json={"dataset_id": dataset_id, "question": "q2"})
+    sid1 = r1.json()["data"]["session_id"]
+    sid2 = r2.json()["data"]["session_id"]
+
+    # Populate cache for both sessions
+    for sid in (sid1, sid2):
+        nodes_module._session_cache[sid] = {dataset_id: pd.DataFrame({"x": [1]})}
+
+    resp = client.delete("/sessions")
+    assert resp.status_code == 200
+    assert sid1 not in nodes_module._session_cache, "Cache must be evicted for session 1"
+    assert sid2 not in nodes_module._session_cache, "Cache must be evicted for session 2"

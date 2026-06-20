@@ -1,6 +1,6 @@
 # C32 — Collapsible Conversation Turns
 
-**Status:** planned
+**Status:** implemented
 **Covers:** C32 (collapsible conversation turns)
 
 ---

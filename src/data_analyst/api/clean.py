@@ -82,7 +82,11 @@ def preview_clean(
     var = re.sub(r"[^\w]", "_", ds.filename.rsplit(".", 1)[0].lower()).strip("_") or "df"
 
     try:
-        df = pd.read_csv(ds.file_path)
+        from pathlib import Path
+        if ds.parquet_path and Path(ds.parquet_path).exists():
+            df = pd.read_parquet(ds.parquet_path, engine="pyarrow")
+        else:
+            df = pd.read_csv(ds.file_path)
     except Exception as exc:
         raise api_error("read_error", f"Could not read dataset: {exc}", 500)
 
@@ -126,7 +130,11 @@ def apply_clean(
     var = re.sub(r"[^\w]", "_", ds.filename.rsplit(".", 1)[0].lower()).strip("_") or "df"
 
     try:
-        df = pd.read_csv(ds.file_path)
+        from pathlib import Path
+        if ds.parquet_path and Path(ds.parquet_path).exists():
+            df = pd.read_parquet(ds.parquet_path, engine="pyarrow")
+        else:
+            df = pd.read_csv(ds.file_path)
     except Exception as exc:
         raise api_error("read_error", f"Could not read dataset: {exc}", 500)
 
