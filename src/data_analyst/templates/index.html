@@ -1,4 +1,14 @@
 {% extends "base.html" %}
+
+{% block header_center %}
+<nav class="site-header__tabs" role="tablist" aria-label="Main sections">
+  <button type="button" class="hdr-tab active" data-tab="analyse" onclick="switchTab('analyse')"
+          role="tab" aria-selected="true" aria-controls="analyse-tab">Analyse</button>
+  <button type="button" class="hdr-tab" data-tab="database" onclick="switchTab('database')"
+          role="tab" aria-selected="false" aria-controls="database-tab">Database</button>
+</nav>
+{% endblock %}
+
 {% block content %}
 
 <!-- Memory modal -->
@@ -153,14 +163,6 @@
   <!-- ── Main ───────────────────────────────────────────────────────────── -->
   <main class="main" id="main-content">
 
-    <!-- Tab bar (C28) -->
-    <div class="tab-bar" role="tablist" style="display:flex;gap:0;border-bottom:2px solid #e5e7eb;flex-shrink:0;margin-bottom:12px;">
-      <button type="button" class="tab-btn active" data-tab="analyse" onclick="switchTab('analyse')"
-              role="tab" aria-selected="true" aria-controls="analyse-tab">Analyse</button>
-      <button type="button" class="tab-btn" data-tab="database" onclick="switchTab('database')"
-              role="tab" aria-selected="false" aria-controls="database-tab">Database</button>
-    </div>
-
     <!-- Analyse tab -->
     <div id="analyse-tab" role="tabpanel" style="display:flex;flex-direction:column;flex:1;min-height:0;gap:16px;">
 
@@ -188,7 +190,6 @@
           <button type="button" class="ds-filter-btn" data-filter="derived" onclick="_setDsFilter('derived')">Derived</button>
           <button type="button" class="ds-filter-btn" data-filter="session" onclick="_setDsFilter('session')">This session</button>
         </div>
-        <p style="font-size:11px;color:#6b7280;margin:0 0 8px;">Check to select datasets for querying. Un-check to exclude.</p>
         <div id="dataset-list-wrap"
              style="border:1px solid #e5e7eb;border-radius:6px;padding:6px 10px;overflow-y:auto;min-height:60px;max-height:200px;background:#fafafa;margin-bottom:8px;"
              role="list" aria-label="Uploaded datasets">
@@ -337,32 +338,41 @@
         <button type="button" class="btn btn-ghost-danger btn-xs" onclick="openModal('clear-db-modal')">Clear database</button>
       </div>
 
-      <!-- DB body: lineage (left) + schema panel (right) -->
+      <!-- DB body: diagram (left) + description panel (right) -->
       <div style="flex:1;display:flex;min-height:0;border:1px solid #e5e7eb;border-top:none;overflow:hidden;">
 
-        <!-- Lineage graph panel -->
-        <div style="flex:6;min-width:0;border-right:1px solid #e5e7eb;position:relative;overflow:hidden;background:#f8fafc;">
-          <svg id="lineage-svg" width="100%" height="100%" style="display:block;cursor:grab;"></svg>
-          <!-- DAG controls -->
-          <div style="position:absolute;bottom:8px;right:10px;display:flex;gap:4px;">
-            <button type="button" class="btn btn-ghost btn-xs" onclick="fitLineageDag()" title="Fit to view">Fit</button>
-            <button type="button" class="btn btn-ghost btn-xs" onclick="zoomLineageDag(1.2)" title="Zoom in">+</button>
-            <button type="button" class="btn btn-ghost btn-xs" onclick="zoomLineageDag(0.9)" title="Zoom out">−</button>
+        <!-- Diagram panel -->
+        <div style="flex:6;min-width:0;display:flex;flex-direction:column;border-right:1px solid #e5e7eb;overflow:hidden;">
+          <!-- Panel header -->
+          <div style="padding:7px 12px;background:#f8fafc;border-bottom:1px solid #e5e7eb;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;">
+            <span style="font-size:12px;font-weight:600;color:#374151;">Schema</span>
+            <div style="display:flex;gap:8px;font-size:11px;color:#6b7280;">
+              <span style="display:flex;align-items:center;gap:3px;"><span style="width:9px;height:9px;border-radius:2px;background:#eff6ff;border:1.5px solid #3b82f6;display:inline-block;"></span>uploaded</span>
+              <span style="display:flex;align-items:center;gap:3px;"><span style="width:9px;height:9px;border-radius:2px;background:#dcfce7;border:1.5px solid #16a34a;display:inline-block;"></span>derived</span>
+            </div>
           </div>
-          <!-- Legend -->
-          <div style="position:absolute;top:8px;left:10px;display:flex;gap:8px;font-size:11px;color:#6b7280;">
-            <span style="display:flex;align-items:center;gap:3px;"><span style="width:10px;height:10px;border-radius:2px;background:#eff6ff;border:1.5px solid #3b82f6;display:inline-block;"></span>uploaded</span>
-            <span style="display:flex;align-items:center;gap:3px;"><span style="width:10px;height:10px;border-radius:2px;background:#dcfce7;border:1.5px solid #16a34a;display:inline-block;"></span>derived</span>
-            <span style="display:flex;align-items:center;gap:3px;"><span style="width:10px;height:10px;border-radius:2px;background:#fef3c7;border:2px solid #f59e0b;display:inline-block;"></span>stale</span>
+          <!-- SVG area -->
+          <div style="flex:1;position:relative;overflow:hidden;background:#f8fafc;">
+            <svg id="lineage-svg" width="100%" height="100%" style="display:block;cursor:grab;"></svg>
+            <div style="position:absolute;bottom:8px;right:10px;display:flex;gap:4px;">
+              <button type="button" class="btn btn-ghost btn-xs" onclick="fitLineageDag()" title="Fit to view">Fit</button>
+              <button type="button" class="btn btn-ghost btn-xs" onclick="zoomLineageDag(1.2)" title="Zoom in">+</button>
+              <button type="button" class="btn btn-ghost btn-xs" onclick="zoomLineageDag(0.9)" title="Zoom out">−</button>
+            </div>
           </div>
         </div>
 
-        <!-- Schema panel -->
-        <div id="db-schema-panel" style="flex:4;min-width:220px;overflow-y:auto;background:#fff;">
-          <div id="db-schema-empty" style="padding:32px 20px;text-align:center;color:#9ca3af;font-size:13px;">
-            ← Click a node or chip to see its schema
+        <!-- Table Description panel -->
+        <div id="db-schema-panel" style="flex:4;min-width:240px;display:flex;flex-direction:column;background:#fff;overflow:hidden;">
+          <div style="padding:7px 12px;background:#f8fafc;border-bottom:1px solid #e5e7eb;flex-shrink:0;">
+            <span style="font-size:12px;font-weight:600;color:#374151;">Table Description</span>
           </div>
-          <div id="db-schema-content" style="display:none;"></div>
+          <div style="flex:1;overflow-y:auto;">
+            <div id="db-schema-empty" style="padding:32px 20px;text-align:center;color:#9ca3af;font-size:13px;">
+              ← Click a table to see its description
+            </div>
+            <div id="db-schema-content" style="display:none;"></div>
+          </div>
         </div>
 
       </div><!-- /DB body -->
@@ -1664,7 +1674,8 @@
     document.getElementById('analyse-tab').style.display = isDb ? 'none' : 'flex';
     const dbTab = document.getElementById('database-tab');
     dbTab.style.display = isDb ? 'flex' : 'none';
-    document.querySelectorAll('.tab-btn').forEach(b => {
+    document.querySelector('.app-shell').classList.toggle('db-active', isDb);
+    document.querySelectorAll('.hdr-tab').forEach(b => {
       const active = b.dataset.tab === name;
       b.classList.toggle('active', active);
       b.setAttribute('aria-selected', active ? 'true' : 'false');
@@ -2021,6 +2032,46 @@
     }
   }
 
+  // Infer PK/FK from column naming conventions across all loaded datasets
+  function _inferKeys(ds) {
+    // Collect columns from every OTHER dataset
+    const otherCols = new Set();
+    _dbDatasets.forEach(d => {
+      if (d.dataset_id === ds.dataset_id) return;
+      const cols = d.columns_schema || (d.columns||[]).map(c=>({name:c}));
+      cols.forEach(c => otherCols.add(c.name));
+    });
+
+    // Derive stem words from filename (e.g. "olist_orders_dataset.csv" → ["orders"])
+    const stemWords = ds.filename
+      .replace(/\.(csv|parquet|json|xlsx?|tsv)$/i,'')
+      .toLowerCase()
+      .split(/[_\s\-]+/)
+      .filter(w => !['olist','dataset','data','file','table','db','_'].includes(w));
+
+    const cols = ds.columns_schema || (ds.columns||[]).map(c=>({name:c,dtype:'?'}));
+    const pks = [], fks = [];
+
+    cols.forEach(c => {
+      const lname = c.name.toLowerCase();
+      if (lname === 'id') {
+        pks.push(c.name);
+      } else if (lname.endsWith('_id')) {
+        const prefix = lname.slice(0,-3); // remove "_id"
+        const matchesStem = stemWords.some(s => s.includes(prefix) || prefix.includes(s));
+        if (matchesStem) {
+          pks.push(c.name);
+        } else if (otherCols.has(c.name)) {
+          fks.push(c.name);
+        } else {
+          pks.push(c.name); // unique ID column in this table only
+        }
+      }
+    });
+
+    return { pks, fks };
+  }
+
   function _renderSchemaPanel(ds) {
     const isDerived = ds.origin==='derived';
     const staleTag = ds.stale
@@ -2030,10 +2081,18 @@
       ? '<span style="background:#dcfce7;color:#166534;font-size:11px;padding:1px 6px;border-radius:4px;">derived</span>'
       : '<span style="background:#eff6ff;color:#1e40af;font-size:11px;padding:1px 6px;border-radius:4px;">uploaded</span>';
 
-    const colRows = (ds.columns_schema||[]).map(c=>
-      `<tr><td style="padding:3px 8px;font-family:monospace;font-size:12px;color:#374151;">${esc(c.name)}</td>`
-      +`<td style="padding:3px 8px;font-size:11px;color:#6b7280;">${esc(c.dtype)}</td></tr>`
-    ).join('');
+    const { pks, fks } = _inferKeys(ds);
+    const pkSet = new Set(pks), fkSet = new Set(fks);
+
+    const colRows = (ds.columns_schema||[]).map(c => {
+      let badge = '';
+      if (pkSet.has(c.name))
+        badge = '<span style="font-size:9px;font-weight:700;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:3px;padding:0 4px;margin-left:5px;vertical-align:middle;">PK</span>';
+      else if (fkSet.has(c.name))
+        badge = '<span style="font-size:9px;font-weight:700;background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;border-radius:3px;padding:0 4px;margin-left:5px;vertical-align:middle;">FK</span>';
+      return `<tr><td style="padding:3px 8px;font-family:monospace;font-size:12px;color:#374151;">${esc(c.name)}${badge}</td>`
+           + `<td style="padding:3px 8px;font-size:11px;color:#6b7280;">${esc(c.dtype)}</td></tr>`;
+    }).join('');
 
     const parentChips = (isDerived&&ds.derived_from_dataset_ids)
       ? ds.derived_from_dataset_ids.map(pid=>{
@@ -2058,6 +2117,19 @@
       : `<button type="button" class="btn btn-ghost btn-xs" onclick="dbClean('${ds.dataset_id}')">🧹 Clean</button> `
         +`<button type="button" class="btn btn-ghost btn-xs" style="color:#b91c1c;" onclick="dbDelete('${ds.dataset_id}')">🗑 Delete</button>`;
 
+    const keysBlock = (pks.length||fks.length) ? `
+      <div style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #f3f4f6;">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#9ca3af;margin-bottom:6px;">Keys</div>
+        ${pks.length?`<div style="display:flex;align-items:baseline;gap:6px;margin-bottom:4px;">
+          <span style="font-size:10px;font-weight:700;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:3px;padding:1px 6px;flex-shrink:0;">PK</span>
+          <span style="font-size:12px;font-family:monospace;color:#374151;">${pks.map(k=>esc(k)).join(', ')}</span>
+        </div>`:''}
+        ${fks.length?`<div style="display:flex;align-items:baseline;gap:6px;">
+          <span style="font-size:10px;font-weight:700;background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;border-radius:3px;padding:1px 6px;flex-shrink:0;">FK</span>
+          <span style="font-size:12px;font-family:monospace;color:#374151;">${fks.map(k=>esc(k)).join(', ')}</span>
+        </div>`:''}
+      </div>` : '';
+
     return `<div style="padding:14px 16px;">
       <div style="display:flex;align-items:flex-start;gap:6px;margin-bottom:6px;flex-wrap:wrap;">
         <span style="font-weight:600;font-size:14px;color:#111827;word-break:break-all;">${esc(ds.filename)}</span>
@@ -2065,9 +2137,10 @@
       </div>
       <div style="font-size:12px;color:#6b7280;margin-bottom:10px;">${(ds.row_count||0).toLocaleString()} rows × ${ds.col_count} cols · ${(ds.format||'csv').toUpperCase()}</div>
       ${derivedBlock}
+      ${keysBlock}
       <div style="margin-bottom:10px;">
-        <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:5px;">Schema</div>
-        <div style="border:1px solid #e5e7eb;border-radius:4px;overflow:hidden;max-height:240px;overflow-y:auto;">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#9ca3af;margin-bottom:5px;">Columns</div>
+        <div style="border:1px solid #e5e7eb;border-radius:4px;overflow:hidden;max-height:260px;overflow-y:auto;">
           <table style="width:100%;border-collapse:collapse;">
             <thead><tr>
               <th style="padding:4px 8px;background:#f8fafc;font-size:11px;color:#6b7280;text-align:left;font-weight:600;position:sticky;top:0;">Name</th>

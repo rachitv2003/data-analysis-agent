@@ -21,12 +21,23 @@
     /* ── Header ───────────────────────────────────────────────────────────── */
     .site-header {
       background: #1e40af; color: white;
-      padding: 13px 24px;
-      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 24px;
+      display: flex; align-items: stretch; justify-content: space-between;
       position: sticky; top: 0; z-index: 50; box-shadow: 0 1px 4px rgba(0,0,0,.2);
+      min-height: 52px;
     }
+    .site-header__brand { display: flex; flex-direction: column; justify-content: center; padding: 10px 0; }
     .site-header__brand h1 { font-size: 17px; font-weight: 700; letter-spacing: -.01em; }
     .site-header__brand p  { font-size: 12px; opacity: .7; margin-top: 1px; }
+    .site-header__tabs { display: flex; gap: 2px; align-items: flex-end; padding-bottom: 0; }
+    .hdr-tab {
+      background: none; border: none; border-bottom: 3px solid transparent;
+      color: rgba(255,255,255,.65); font-size: 13px; font-weight: 600;
+      padding: 16px 20px 13px; cursor: pointer; font-family: inherit;
+      transition: color .15s, border-color .15s;
+    }
+    .hdr-tab:hover { color: rgba(255,255,255,.9); }
+    .hdr-tab.active { color: white; border-bottom-color: white; }
     .site-header__actions  { display: flex; gap: 8px; align-items: center; }
     .header-btn {
       background: rgba(255,255,255,.15); color: white;
@@ -42,6 +53,8 @@
       height: calc(100vh - 52px); /* matches header height */
       overflow: hidden;
     }
+    .app-shell.db-active .sidebar { display: none; }
+    .app-shell.db-active .main { padding: 0; gap: 0; overflow: hidden; }
 
     /* ── Sidebar ──────────────────────────────────────────────────────────── */
     .sidebar {
@@ -231,6 +244,7 @@
       <h1>Data Analysis Agent</h1>
       <p>Upload a file and ask questions in plain English</p>
     </div>
+    {% block header_center %}{% endblock %}
     <div class="site-header__actions">
       <button class="header-btn" id="memory-open-btn" aria-haspopup="dialog" aria-controls="memory-modal"
               onclick="openModal('memory-modal');loadMemory()">
