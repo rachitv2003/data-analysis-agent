@@ -389,8 +389,8 @@
         const d = (await (await fetch('/stats/daily')).json()).data;
         _tuRenderDaily(d);
         if (d && d.context_limit) {
-          _ctxLimit = d.context_limit;
-          if (typeof _updateCtxBar === 'function') _updateCtxBar();
+          window._ctxLimit = d.context_limit;
+          if (typeof window._updateCtxBar === 'function') window._updateCtxBar();
         }
       }
       catch { _tuRenderDaily(null); }
