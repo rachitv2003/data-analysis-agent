@@ -1,0 +1,120 @@
+# C32 — Collapsible Conversation Turns
+
+**Status:** planned
+**Covers:** C32 (collapsible conversation turns)
+
+---
+
+## Overview
+
+Each query turn in the conversation thread can be individually collapsed and expanded, hiding the full answer body while keeping the question visible. This mirrors Jupyter notebook cell folding — useful for long multi-turn sessions where earlier answers take up significant screen space.
+
+No API changes. Pure client-side state toggled by a chevron button in the turn header.
+
+---
+
+## Behaviour
+
+### Per-turn toggle
+
+A **▼ / ▶** chevron button appears at the far right of every completed turn's question header row. Clicking it toggles the turn's collapsed state:
+
+| State | Visible |
+|-------|---------|
+| Expanded (default) | Full answer body: rendered Markdown, charts, iteration/token counts, Datasets used, Steps inspector, follow-up chips, Export MD |
+| Collapsed | Question text, timestamp, best-effort badge (if any), the chevron button |
+
+The collapsed turn shows a single summary line below the question in muted text:
+
+```
+▶  [answer truncated — click to expand]
+```
+
+Collapsed turns do **not** hide the question row itself — the user can always read what was asked.
+
+### Restrictions
+
+| Turn type | Collapsible? | Reason |
+|-----------|-------------|--------|
+| Completed turn | ✓ | Normal case |
+| Clarification turn (C26) | ✗ | No answer body to hide; the clarification question must remain visible so the user can respond |
+| Running turn (in-progress) | ✗ | Progress row and spinner must stay visible during the query |
+| Best-effort turn | ✓ | Same as completed; the ⚠ badge stays visible in collapsed state |
+
+The chevron button is not rendered at all for clarification and running turns.
+
+### Collapse all / Expand all
+
+When the thread contains **≥ 2 completed turns**, a pair of buttons appears in the thread toolbar area (above the first turn, or in the thread card header):
+
+- **Collapse all** — collapses every collapsible turn; label changes to **Expand all** when all are collapsed
+- **Expand all** — expands every turn
+
+The toolbar only shows when ≥ 2 completed turns exist. A single-turn session does not need it.
+
+---
+
+## State Persistence
+
+Turn collapsed state is stored in `sessionStorage` under the key `_turnCollapsed` (a JSON object mapping `run_id → true`). Only collapsed turns are stored — absence means expanded.
+
+This means:
+- State survives tab switches and navigation between Analyse and Database tabs.
+- State is **reset** on page refresh (session storage is not persistent).
+- Switching sessions clears `_turnCollapsed` (since run IDs differ between sessions).
+- When a session is loaded via `loadSession(id)` → `GET /sessions/{id}`, each turn is rendered with its stored collapsed state applied immediately (no flicker).
+
+---
+
+## UI Details
+
+### Chevron button
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Q: What is the total revenue by region?      12:34   ▼    │  ← expanded
+└─────────────────────────────────────────────────────────────┘
+│  Total revenue by region:                                    │
+│  | Region | Revenue |                                        │
+│  ...                                                         │
+│  [Datasets used ▸] [2 steps ▸] [💬 …] [Export MD]          │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│  Q: What is the total revenue by region?      12:34   ▶    │  ← collapsed
+│  ▶  [answer truncated — click to expand]                    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+- Button: `type="button"`, `aria-label="Collapse turn"` / `"Expand turn"`, `aria-expanded="true"/"false"` on the turn element.
+- The summary line uses muted text (`color: #9ca3af`, `font-size: 12px`).
+- Collapse/expand is animated with `max-height` transition (200 ms ease-out) to avoid jarring jumps.
+
+### Toolbar placement
+
+Appears at the top of `#thread`, right-aligned, as a compact button group:
+
+```
+[ Collapse all ]   ← only when ≥ 1 expanded; changes to [ Expand all ] when all collapsed
+```
+
+Rendered once by `_updateCollapseToolbar()` which is called after every turn append and after any collapse/expand action.
+
+---
+
+## Implementation
+
+| File | Change |
+|------|--------|
+| `src/data_analyst/templates/index.html` | Add chevron toggle to `appendTurn`; add `_toggleTurn(runId)`, `_collapseAll()`, `_expandAll()`, `_updateCollapseToolbar()`, `_turnCollapsed` object; update `loadSession` to restore state; CSS for collapsed state + animation |
+
+No backend changes. No new API routes. No DB changes.
+
+---
+
+## Out of Scope
+
+- Persisting collapsed state across page refreshes (sessionStorage is sufficient).
+- Per-section collapsing within a turn (e.g. hiding only the Steps inspector — that already exists via the existing steps toggle).
+- Keyboard shortcut to collapse all.
+- Remembering collapsed state when the user navigates away and returns via browser history.
