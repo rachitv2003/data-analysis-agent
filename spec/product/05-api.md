@@ -252,6 +252,15 @@ The `run_id` references a thin `QueryRunRow(status="clarification")`. The user a
         "status": "completed",
         "is_best_effort": false,
         "steps": [],
+        "prompt_breakdown": {
+          "system_overhead": 812,
+          "dataset_schemas": 3201,
+          "history": 2089,
+          "memory": 441,
+          "dataset_notes": 7392,
+          "action_history": 1740,
+          "total_prompt": 15675
+        },
         "created_at": "..."
       }
     ]
@@ -344,7 +353,7 @@ The `run_id` references a thin `QueryRunRow(status="clarification")`. The user a
 
 ### `GET /stats/daily` *(C18, C29)*
 
-**Purpose:** Return aggregated token usage statistics and the active model name for the current UTC calendar day. Used by the token usage counter widget.
+**Purpose:** Return aggregated token usage statistics and the active model name for the current local calendar day (server timezone). Used by the token usage counter widget.
 
 **Query parameters:** none.
 
@@ -366,7 +375,8 @@ The `run_id` references a thin `QueryRunRow(status="clarification")`. The user a
 `context_limit` is the context window size (tokens) for the active model, looked up from the hard-coded model table in C29. Used by the sidebar token budget widget to render the used/total bar. Returns `128000` for unknown models.
 
 **Implementation notes:**
-- Aggregates `query_runs` rows where `status = 'completed'` and `DATE(created_at) = <today UTC>`.
+
+- Aggregates `query_runs` rows where `status = 'completed'` and `DATE(created_at, 'localtime') = <today local>`.
 - `model` is read from `Settings.llm_model` at request time.
 - Returns zero values (all counts = 0) when no completed runs exist for today — never a 404.
 
@@ -380,7 +390,7 @@ In addition to `file`, accepts:
 - `context` (form field, string, optional) — typed dataset notes, max 4 000 chars
 - `notes_file` (file, optional) — `.txt` or `.md` file whose content is used as (or appended to) `context`
 
-Response gains `context: string` and `auto_notes_status: "pending"` fields. Status is always `"pending"` on upload since the C30 background task has just been queued (or `null` if no LLM provider is configured).
+Response gains a `context: string` field containing the stored notes.
 
 ---
 

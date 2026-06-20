@@ -130,13 +130,14 @@ def update_context(
         raise api_error("dataset_not_found", f"Dataset {dataset_id} not found.", 404)
 
     row.context = body.context.strip() or None
+    if not row.context:
+        row.context_facts = None
+    # Commit before queuing background task so the task sees the new context
+    session.commit()
     # C31: compress updated notes into facts in background
     if row.context:
         from data_analyst.graph.compress import compress_dataset_context
         background_tasks.add_task(compress_dataset_context, dataset_id)
-    else:
-        # Notes cleared — clear facts too
-        row.context_facts = None
 
     return ok({"dataset_id": dataset_id, "context": row.context or ""})
 
@@ -153,6 +154,8 @@ def describe_dataset(
         raise api_error("dataset_not_found", f"Dataset {dataset_id} not found.", 404)
 
     row.auto_notes_status = "pending"
+    # Commit immediately so the generator cleanup doesn't overwrite the background task's "done"
+    session.commit()
     from data_analyst.graph.describe import generate_dataset_notes
     background_tasks.add_task(generate_dataset_notes, dataset_id, True)
     return ok({"dataset_id": dataset_id, "auto_notes_status": "pending"})

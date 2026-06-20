@@ -987,3 +987,242 @@ def test_multi_dataset_session_appears_in_secondary(client):
     r2 = client.get(f"/datasets/{id2}/sessions")
     assert r2.status_code == 200
     assert session_id in {s["session_id"] for s in r2.json()["data"]}
+
+
+# ── C25: save_dataset happy path ─────────────────────────────────────────────
+
+def test_save_dataset_creates_derived_row(client, monkeypatch):
+    """C25: save_dataset() in agent code persists a DatasetRow with origin='derived'."""
+    import data_analyst.graph.nodes as nodes_module
+    from data_analyst.llm.providers.base import LLMResponse
+    from data_analyst.llm.client import LLMClient
+
+    call_count = [0]
+
+    class SaveDatasetProvider:
+        def complete(self, prompt: str) -> LLMResponse:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # First plan_action: call save_dataset using the 'test' variable (from test.csv)
+                return LLMResponse(
+                    text="save_dataset(test, 'derived_test', 'Derived from test')",
+                    tokens_input=10,
+                    tokens_output=20,
+                )
+            return LLMResponse(text="FINAL ANSWER: Derived dataset created.", tokens_input=10, tokens_output=20)
+
+    monkeypatch.setattr(nodes_module, "_llm_client", LLMClient(SaveDatasetProvider()))
+
+    dataset_id = _upload(client)
+    resp = client.post("/ask", json={"dataset_id": dataset_id, "question": "Save a derived dataset."})
+    assert resp.status_code == 200, resp.text
+    result = resp.json()["data"]
+    assert result["status"] == "completed"
+    assert len(result["derived_dataset_ids"]) >= 1
+
+    all_datasets = client.get("/datasets").json()["data"]
+    derived = [d for d in all_datasets if d.get("origin") == "derived"]
+    assert len(derived) >= 1
+
+
+# ── C26: clarification turn stored in session ─────────────────────────────────
+
+def test_clarification_turn_in_session(client, monkeypatch):
+    """C26: A clarification turn appears in GET /sessions/{id} with status='clarification'."""
+    class _FakeClarify:
+        needs_clarification = True
+        question = "Which year — 2023 or 2024?"
+        tokens_input = 5
+        tokens_output = 3
+
+    monkeypatch.setattr("data_analyst.graph.clarify.check_clarification", lambda *a, **kw: _FakeClarify())
+
+    _upload(client)
+    resp = client.post("/ask", json={"question": "What is the revenue?"})
+    assert resp.status_code == 200
+    session_id = resp.json()["data"]["session_id"]
+
+    turns_resp = client.get(f"/sessions/{session_id}")
+    assert turns_resp.status_code == 200
+    turns = turns_resp.json()["data"]["turns"]
+    assert len(turns) == 1
+    turn = turns[0]
+    assert turn["status"] == "clarification"
+    assert turn["answer_markdown"] == "Which year — 2023 or 2024?"
+
+
+# ── C27: Parquet sidecar written on upload ────────────────────────────────────
+
+def test_upload_writes_parquet_file(client):
+    """C27: Uploading a CSV creates a Parquet sidecar; DatasetRow.parquet_path is set."""
+    pytest.importorskip("pyarrow")
+    import pathlib
+    from data_analyst.db.models import DatasetRow
+    from data_analyst.db import session as session_module
+
+    dataset_id = _upload(client)
+
+    factory = session_module._get_session_factory()
+    with factory() as db:
+        row = db.get(DatasetRow, dataset_id)
+        assert row.parquet_path is not None, "parquet_path must be set after upload"
+        assert pathlib.Path(row.parquet_path).exists(), "Parquet file must exist on disk"
+
+
+# ── C29: prompt_breakdown in /ask response and session turns ──────────────────
+
+def test_prompt_breakdown_in_ask_response(client):
+    """C29: /ask response includes prompt_breakdown with expected keys."""
+    dataset_id = _upload(client)
+    resp = client.post("/ask", json={"dataset_id": dataset_id, "question": "rows?"})
+    assert resp.status_code == 200, resp.text
+    result = resp.json()["data"]
+    assert "prompt_breakdown" in result
+    bd = result["prompt_breakdown"]
+    if bd is not None:
+        for key in ("system_overhead", "dataset_schemas", "total_prompt"):
+            assert key in bd, f"prompt_breakdown missing key: {key}"
+
+
+def test_prompt_breakdown_in_session_turns(client):
+    """C29: GET /sessions/{id} turns include prompt_breakdown field."""
+    dataset_id = _upload(client)
+    r = client.post("/ask", json={"dataset_id": dataset_id, "question": "rows?"})
+    session_id = r.json()["data"]["session_id"]
+
+    turns_resp = client.get(f"/sessions/{session_id}")
+    assert turns_resp.status_code == 200
+    turns = turns_resp.json()["data"]["turns"]
+    assert len(turns) >= 1
+    assert "prompt_breakdown" in turns[0]
+
+
+# ── C30: describe endpoint triggers notes generation ─────────────────────────
+
+def test_describe_endpoint_generates_notes(client, monkeypatch):
+    """C30: POST /datasets/{id}/describe triggers generate_dataset_notes in a background thread."""
+    import time
+    import data_analyst.graph.nodes as nodes_module
+    from data_analyst.llm.providers.base import LLMResponse
+    from data_analyst.llm.client import LLMClient
+    from data_analyst.db.models import DatasetRow
+    from data_analyst.db import session as session_module
+
+    class NotesProvider:
+        def complete(self, prompt: str) -> LLMResponse:
+            return LLMResponse(
+                text="This dataset has names, values, and regions.",
+                tokens_input=10,
+                tokens_output=20,
+            )
+
+    monkeypatch.setattr(nodes_module, "_llm_client", LLMClient(NotesProvider()))
+
+    dataset_id = _upload(client)
+    resp = client.post(f"/datasets/{dataset_id}/describe")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["auto_notes_status"] == "pending"
+
+    # Background task runs in a thread; poll the API until auto_notes_status transitions
+    deadline = time.time() + 5.0
+    status = None
+    while time.time() < deadline:
+        r = client.get(f"/datasets/{dataset_id}")
+        status = r.json()["data"].get("auto_notes_status")
+        if status == "done":
+            break
+        time.sleep(0.1)
+    assert status == "done", f"Expected 'done', got {status!r}"
+    ctx = client.get(f"/datasets/{dataset_id}").json()["data"]["context"]
+    assert ctx == "This dataset has names, values, and regions."
+
+
+def test_describe_not_found(client):
+    """C30: POST /datasets/{id}/describe returns 404 for an unknown dataset."""
+    resp = client.post("/datasets/nonexistent/describe")
+    assert resp.status_code == 404
+
+
+# ── C31: compression triggered by context patch and memory patch ──────────────
+
+def test_context_patch_triggers_compression(client, monkeypatch):
+    """C31: PATCH /datasets/{id}/context queues compress_dataset_context; context_facts populated."""
+    import json
+    import time
+    import data_analyst.graph.nodes as nodes_module
+    from data_analyst.llm.providers.base import LLMResponse
+    from data_analyst.llm.client import LLMClient
+    from data_analyst.db.models import DatasetRow
+    from data_analyst.db import session as session_module
+
+    class CompressProvider:
+        def complete(self, prompt: str) -> LLMResponse:
+            return LLMResponse(
+                text='["revenue is in USD", "dates are ISO 8601"]',
+                tokens_input=10,
+                tokens_output=20,
+            )
+
+    monkeypatch.setattr(nodes_module, "_llm_client", LLMClient(CompressProvider()))
+
+    dataset_id = _upload(client)
+    resp = client.patch(
+        f"/datasets/{dataset_id}/context",
+        json={"context": "Revenue is in USD. Dates are ISO 8601 format."},
+    )
+    assert resp.status_code == 200, resp.text
+
+    # Background task runs in a thread; poll until it commits
+    factory = session_module._get_session_factory()
+    deadline = time.time() + 5.0
+    row = None
+    while time.time() < deadline:
+        with factory() as db:
+            row = db.get(DatasetRow, dataset_id)
+            if row and row.context_facts is not None:
+                break
+        time.sleep(0.1)
+    assert row is not None
+    assert row.context_facts is not None, "context_facts must be set after compression"
+    facts = json.loads(row.context_facts)
+    assert isinstance(facts, list)
+    assert len(facts) >= 1
+
+
+def test_memory_patch_triggers_compression(client, monkeypatch):
+    """C31: PATCH /memory queues compress_memory; global_memory_facts SettingsRow populated."""
+    import json
+    import time
+    import data_analyst.graph.nodes as nodes_module
+    from data_analyst.llm.providers.base import LLMResponse
+    from data_analyst.llm.client import LLMClient
+    from data_analyst.db.models import SettingsRow
+    from data_analyst.db import session as session_module
+
+    class CompressProvider:
+        def complete(self, prompt: str) -> LLMResponse:
+            return LLMResponse(
+                text='["fiscal year starts in April"]',
+                tokens_input=10,
+                tokens_output=20,
+            )
+
+    monkeypatch.setattr(nodes_module, "_llm_client", LLMClient(CompressProvider()))
+
+    resp = client.patch("/memory", json={"content": "Fiscal year starts in April."})
+    assert resp.status_code == 200, resp.text
+
+    # Background task runs in a thread; poll until it commits
+    factory = session_module._get_session_factory()
+    deadline = time.time() + 5.0
+    row = None
+    while time.time() < deadline:
+        with factory() as db:
+            row = db.get(SettingsRow, "global_memory_facts")
+            if row is not None:
+                break
+        time.sleep(0.1)
+    assert row is not None, "global_memory_facts SettingsRow must exist after compression"
+    facts = json.loads(row.value)
+    assert isinstance(facts, list)
+    assert len(facts) >= 1

@@ -34,6 +34,9 @@ def update_memory(
     else:
         row.value = body.content
 
+    # Commit before queuing background task so compress_memory sees the new value
+    session.commit()
+
     # C31: compress memory facts in background
     from data_analyst.graph.compress import compress_memory
     background_tasks.add_task(compress_memory)

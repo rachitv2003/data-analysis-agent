@@ -18,8 +18,18 @@ FastAPI (port 8001)
   ├── POST /ask                           → auto-select datasets, create run, invoke agent, return answer
   ├── GET  /sessions                      → list all sessions (global, most-recently-updated first)
   ├── GET  /sessions/{id}                 → turns for a session
+  ├── DELETE /sessions/{id}               → delete a single session and its runs
+  ├── DELETE /sessions                    → delete all sessions and their runs
+  ├── PATCH /sessions/{id}/name           → rename a session
   ├── GET  /runs/current                  → most-recent run's status + iteration_count (progress polling)
-  └── GET  /stats/daily                   → aggregated token usage for today (UTC)
+  ├── GET  /stats/daily                   → aggregated token usage for today (server local time)
+  ├── GET  /memory                        → read global persistent memory
+  ├── PATCH /memory                       → replace global persistent memory; triggers C31 compression
+  ├── GET  /datasets/{id}                 → single dataset metadata + column schema (used by Database tab)
+  ├── POST /datasets/{id}/describe        → C30: trigger on-demand notes generation for a dataset
+  ├── POST /datasets/{id}/re-derive       → C25: re-execute derivation code against current parents
+  ├── POST /datasets/{id}/clean           → C24: preview NL cleaning operation (LLM generates code)
+  └── POST /datasets/{id}/clean/apply     → C24: apply cleaning code in-place; updates CSV + Parquet
   │
   ▼
 Pre-flight: clarification check (C26)
@@ -41,11 +51,15 @@ LangGraph ReAct Agent (StateGraph)
   ▼
 SQLite (data_analyst.db)
   ├── datasets             → id, filename, file_path, row_count, col_count, columns_json,
-  │                          content_hash, format, context, created_at
+  │                          content_hash, format, context, origin, derived_from_run_id,
+  │                          derived_from_dataset_ids, derivation_code, parquet_path,
+  │                          auto_notes_status, context_facts, created_at, updated_at
   ├── query_runs           → id, dataset_id, session_id, question, answer, status, error_message,
   │                          action_history, iteration_count, tokens_input, tokens_output,
-  │                          dataset_ids_json, selector_reasoning, created_at, updated_at
-  └── conversation_sessions → id, dataset_id, dataset_ids_json, created_at, updated_at
+  │                          prompt_breakdown, dataset_ids_json, selector_reasoning,
+  │                          created_at, updated_at
+  ├── conversation_sessions → id, dataset_id, dataset_ids_json, name, created_at, updated_at
+  └── settings             → key, value, updated_at  (global_memory, global_memory_facts, llm_model)
 ```
 
 ## Layers
