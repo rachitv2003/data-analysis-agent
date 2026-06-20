@@ -13,6 +13,9 @@ router = APIRouter()
 
 # C29: hard-coded context window limits per model (tokens)
 _CONTEXT_LIMITS: dict[str, int] = {
+    "gemini-3.1-flash-lite": 1_000_000,
+    "gemini-3.1-flash":      1_000_000,
+    "gemini-3.1-pro":        1_000_000,
     "gemini-2.5-flash-lite": 1_000_000,
     "gemini-2.5-flash":      1_000_000,
     "gemini-2.5-pro":        1_000_000,
@@ -37,6 +40,9 @@ def get_context_limit(model: str) -> int:
     for key, limit in _CONTEXT_LIMITS.items():
         if key in model_lower:
             return limit
+    # Unlisted Gemini models all have large context windows
+    if "gemini" in model_lower:
+        return 1_000_000
     return 128_000
 
 

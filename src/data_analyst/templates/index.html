@@ -283,7 +283,10 @@
         <div id="staged-panel" style="display:none;margin-top:14px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
             <span style="font-size:13px;font-weight:600;color:#374151;" id="staged-header">0 files staged</span>
-            <button type="button" class="btn btn-ghost btn-xs" onclick="clearStaged()">Clear staged</button>
+            <div style="display:flex;gap:6px;">
+              <button type="button" id="clear-folder-notes-btn" class="btn btn-ghost btn-xs" onclick="clearAllFolderNotes()" style="display:none;color:#d97706;border-color:#fcd34d;">Clear all notes</button>
+              <button type="button" class="btn btn-ghost btn-xs" onclick="clearStaged()">Clear staged</button>
+            </div>
           </div>
           <div id="staged-rows" style="max-height:160px;overflow-y:auto;"></div>
           <div style="margin-top:10px;">
@@ -579,6 +582,9 @@
     document.getElementById('drop-zone-text').textContent = 'Drop more files to add to the list';
     document.getElementById('staged-header').textContent = `${n} file${n!==1?'s':''} staged — review before uploading`;
     document.getElementById('upload-btn-count').textContent = n;
+    const hasFolderNotes = [..._staged.values()].some(s => s.notesFilename === '_folder_notes');
+    const cfnBtn = document.getElementById('clear-folder-notes-btn');
+    if (cfnBtn) cfnBtn.style.display = hasFolderNotes ? 'inline-flex' : 'none';
     const uploaded = new Set([...document.querySelectorAll('.ds-check')].map(c => {
       const s = c.parentElement?.querySelector('span'); return s?s.textContent.split(' (')[0]:'';
     }));
@@ -596,7 +602,7 @@
           <div class="sr-acts">
             <button type="button" onclick="toggleNotes(${id})" style="background:#f3f4f6;color:#374151;border:1px solid #d1d5db;">📝 Notes</button>
             ${notesAttached
-              ? `<span style="font-size:11px;color:#16a34a;cursor:default;">📎 ${esc(item.notesFilename)}</span>`
+              ? `<span style="font-size:11px;color:#16a34a;display:inline-flex;align-items:center;gap:3px;">📎 ${esc(item.notesFilename)}<button type="button" onclick="clearNotesFile(${id})" title="Remove notes" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:13px;padding:0 2px;line-height:1;">✕</button></span>`
               : `<label style="cursor:pointer;font-size:12px;color:#1e40af;text-decoration:underline;">📎 Notes file<input type="file" accept=".txt,.md" style="display:none" onchange="attachNotesFile(${id},this)"></label>`
             }
             <button type="button" onclick="removeStagedFile(${id})" style="background:none;color:#9ca3af;border:none;font-size:18px;padding:0 6px;cursor:pointer;" aria-label="Remove staged file">&#10005;</button>
@@ -617,6 +623,17 @@
 
   function removeStagedFile(id) { _staged.delete(id); _renderStaged(); }
   function clearStaged() { _staged.clear(); _renderStaged(); }
+  function clearNotesFile(id) {
+    const s = _staged.get(id); if(!s) return;
+    s.notesContent = ''; s.notesFilename = ''; s.context = '';
+    _renderStaged();
+  }
+  function clearAllFolderNotes() {
+    for (const s of _staged.values()) {
+      if (s.notesFilename === '_folder_notes') { s.notesContent = ''; s.notesFilename = ''; s.context = ''; }
+    }
+    _renderStaged();
+  }
   function toggleNotes(id) {
     const el = document.getElementById(`sr-notes-${id}`);
     if (el) el.style.display = el.style.display==='none'?'block':'none';
