@@ -270,7 +270,7 @@
             <span style="font-size:13px;font-weight:600;color:#374151;" id="staged-header">0 files staged</span>
             <button type="button" class="btn btn-ghost btn-xs" onclick="clearStaged()">Clear staged</button>
           </div>
-          <div id="staged-rows"></div>
+          <div id="staged-rows" style="max-height:160px;overflow-y:auto;"></div>
           <div style="margin-top:10px;">
             <button type="button" id="upload-staged-btn" class="btn btn-primary" onclick="uploadStaged()">
               Upload <span id="upload-btn-count">0</span> file(s)
@@ -1684,16 +1684,28 @@
           const sess = sessBody.data;
           const sessDatasetIds = new Set(sess.dataset_ids || [sess.dataset_id]);
           sessRunIds = new Set((sess.turns||[]).map(t=>t.run_id));
-          datasets = datasets.filter(d =>
+
+          // Backward-compat: if session only tracked 1 dataset (pre-dataset_ids_json),
+          // show all uploaded datasets rather than just the primary one.
+          const filteredBySession = datasets.filter(d =>
             sessDatasetIds.has(d.dataset_id) ||
             (d.derived_from_run_id && sessRunIds.has(d.derived_from_run_id))
           );
+          const allUploaded = datasets.filter(d => d.origin !== 'derived');
+          if (sessDatasetIds.size <= 1 && allUploaded.length > 1) {
+            // Session predates multi-dataset tracking — show all uploaded + session-derived
+            const sessionDerived = datasets.filter(d => d.derived_from_run_id && sessRunIds.has(d.derived_from_run_id));
+            datasets = [...allUploaded, ...sessionDerived];
+          } else {
+            datasets = filteredBySession;
+          }
+
           const label = sess.name || (sess.turns?.[0]?.question?.slice(0,40)) || 'Unnamed session';
           document.getElementById('db-session-name').textContent = label;
         } catch {}
       } else {
         // No active session: show only uploaded datasets with banner
-        datasets = datasets.filter(d => !d.derived_from_run_id);
+        datasets = datasets.filter(d => d.origin !== 'derived');
         document.getElementById('db-session-name').textContent = 'No active session — showing uploaded datasets';
       }
 
@@ -1912,6 +1924,7 @@
       if (!schema) {
         const body = await fetch(`/datasets/${id}`).then(r=>r.json());
         schema = body.data;
+        if (!schema) throw new Error(body.detail?.message || 'Dataset could not be loaded');
         _dbSchemaCache[id] = schema;
       }
       contentEl.innerHTML = _renderSchemaPanel(schema);

@@ -54,9 +54,14 @@ def init_db() -> None:
     # Incremental migrations — add columns that create_all won't add to existing tables
     with engine.connect() as conn:
         sess_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(conversation_sessions)"))}
-        if "name" not in sess_cols:
-            conn.execute(text("ALTER TABLE conversation_sessions ADD COLUMN name TEXT"))
-            conn.commit()
+        _sess_migrations = [
+            ("name", "TEXT"),
+            ("dataset_ids_json", "TEXT"),
+        ]
+        for col, definition in _sess_migrations:
+            if col not in sess_cols:
+                conn.execute(text(f"ALTER TABLE conversation_sessions ADD COLUMN {col} {definition}"))
+        conn.commit()
 
         ds_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(datasets)"))}
         _ds_migrations = [
