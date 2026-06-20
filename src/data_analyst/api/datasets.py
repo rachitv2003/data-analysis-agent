@@ -17,7 +17,7 @@ _CONTEXT_MAX_LEN = 4000
 
 def _friendly_dtype(dtype_str: str) -> str:
     s = dtype_str.lower()
-    if s == "object": return "text"
+    if s in ("object", "string"): return "text"
     if s.startswith("int"): return "integer"
     if s.startswith("uint"): return "integer"
     if s.startswith("float"): return "float"
@@ -91,7 +91,8 @@ def get_dataset(dataset_id: str, session: Session = Depends(get_session)):
             ]
         elif row.file_path and Path(row.file_path).exists():
             import pandas as pd
-            df0 = pd.read_csv(row.file_path, nrows=0)
+            # nrows=200 gives pandas enough data to infer numeric/date types
+            df0 = pd.read_csv(row.file_path, nrows=200)
             columns_schema = [
                 {"name": col, "dtype": _friendly_dtype(str(dtype))}
                 for col, dtype in df0.dtypes.items()

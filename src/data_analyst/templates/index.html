@@ -170,7 +170,7 @@
       <!-- Datasets card -->
       <div class="card">
         <div class="card-header">
-          <h2 class="card-title">Datasets</h2>
+          <h2 class="card-title">Tables</h2>
           <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;">
             <button type="button" id="select-all-btn" class="btn btn-ghost btn-xs"
                     style="display:{% if datasets %}inline-flex{% else %}none{% endif %};"
@@ -1453,7 +1453,7 @@
     });
     _updateStorageStat();
     loadSessionList();
-    _updateLineageBtn();
+    _initDagPanZoom();
   });
 
   // ── Clarification turn (C26) ──────────────────────────────────────────────
@@ -1479,7 +1479,6 @@
       for (const ds of (body.data||[])) {
         _registerDataset(ds); // handles both new rows and stale-status updates
       }
-      _updateLineageBtn();
     } catch {}
   }
 
@@ -1717,11 +1716,26 @@
         document.getElementById('db-session-name').textContent = 'No active session — showing uploaded datasets';
       }
 
+      // Batch-fetch schemas (column types) for ER diagram — use cache to skip known datasets
+      const _schemaFetches = await Promise.allSettled(
+        datasets.map(d => {
+          if (_dbSchemaCache[d.dataset_id]) return Promise.resolve(_dbSchemaCache[d.dataset_id]);
+          return fetch(`/datasets/${d.dataset_id}`).then(r=>r.json()).then(b=>{
+            if(b.data) _dbSchemaCache[d.dataset_id]=b.data;
+            return b.data||d;
+          });
+        })
+      );
+      datasets = datasets.map((d,i)=>{
+        const r=_schemaFetches[i];
+        return r.status==='fulfilled'&&r.value?{...d,...r.value}:d;
+      });
+
       _dbDatasets = datasets;
       document.getElementById('db-ds-count').textContent =
         `${datasets.length} dataset${datasets.length!==1?'s':''}`;
 
-      renderLineageDAG(datasets);
+      renderERDiagram(datasets);
       _renderDbStrip(datasets);
 
       if (_dbSelectedId && datasets.some(d=>d.dataset_id===_dbSelectedId)) {
@@ -1734,155 +1748,213 @@
     } catch(e) { console.error('loadDatabaseTab', e); }
   }
 
-  // ── Lineage DAG rendering ─────────────────────────────────────────────────
-  function renderLineageDAG(datasets) {
+  // ── Pan/zoom setup (done once at load, not per render) ───────────────────
+  function _initDagPanZoom() {
+    const svgEl = document.getElementById('lineage-svg'); if (!svgEl) return;
+    let dragging=false, px=0, py=0;
+    svgEl.addEventListener('mousedown',e=>{dragging=true;px=e.clientX;py=e.clientY;e.preventDefault();svgEl.style.cursor='grabbing';});
+    window.addEventListener('mouseup',()=>{dragging=false;svgEl.style.cursor='grab';});
+    window.addEventListener('mousemove',e=>{
+      if(!dragging)return;
+      _dagTranslate.x+=e.clientX-px; _dagTranslate.y+=e.clientY-py;
+      px=e.clientX; py=e.clientY;
+      const g=document.getElementById('dag-g');
+      if(g) g.setAttribute('transform',`translate(${_dagTranslate.x},${_dagTranslate.y}) scale(${_dagScale})`);
+    });
+    svgEl.addEventListener('wheel',e=>{
+      e.preventDefault();
+      _dagScale=Math.max(0.2,Math.min(4,_dagScale*(e.deltaY<0?1.1:0.9)));
+      const g=document.getElementById('dag-g');
+      if(g) g.setAttribute('transform',`translate(${_dagTranslate.x},${_dagTranslate.y}) scale(${_dagScale})`);
+    },{passive:false});
+  }
+
+  // ── ER schema diagram ─────────────────────────────────────────────────────
+  function renderERDiagram(datasets) {
     const svgEl = document.getElementById('lineage-svg');
     svgEl.innerHTML = '';
     const ns = 'http://www.w3.org/2000/svg';
     if (!datasets.length) {
-      const t = document.createElementNS(ns,'text');
+      const t=document.createElementNS(ns,'text');
       t.setAttribute('x','50%'); t.setAttribute('y','50%');
       t.setAttribute('text-anchor','middle'); t.setAttribute('fill','#9ca3af'); t.setAttribute('font-size','13');
-      t.textContent = 'No datasets in this scope';
-      svgEl.appendChild(t); return;
+      t.textContent='No datasets in this scope'; svgEl.appendChild(t); return;
     }
 
-    // Normalise derived_from_dataset_ids: API returns a parsed array; HTML attrs are JSON strings
-    function _parentIds(d) {
-      if (!d.derived_from_dataset_ids) return null;
-      if (Array.isArray(d.derived_from_dataset_ids)) return d.derived_from_dataset_ids;
-      try { return JSON.parse(d.derived_from_dataset_ids); } catch { return null; }
+    const CW=210, H_HDR=30, H_ROW=22, MAX_ROWS=10, GAP_X=50, GAP_Y=40, GRID_COLS=3;
+
+    function getCols(d){ return d.columns_schema||(d.columns||[]).map(c=>({name:c,dtype:'?'})); }
+    function cardH(d){ const n=getCols(d); const vis=Math.min(n.length,MAX_ROWS); return H_HDR+vis*H_ROW+(n.length>MAX_ROWS?H_ROW:0)+4; }
+    function parentIds(d){
+      if(!d.derived_from_dataset_ids) return [];
+      if(Array.isArray(d.derived_from_dataset_ids)) return d.derived_from_dataset_ids;
+      try{return JSON.parse(d.derived_from_dataset_ids);}catch{return [];}
     }
 
-    // Assign topological levels
-    const levels = {};
-    datasets.forEach(d => {
-      if (!_parentIds(d)) levels[d.dataset_id] = 0;
-    });
-    let changed = true, iter = 0;
-    while (changed && iter++ < 20) {
-      changed = false;
-      datasets.forEach(d => {
-        const parents = _parentIds(d);
-        if (!parents) return;
-        const parentLevels = parents.map(pid => levels[pid]).filter(l => l !== undefined);
-        if (parentLevels.length) {
-          const newLv = Math.max(...parentLevels) + 1;
-          if ((levels[d.dataset_id]??-1) < newLv) { levels[d.dataset_id] = newLv; changed = true; }
-        } else if (!(d.dataset_id in levels)) { levels[d.dataset_id] = 0; changed = true; }
-      });
+    const uploaded=datasets.filter(d=>d.origin!=='derived');
+    const derived=datasets.filter(d=>d.origin==='derived');
+    const pos={};
+    let yOff=20;
+
+    // Grid layout for uploaded tables
+    for(let r=0;r<Math.ceil(uploaded.length/GRID_COLS);r++){
+      const row=uploaded.slice(r*GRID_COLS,(r+1)*GRID_COLS);
+      const rowH=Math.max(...row.map(cardH));
+      row.forEach((d,c)=>{ pos[d.dataset_id]={x:20+c*(CW+GAP_X),y:yOff}; });
+      yOff+=rowH+GAP_Y;
     }
-    datasets.forEach(d => { if (!(d.dataset_id in levels)) levels[d.dataset_id] = 0; });
+    // Derived tables below
+    derived.forEach((d,i)=>{ pos[d.dataset_id]={x:20+i*(CW+GAP_X),y:yOff}; });
 
-    // Group by level
-    const byLevel = {};
-    datasets.forEach(d => { const lv=levels[d.dataset_id]||0; if(!byLevel[lv])byLevel[lv]=[]; byLevel[lv].push(d); });
+    const svgW=GRID_COLS*(CW+GAP_X)+20;
+    const svgH=derived.length?yOff+Math.max(...derived.map(cardH))+40:yOff+20;
 
-    const svgW = svgEl.parentElement.clientWidth || 600;
-    const svgH = svgEl.parentElement.clientHeight || 400;
-    const numLevels = Math.max(...Object.keys(byLevel).map(Number)) + 1;
-    const nodeW = 150, nodeH = 50, nodeRx = 8;
-    const colW = svgW / numLevels;
-
-    const positions = {};
-    Object.entries(byLevel).forEach(([lv, col]) => {
-      col.forEach((d,i) => {
-        const x = Number(lv)*colW + (colW-nodeW)/2;
-        const y = (i+0.5)*svgH/col.length - nodeH/2;
-        positions[d.dataset_id] = {x, y, cx:x+nodeW/2, cy:y+nodeH/2};
-      });
-    });
-
-    // Arrow marker defs
-    const defs = document.createElementNS(ns,'defs');
-    const marker = document.createElementNS(ns,'marker');
-    marker.setAttribute('id','dag-arrow'); marker.setAttribute('markerWidth','8');
-    marker.setAttribute('markerHeight','6'); marker.setAttribute('refX','7');
-    marker.setAttribute('refY','3'); marker.setAttribute('orient','auto');
-    const arrowPath = document.createElementNS(ns,'path');
-    arrowPath.setAttribute('d','M0,0 L0,6 L8,3 z'); arrowPath.setAttribute('fill','#d1d5db');
-    marker.appendChild(arrowPath); defs.appendChild(marker); svgEl.appendChild(defs);
+    // Defs: arrow marker
+    const defs=document.createElementNS(ns,'defs');
+    const mk=document.createElementNS(ns,'marker');
+    mk.setAttribute('id','dag-arrow'); mk.setAttribute('markerWidth','8'); mk.setAttribute('markerHeight','6');
+    mk.setAttribute('refX','7'); mk.setAttribute('refY','3'); mk.setAttribute('orient','auto');
+    const ap=document.createElementNS(ns,'path');
+    ap.setAttribute('d','M0,0 L0,6 L8,3 z'); ap.setAttribute('fill','#94a3b8');
+    mk.appendChild(ap); defs.appendChild(mk); svgEl.appendChild(defs);
 
     // Pan/zoom group
-    const g = document.createElementNS(ns,'g');
-    g.id = 'dag-g';
+    const g=document.createElementNS(ns,'g');
+    g.id='dag-g';
     g.setAttribute('transform',`translate(${_dagTranslate.x},${_dagTranslate.y}) scale(${_dagScale})`);
 
-    // Edges
-    datasets.forEach(d => {
-      const parents = _parentIds(d); if (!parents) return;
-      const tp = positions[d.dataset_id]; if(!tp) return;
-      parents.forEach(pid => {
-        const pp = positions[pid]; if(!pp) return;
-        const line = document.createElementNS(ns,'line');
-        line.setAttribute('x1',pp.cx); line.setAttribute('y1',pp.cy);
-        line.setAttribute('x2',tp.cx - nodeW/2 + 6); line.setAttribute('y2',tp.cy);
-        line.setAttribute('stroke','#d1d5db'); line.setAttribute('stroke-width','1.5');
-        line.setAttribute('marker-end','url(#dag-arrow)');
-        g.appendChild(line);
+    // FK inference: columns ending in _id shared by exactly 2 uploaded tables
+    const colMap={};
+    uploaded.forEach(d=>{
+      getCols(d).forEach(c=>{
+        if(c.name&&c.name.endsWith('_id')){
+          if(!colMap[c.name]) colMap[c.name]=[];
+          if(!colMap[c.name].includes(d.dataset_id)) colMap[c.name].push(d.dataset_id);
+        }
+      });
+    });
+    const drawnPairs=new Set(), fkLinks=[];
+    Object.entries(colMap).filter(([,ids])=>ids.length===2).forEach(([col,[a,b]])=>{
+      const k=[a,b].sort().join('|');
+      if(!drawnPairs.has(k)){drawnPairs.add(k); fkLinks.push({from:a,to:b,col});}
+    });
+
+    // FK lines (drawn behind table cards)
+    fkLinks.forEach(({from,to,col})=>{
+      const fp=pos[from],tp=pos[to]; if(!fp||!tp) return;
+      const fx=fp.x+CW, fy=fp.y+H_HDR+H_ROW*0.8;
+      const tx=tp.x, ty=tp.y+H_HDR+H_ROW*0.8;
+      const cx=(fx+tx)/2;
+      const path=document.createElementNS(ns,'path');
+      path.setAttribute('d',`M${fx},${fy} C${cx},${fy} ${cx},${ty} ${tx},${ty}`);
+      path.setAttribute('stroke','#cbd5e1'); path.setAttribute('stroke-width','1.5');
+      path.setAttribute('fill','none'); path.setAttribute('marker-end','url(#dag-arrow)');
+      g.appendChild(path);
+      const lbl=document.createElementNS(ns,'text');
+      lbl.setAttribute('x',cx); lbl.setAttribute('y',(fy+ty)/2-4);
+      lbl.setAttribute('text-anchor','middle'); lbl.setAttribute('font-size','9');
+      lbl.setAttribute('fill','#94a3b8'); lbl.style.pointerEvents='none';
+      lbl.textContent=col; g.appendChild(lbl);
+    });
+
+    // Derivation lines (dashed green, parent bottom → child top)
+    derived.forEach(d=>{
+      const pids=parentIds(d); const tp=pos[d.dataset_id]; if(!tp) return;
+      pids.forEach(pid=>{
+        const pp=pos[pid]; if(!pp) return;
+        const pd=datasets.find(x=>x.dataset_id===pid);
+        const fy=pp.y+(pd?cardH(pd):100);
+        const fx=pp.x+CW/2, tx=tp.x+CW/2, ty=tp.y;
+        const path=document.createElementNS(ns,'path');
+        path.setAttribute('d',`M${fx},${fy} C${fx},${fy+30} ${tx},${ty-30} ${tx},${ty}`);
+        path.setAttribute('stroke','#16a34a'); path.setAttribute('stroke-width','1.5');
+        path.setAttribute('stroke-dasharray','5,3'); path.setAttribute('fill','none');
+        path.setAttribute('marker-end','url(#dag-arrow)'); g.appendChild(path);
       });
     });
 
-    // Nodes
-    datasets.forEach(d => {
-      const pos = positions[d.dataset_id]; if(!pos) return;
-      const isActive = d.dataset_id === _dbSelectedId;
-      const isDerived = d.origin === 'derived';
-      const fill = isDerived ? '#dcfce7' : '#eff6ff';
-      const stroke = d.stale ? '#f59e0b' : (isDerived ? '#16a34a' : '#3b82f6');
-      const strokeW = isActive ? 3 : (d.stale ? 2 : 1.5);
+    // Table cards
+    datasets.forEach(d=>{
+      const p=pos[d.dataset_id]; if(!p) return;
+      const cols=getCols(d);
+      const isDerived=d.origin==='derived';
+      const isActive=d.dataset_id===_dbSelectedId;
+      const visRows=Math.min(cols.length,MAX_ROWS);
+      const hasMore=cols.length>MAX_ROWS;
+      const totalH=H_HDR+visRows*H_ROW+(hasMore?H_ROW:0)+4;
 
-      const rect = document.createElementNS(ns,'rect');
-      rect.setAttribute('x',pos.x); rect.setAttribute('y',pos.y);
-      rect.setAttribute('width',nodeW); rect.setAttribute('height',nodeH);
-      rect.setAttribute('rx',nodeRx); rect.setAttribute('fill',fill);
-      rect.setAttribute('stroke',stroke); rect.setAttribute('stroke-width',strokeW);
-      rect.style.cursor='pointer';
-      rect.addEventListener('click',()=>selectDataset(d.dataset_id));
-      g.appendChild(rect);
+      const cg=document.createElementNS(ns,'g');
+      cg.setAttribute('transform',`translate(${p.x},${p.y})`);
+      cg.style.cursor='pointer';
+      cg.addEventListener('click',()=>selectDataset(d.dataset_id));
 
-      const label = document.createElementNS(ns,'text');
-      label.setAttribute('x',pos.cx); label.setAttribute('y',pos.cy-6);
-      label.setAttribute('text-anchor','middle'); label.setAttribute('font-size','11');
-      label.setAttribute('font-weight','600'); label.setAttribute('fill','#1f2937');
-      label.style.cursor='pointer'; label.style.pointerEvents='none';
-      label.textContent = d.filename.length>20?d.filename.slice(0,18)+'…':d.filename;
-      g.appendChild(label);
+      // Border rect
+      const bg=document.createElementNS(ns,'rect');
+      bg.setAttribute('width',CW); bg.setAttribute('height',totalH); bg.setAttribute('rx','4');
+      bg.setAttribute('fill','white');
+      bg.setAttribute('stroke',isActive?'#3b82f6':(isDerived?'#16a34a':'#d1d5db'));
+      bg.setAttribute('stroke-width',isActive?'2':'1');
+      cg.appendChild(bg);
 
-      const sub = document.createElementNS(ns,'text');
-      sub.setAttribute('x',pos.cx); sub.setAttribute('y',pos.cy+9);
-      sub.setAttribute('text-anchor','middle'); sub.setAttribute('font-size','10');
-      sub.setAttribute('fill','#6b7280'); sub.style.pointerEvents='none';
-      sub.textContent = `${(d.row_count||0).toLocaleString()} rows${d.stale?' · stale':''}`;
-      g.appendChild(sub);
+      // Header bg (rounded top, square bottom)
+      const hdr=document.createElementNS(ns,'rect');
+      hdr.setAttribute('width',CW); hdr.setAttribute('height',H_HDR); hdr.setAttribute('rx','4');
+      hdr.setAttribute('fill',isDerived?'#15803d':'#1e40af'); cg.appendChild(hdr);
+      const hdrBot=document.createElementNS(ns,'rect');
+      hdrBot.setAttribute('y',H_HDR/2); hdrBot.setAttribute('width',CW); hdrBot.setAttribute('height',H_HDR/2);
+      hdrBot.setAttribute('fill',isDerived?'#15803d':'#1e40af'); cg.appendChild(hdrBot);
 
-      // Invisible click overlay
-      const overlay = document.createElementNS(ns,'rect');
-      overlay.setAttribute('x',pos.x); overlay.setAttribute('y',pos.y);
-      overlay.setAttribute('width',nodeW); overlay.setAttribute('height',nodeH);
-      overlay.setAttribute('fill','transparent'); overlay.style.cursor='pointer';
-      overlay.addEventListener('click',()=>selectDataset(d.dataset_id));
-      g.appendChild(overlay);
+      // Table name
+      const tname=document.createElementNS(ns,'text');
+      tname.setAttribute('x','8'); tname.setAttribute('y','20');
+      tname.setAttribute('fill','white'); tname.setAttribute('font-size','11');
+      tname.setAttribute('font-weight','600'); tname.style.pointerEvents='none';
+      const fn=d.filename.replace(/\.(csv|parquet)$/i,'');
+      tname.textContent=fn.length>26?fn.slice(0,24)+'…':fn; cg.appendChild(tname);
+
+      if(isDerived){
+        const badge=document.createElementNS(ns,'text');
+        badge.setAttribute('x',CW-6); badge.setAttribute('y','20');
+        badge.setAttribute('text-anchor','end'); badge.setAttribute('fill','#bbf7d0');
+        badge.setAttribute('font-size','9'); badge.style.pointerEvents='none';
+        badge.textContent='derived'; cg.appendChild(badge);
+      }
+
+      // Column rows
+      cols.slice(0,MAX_ROWS).forEach((col,i)=>{
+        const ry=H_HDR+i*H_ROW;
+        if(i%2===0){
+          const rb=document.createElementNS(ns,'rect');
+          rb.setAttribute('y',ry); rb.setAttribute('width',CW); rb.setAttribute('height',H_ROW);
+          rb.setAttribute('fill','#f8fafc'); cg.appendChild(rb);
+        }
+        const div=document.createElementNS(ns,'line');
+        div.setAttribute('x1','0'); div.setAttribute('y1',ry); div.setAttribute('x2',CW); div.setAttribute('y2',ry);
+        div.setAttribute('stroke','#e5e7eb'); div.setAttribute('stroke-width','0.5'); cg.appendChild(div);
+        const cn=document.createElementNS(ns,'text');
+        cn.setAttribute('x','8'); cn.setAttribute('y',ry+15);
+        cn.setAttribute('fill','#374151'); cn.setAttribute('font-size','10'); cn.style.pointerEvents='none';
+        cn.textContent=col.name&&col.name.length>22?col.name.slice(0,20)+'…':col.name||'?'; cg.appendChild(cn);
+        const ct=document.createElementNS(ns,'text');
+        ct.setAttribute('x',CW-6); ct.setAttribute('y',ry+15);
+        ct.setAttribute('text-anchor','end'); ct.setAttribute('fill','#94a3b8');
+        ct.setAttribute('font-size','10'); ct.setAttribute('font-style','italic'); ct.style.pointerEvents='none';
+        ct.textContent=col.dtype||'?'; cg.appendChild(ct);
+      });
+
+      if(hasMore){
+        const moreY=H_HDR+visRows*H_ROW;
+        const mt=document.createElementNS(ns,'text');
+        mt.setAttribute('x',CW/2); mt.setAttribute('y',moreY+15);
+        mt.setAttribute('text-anchor','middle'); mt.setAttribute('fill','#9ca3af');
+        mt.setAttribute('font-size','10'); mt.style.pointerEvents='none';
+        mt.textContent=`… and ${cols.length-MAX_ROWS} more`; cg.appendChild(mt);
+      }
+
+      g.appendChild(cg);
     });
 
     svgEl.appendChild(g);
-
-    // Pan
-    let _dragging=false, _px=0, _py=0;
-    svgEl.addEventListener('mousedown',e=>{_dragging=true;_px=e.clientX;_py=e.clientY;e.preventDefault();svgEl.style.cursor='grabbing';});
-    window.addEventListener('mouseup',()=>{_dragging=false;svgEl.style.cursor='grab';});
-    window.addEventListener('mousemove',e=>{
-      if(!_dragging)return;
-      _dagTranslate.x+=e.clientX-_px; _dagTranslate.y+=e.clientY-_py;
-      _px=e.clientX; _py=e.clientY;
-      g.setAttribute('transform',`translate(${_dagTranslate.x},${_dagTranslate.y}) scale(${_dagScale})`);
-    });
-    // Zoom
-    svgEl.addEventListener('wheel',e=>{
-      e.preventDefault();
-      _dagScale=Math.max(0.2,Math.min(4,_dagScale*(e.deltaY<0?1.1:0.9)));
-      g.setAttribute('transform',`translate(${_dagTranslate.x},${_dagTranslate.y}) scale(${_dagScale})`);
-    },{passive:false});
   }
 
   function fitLineageDag() {
@@ -1925,7 +1997,7 @@
   async function selectDataset(id) {
     _dbSelectedId = id;
     document.querySelectorAll('#db-strip .db-chip').forEach(c=>c.classList.toggle('active',c.dataset.id===id));
-    renderLineageDAG(_dbDatasets);
+    renderERDiagram(_dbDatasets);
 
     const emptyEl=document.getElementById('db-schema-empty');
     const contentEl=document.getElementById('db-schema-content');
