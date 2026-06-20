@@ -65,9 +65,16 @@ def get_session_turns(
         .all()
     )
 
+    # C28: resolve dataset_ids for Database tab session scoping
+    if sess.dataset_ids_json:
+        dataset_ids = _json.loads(sess.dataset_ids_json)
+    else:
+        dataset_ids = [sess.dataset_id]
+
     return ok({
         "session_id": sess.id,
         "dataset_id": sess.dataset_id,
+        "dataset_ids": dataset_ids,
         "name": sess.name,
         "turns": [
             {
@@ -111,6 +118,12 @@ def delete_session(
         raise api_error("session_not_found", f"Session {session_id} not found.", 404)
     session.query(QueryRunRow).filter(QueryRunRow.session_id == session_id).delete()
     session.delete(sess)
+    # C27: evict session DataFrame cache
+    try:
+        from data_analyst.graph.nodes import _evict_session
+        _evict_session(session_id)
+    except Exception:
+        pass
     return ok({"deleted": session_id})
 
 

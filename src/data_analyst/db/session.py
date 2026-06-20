@@ -53,7 +53,21 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     # Incremental migrations — add columns that create_all won't add to existing tables
     with engine.connect() as conn:
-        existing = {row[1] for row in conn.execute(text("PRAGMA table_info(conversation_sessions)"))}
-        if "name" not in existing:
+        sess_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(conversation_sessions)"))}
+        if "name" not in sess_cols:
             conn.execute(text("ALTER TABLE conversation_sessions ADD COLUMN name TEXT"))
             conn.commit()
+
+        ds_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(datasets)"))}
+        _ds_migrations = [
+            ("updated_at", "TIMESTAMP DEFAULT (datetime('now'))"),
+            ("origin", "TEXT NOT NULL DEFAULT 'uploaded'"),
+            ("derived_from_run_id", "TEXT"),
+            ("derived_from_dataset_ids", "TEXT"),
+            ("derivation_code", "TEXT"),
+            ("parquet_path", "TEXT"),
+        ]
+        for col, definition in _ds_migrations:
+            if col not in ds_cols:
+                conn.execute(text(f"ALTER TABLE datasets ADD COLUMN {col} {definition}"))
+        conn.commit()

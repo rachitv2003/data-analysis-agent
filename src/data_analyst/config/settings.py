@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     max_iterations: int = Field(default=6)
     log_level: str = Field(default="INFO")
     upload_dir: str = Field(default="uploads")
+    cache_limit_mb: int = Field(default=1024)
 
 
 _settings: Settings | None = None

@@ -140,10 +140,26 @@ def apply_clean(
     except Exception as exc:
         raise api_error("write_error", f"Could not save cleaned dataset: {exc}", 500)
 
-    # Update DB metadata
+    # C27: regenerate Parquet after clean (non-fatal)
+    if ds.parquet_path:
+        try:
+            cleaned.to_parquet(ds.parquet_path, engine="pyarrow", index=False)
+        except Exception:
+            pass
+
+    # Update DB metadata and timestamp
+    from datetime import datetime, timezone
     ds.row_count = len(cleaned)
     ds.col_count = len(cleaned.columns)
     ds.columns_json = _json.dumps(cleaned.columns.tolist())
+    ds.updated_at = datetime.now(timezone.utc)
+
+    # C27: evict from session cache so next run reloads fresh data
+    try:
+        from data_analyst.graph.nodes import _invalidate_dataset
+        _invalidate_dataset(dataset_id)
+    except Exception:
+        pass
 
     return ok({
         "row_count": len(cleaned),

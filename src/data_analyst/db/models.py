@@ -32,6 +32,16 @@ class DatasetRow(Base):
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=_now
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+    # C25: derived dataset provenance
+    origin: Mapped[str] = mapped_column(Text, nullable=False, default="uploaded")
+    derived_from_run_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    derived_from_dataset_ids: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array
+    derivation_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # C27: Parquet path for fast reloading
+    parquet_path: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class ConversationSessionRow(Base):

@@ -112,6 +112,7 @@ def upload_file(
         content_hash=content_hash,
         format=fmt,
         context=context.strip() or None,
+        origin="uploaded",
     )
     session.add(dataset)
     session.flush()
@@ -119,6 +120,14 @@ def upload_file(
     dest = upload_dir / f"{dataset.id}.csv"
     df.to_csv(dest, index=False)
     dataset.file_path = str(dest.resolve())
+
+    # C27: write Parquet for fast reloading; non-fatal on failure
+    try:
+        parquet_dest = upload_dir / f"{dataset.id}.parquet"
+        df.to_parquet(parquet_dest, engine="pyarrow", index=False)
+        dataset.parquet_path = str(parquet_dest.resolve())
+    except Exception:
+        pass
 
     return ok({
         "dataset_id": dataset.id,

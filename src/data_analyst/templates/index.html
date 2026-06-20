@@ -89,6 +89,18 @@
   </div>
 </div>
 
+<!-- Clear database modal (C28) -->
+<div id="clear-db-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="cdb-title">
+  <div class="modal modal--sm">
+    <h3 class="modal__title modal__title--danger" id="cdb-title">Clear entire database?</h3>
+    <p class="modal__desc">This will permanently delete <strong>all datasets, all sessions, and all conversation history</strong>. This cannot be undone.</p>
+    <div class="modal__actions">
+      <button type="button" class="btn btn-danger" onclick="confirmClearDatabase()">Clear database</button>
+      <button type="button" class="btn btn-ghost" onclick="closeModal('clear-db-modal')">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- App shell -->
 <div class="app-shell">
 
@@ -140,6 +152,17 @@
 
   <!-- ── Main ───────────────────────────────────────────────────────────── -->
   <main class="main" id="main-content">
+
+    <!-- Tab bar (C28) -->
+    <div class="tab-bar" role="tablist" style="display:flex;gap:0;border-bottom:2px solid #e5e7eb;flex-shrink:0;margin-bottom:12px;">
+      <button type="button" class="tab-btn active" data-tab="analyse" onclick="switchTab('analyse')"
+              role="tab" aria-selected="true" aria-controls="analyse-tab">Analyse</button>
+      <button type="button" class="tab-btn" data-tab="database" onclick="switchTab('database')"
+              role="tab" aria-selected="false" aria-controls="database-tab">Database</button>
+    </div>
+
+    <!-- Analyse tab -->
+    <div id="analyse-tab" role="tabpanel" style="display:flex;flex-direction:column;flex:1;min-height:0;gap:16px;">
 
     <!-- Top row: datasets + upload -->
     <div class="card-row">
@@ -286,6 +309,57 @@
 
     </div><!-- /.card conversation -->
 
+    </div><!-- /#analyse-tab -->
+
+    <!-- Database tab (C28) -->
+    <div id="database-tab" role="tabpanel" style="display:none;flex:1;flex-direction:column;min-height:0;overflow:hidden;">
+
+      <!-- DB header bar -->
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 16px;background:#fff;border:1px solid #e5e7eb;border-radius:6px 6px 0 0;flex-shrink:0;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span id="db-session-name" style="font-size:14px;font-weight:600;color:#111827;">No active session</span>
+          <span id="db-ds-count" style="font-size:12px;color:#6b7280;background:#f3f4f6;border-radius:10px;padding:1px 8px;">0 datasets</span>
+        </div>
+        <button type="button" class="btn btn-ghost-danger btn-xs" onclick="openModal('clear-db-modal')">Clear database</button>
+      </div>
+
+      <!-- DB body: lineage (left) + schema panel (right) -->
+      <div style="flex:1;display:flex;min-height:0;border:1px solid #e5e7eb;border-top:none;overflow:hidden;">
+
+        <!-- Lineage graph panel -->
+        <div style="flex:6;min-width:0;border-right:1px solid #e5e7eb;position:relative;overflow:hidden;background:#f8fafc;">
+          <svg id="lineage-svg" width="100%" height="100%" style="display:block;cursor:grab;"></svg>
+          <!-- DAG controls -->
+          <div style="position:absolute;bottom:8px;right:10px;display:flex;gap:4px;">
+            <button type="button" class="btn btn-ghost btn-xs" onclick="fitLineageDag()" title="Fit to view">Fit</button>
+            <button type="button" class="btn btn-ghost btn-xs" onclick="zoomLineageDag(1.2)" title="Zoom in">+</button>
+            <button type="button" class="btn btn-ghost btn-xs" onclick="zoomLineageDag(0.9)" title="Zoom out">−</button>
+          </div>
+          <!-- Legend -->
+          <div style="position:absolute;top:8px;left:10px;display:flex;gap:8px;font-size:11px;color:#6b7280;">
+            <span style="display:flex;align-items:center;gap:3px;"><span style="width:10px;height:10px;border-radius:2px;background:#eff6ff;border:1.5px solid #3b82f6;display:inline-block;"></span>uploaded</span>
+            <span style="display:flex;align-items:center;gap:3px;"><span style="width:10px;height:10px;border-radius:2px;background:#dcfce7;border:1.5px solid #16a34a;display:inline-block;"></span>derived</span>
+            <span style="display:flex;align-items:center;gap:3px;"><span style="width:10px;height:10px;border-radius:2px;background:#fef3c7;border:2px solid #f59e0b;display:inline-block;"></span>stale</span>
+          </div>
+        </div>
+
+        <!-- Schema panel -->
+        <div id="db-schema-panel" style="flex:4;min-width:220px;overflow-y:auto;background:#fff;">
+          <div id="db-schema-empty" style="padding:32px 20px;text-align:center;color:#9ca3af;font-size:13px;">
+            ← Click a node or chip to see its schema
+          </div>
+          <div id="db-schema-content" style="display:none;"></div>
+        </div>
+
+      </div><!-- /DB body -->
+
+      <!-- Dataset strip -->
+      <div id="db-strip" style="flex-shrink:0;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 6px 6px;padding:8px 12px;display:flex;gap:8px;overflow-x:auto;background:#fafafa;min-height:52px;align-items:center;">
+        <span style="color:#9ca3af;font-size:12px;white-space:nowrap;">No datasets in scope</span>
+      </div>
+
+    </div><!-- /#database-tab -->
+
   </main><!-- /.main -->
 </div><!-- /.app-shell -->
 
@@ -383,6 +457,20 @@
   .step-code { background:#1e293b; color:#e2e8f0; padding:8px 12px; border-radius:4px; font-size:12px; font-family:monospace; white-space:pre-wrap; word-break:break-all; margin:0 0 4px; }
   .step-result { background:#f3f4f6; color:#374151; padding:6px 10px; border-radius:4px; font-size:12px; font-family:monospace; white-space:pre-wrap; word-break:break-all; margin:0; }
   .step-result-error { background:#fff5f5; color:#b91c1c; padding:6px 10px; border-radius:4px; font-size:12px; font-family:monospace; white-space:pre-wrap; word-break:break-all; margin:0; }
+
+  /* ── Tab bar (C28) ─────────────────────────────────────── */
+  .tab-btn { background:none; border:none; border-bottom:3px solid transparent; padding:8px 18px; font-size:14px; font-weight:600; color:#6b7280; cursor:pointer; margin-bottom:-2px; transition:color .15s,border-color .15s; }
+  .tab-btn:hover { color:#1e40af; }
+  .tab-btn.active { color:#1e40af; border-bottom-color:#3b82f6; }
+
+  /* ── Database tab: dataset strip chips ─────────────────── */
+  .db-chip { background:#f3f4f6; color:#374151; border:1px solid #e5e7eb; border-radius:16px; font-size:12px; padding:4px 12px; cursor:pointer; white-space:nowrap; transition:background .12s,border-color .12s; }
+  .db-chip:hover { background:#eff6ff; border-color:#bfdbfe; color:#1e40af; }
+  .db-chip.active { background:#dbeafe; border-color:#3b82f6; color:#1e40af; font-weight:600; }
+
+  /* ── Clarification turn (C26) ───────────────────────────── */
+  .clarification-turn { border-left:3px solid #f59e0b; background:#fffbeb; }
+  .clarification-label { display:inline-block; background:#fef3c7; color:#92400e; font-size:11px; font-weight:600; padding:1px 7px; border-radius:4px; border:1px solid #fcd34d; margin-bottom:6px; }
 </style>
 
 <script>
@@ -968,8 +1056,14 @@
     document.querySelectorAll('.session-item').forEach(el=>el.classList.toggle('active',el.dataset.sid===sessionId));
     try {
       const body = await(await fetch(`/sessions/${sessionId}`)).json();
-      for (const t of body.data.turns)
-        appendTurn(t.question,t.answer_html||esc(t.answer_markdown||'(no answer)'),t.iteration_count,t.tokens_input,t.tokens_output,t.status,null,!!t.is_best_effort,t.steps||[],new Date(t.created_at),null);
+      for (const t of body.data.turns) {
+        if (t.status === 'clarification') {
+          _pendingQuestion = t.question;
+          appendClarification(t.answer_markdown || t.answer_html || '');
+        } else {
+          appendTurn(t.question,t.answer_html||esc(t.answer_markdown||'(no answer)'),t.iteration_count,t.tokens_input,t.tokens_output,t.status,null,!!t.is_best_effort,t.steps||[],new Date(t.created_at),null);
+        }
+      }
     } catch {}
   }
 
@@ -1093,7 +1187,7 @@
     progressRow.style.display = 'flex';
     let elapsed = 0;
     document.getElementById('prg-elapsed').textContent = '⏱ 0s';
-    document.getElementById('prg-step').textContent = 'Step 0 / —';
+    document.getElementById('prg-step').textContent = 'Checking…';
     document.getElementById('prg-bar-fill').style.width = '0%';
     const elapsedTimer = setInterval(()=>{ elapsed++; document.getElementById('prg-elapsed').textContent=`⏱ ${elapsed}s`; },1000);
     const pollTimer = setInterval(async()=>{
@@ -1122,13 +1216,23 @@
       } else {
         const r = body.data;
         currentSessionId = r.session_id;
-        const dsUsed = r.datasets_used||[];
-        if(dsUsed.length>1) document.getElementById('querying-label').textContent=`Querying ${dsUsed.length} datasets`;
-        appendTurn(q,r.answer_html||esc(r.answer_markdown||'(no answer)'),r.iteration_count,r.tokens_input,r.tokens_output,r.status,dsUsed,!!r.is_best_effort,r.steps||[],firedAt,Date.now()-firedAt.getTime(),r.suggested_questions||[]);
-        if(typeof tuAddRun==='function') tuAddRun(r.tokens_input||0, r.tokens_output||0);
-        qEl.value = '';
-        await loadSessionList();
-        announce('Answer received');
+        if (r.type === 'clarification') {
+          // C26: pre-flight clarification — show amber turn, don't clear input
+          _pendingQuestion = q;
+          appendClarification(r.clarification_question);
+          await loadSessionList();
+          announce('Clarification needed');
+        } else {
+          const dsUsed = r.datasets_used||[];
+          if(dsUsed.length>1) document.getElementById('querying-label').textContent=`Querying ${dsUsed.length} datasets`;
+          appendTurn(q,r.answer_html||esc(r.answer_markdown||'(no answer)'),r.iteration_count,r.tokens_input,r.tokens_output,r.status,dsUsed,!!r.is_best_effort,r.steps||[],firedAt,Date.now()-firedAt.getTime(),r.suggested_questions||[]);
+          if(typeof tuAddRun==='function') tuAddRun(r.tokens_input||0, r.tokens_output||0);
+          qEl.value = '';
+          // Auto-refresh datasets card so agent-saved derived datasets appear
+          await _refreshDatasetsCard();
+          await loadSessionList();
+          announce('Answer received');
+        }
       }
     } catch(e) {
       if (e.name === 'AbortError') {
@@ -1264,5 +1368,436 @@
     _updateStorageStat();
     loadSessionList();
   });
+
+  // ── Clarification turn (C26) ──────────────────────────────────────────────
+  let _pendingQuestion = '';
+
+  function appendClarification(clarificationQ) {
+    const div = document.createElement('div');
+    div.className = 'turn clarification-turn';
+    div.innerHTML =
+      `<div class="turn-q">Q: ${esc(_pendingQuestion)}</div>` +
+      `<div class="clarification-label">Needs clarification</div>` +
+      `<div class="answer-body" style="margin-top:6px;">${esc(clarificationQ)}</div>`;
+    document.getElementById('thread').appendChild(div);
+    document.getElementById('conversation').style.display = 'block';
+    document.getElementById('querying-label').textContent = 'Conversation';
+    div.scrollIntoView({behavior:'smooth',block:'nearest'});
+  }
+
+  // ── Refresh datasets card ─────────────────────────────────────────────────
+  async function _refreshDatasetsCard() {
+    try {
+      const body = await(await fetch('/datasets')).json();
+      const existing = new Set([...document.querySelectorAll('.ds-check')].map(c=>c.value));
+      for (const ds of (body.data||[])) {
+        if (!existing.has(ds.dataset_id)) {
+          _registerDataset(ds);
+        }
+      }
+    } catch {}
+  }
+
+  // ── Tab switching (C28) ───────────────────────────────────────────────────
+  function switchTab(name) {
+    const isDb = name === 'database';
+    document.getElementById('analyse-tab').style.display = isDb ? 'none' : 'flex';
+    const dbTab = document.getElementById('database-tab');
+    dbTab.style.display = isDb ? 'flex' : 'none';
+    document.querySelectorAll('.tab-btn').forEach(b => {
+      const active = b.dataset.tab === name;
+      b.classList.toggle('active', active);
+      b.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    if (isDb) loadDatabaseTab();
+  }
+
+  // ── Database tab state ────────────────────────────────────────────────────
+  let _dbDatasets = [];
+  const _dbSchemaCache = {};
+  let _dbSelectedId = null;
+  let _dagTranslate = {x:0, y:0};
+  let _dagScale = 1;
+
+  async function loadDatabaseTab() {
+    try {
+      const dsBody = await fetch('/datasets').then(r=>r.json());
+      let datasets = dsBody.data || [];
+
+      let sessRunIds = new Set();
+      if (currentSessionId) {
+        try {
+          const sessBody = await fetch(`/sessions/${currentSessionId}`).then(r=>r.json());
+          const sess = sessBody.data;
+          const sessDatasetIds = new Set(sess.dataset_ids || [sess.dataset_id]);
+          sessRunIds = new Set((sess.turns||[]).map(t=>t.run_id));
+          datasets = datasets.filter(d =>
+            sessDatasetIds.has(d.dataset_id) ||
+            (d.derived_from_run_id && sessRunIds.has(d.derived_from_run_id))
+          );
+          const label = sess.name || (sess.turns?.[0]?.question?.slice(0,40)) || 'Unnamed session';
+          document.getElementById('db-session-name').textContent = label;
+        } catch {}
+      } else {
+        // No active session: show only uploaded datasets with banner
+        datasets = datasets.filter(d => !d.derived_from_run_id);
+        document.getElementById('db-session-name').textContent = 'No active session — showing uploaded datasets';
+      }
+
+      _dbDatasets = datasets;
+      document.getElementById('db-ds-count').textContent =
+        `${datasets.length} dataset${datasets.length!==1?'s':''}`;
+
+      renderLineageDAG(datasets);
+      _renderDbStrip(datasets);
+
+      if (_dbSelectedId && datasets.some(d=>d.dataset_id===_dbSelectedId)) {
+        await selectDataset(_dbSelectedId);
+      } else {
+        _dbSelectedId = null;
+        document.getElementById('db-schema-empty').style.display = 'block';
+        document.getElementById('db-schema-content').style.display = 'none';
+      }
+    } catch(e) { console.error('loadDatabaseTab', e); }
+  }
+
+  // ── Lineage DAG rendering ─────────────────────────────────────────────────
+  function renderLineageDAG(datasets) {
+    const svgEl = document.getElementById('lineage-svg');
+    svgEl.innerHTML = '';
+    const ns = 'http://www.w3.org/2000/svg';
+    if (!datasets.length) {
+      const t = document.createElementNS(ns,'text');
+      t.setAttribute('x','50%'); t.setAttribute('y','50%');
+      t.setAttribute('text-anchor','middle'); t.setAttribute('fill','#9ca3af'); t.setAttribute('font-size','13');
+      t.textContent = 'No datasets in this scope';
+      svgEl.appendChild(t); return;
+    }
+
+    // Assign topological levels
+    const levels = {};
+    datasets.forEach(d => {
+      if (!d.derived_from_dataset_ids) levels[d.dataset_id] = 0;
+    });
+    let changed = true, iter = 0;
+    while (changed && iter++ < 20) {
+      changed = false;
+      datasets.forEach(d => {
+        if (!d.derived_from_dataset_ids) return;
+        let parents; try { parents = JSON.parse(d.derived_from_dataset_ids); } catch { return; }
+        const parentLevels = parents.map(pid => levels[pid]).filter(l => l !== undefined);
+        if (parentLevels.length) {
+          const newLv = Math.max(...parentLevels) + 1;
+          if ((levels[d.dataset_id]??-1) < newLv) { levels[d.dataset_id] = newLv; changed = true; }
+        } else if (!(d.dataset_id in levels)) { levels[d.dataset_id] = 0; changed = true; }
+      });
+    }
+    datasets.forEach(d => { if (!(d.dataset_id in levels)) levels[d.dataset_id] = 0; });
+
+    // Group by level
+    const byLevel = {};
+    datasets.forEach(d => { const lv=levels[d.dataset_id]||0; if(!byLevel[lv])byLevel[lv]=[]; byLevel[lv].push(d); });
+
+    const svgW = svgEl.parentElement.clientWidth || 600;
+    const svgH = svgEl.parentElement.clientHeight || 400;
+    const numLevels = Math.max(...Object.keys(byLevel).map(Number)) + 1;
+    const nodeW = 150, nodeH = 50, nodeRx = 8;
+    const colW = svgW / numLevels;
+
+    const positions = {};
+    Object.entries(byLevel).forEach(([lv, col]) => {
+      col.forEach((d,i) => {
+        const x = Number(lv)*colW + (colW-nodeW)/2;
+        const y = (i+0.5)*svgH/col.length - nodeH/2;
+        positions[d.dataset_id] = {x, y, cx:x+nodeW/2, cy:y+nodeH/2};
+      });
+    });
+
+    // Arrow marker defs
+    const defs = document.createElementNS(ns,'defs');
+    const marker = document.createElementNS(ns,'marker');
+    marker.setAttribute('id','dag-arrow'); marker.setAttribute('markerWidth','8');
+    marker.setAttribute('markerHeight','6'); marker.setAttribute('refX','7');
+    marker.setAttribute('refY','3'); marker.setAttribute('orient','auto');
+    const arrowPath = document.createElementNS(ns,'path');
+    arrowPath.setAttribute('d','M0,0 L0,6 L8,3 z'); arrowPath.setAttribute('fill','#d1d5db');
+    marker.appendChild(arrowPath); defs.appendChild(marker); svgEl.appendChild(defs);
+
+    // Pan/zoom group
+    const g = document.createElementNS(ns,'g');
+    g.id = 'dag-g';
+    g.setAttribute('transform',`translate(${_dagTranslate.x},${_dagTranslate.y}) scale(${_dagScale})`);
+
+    // Edges
+    datasets.forEach(d => {
+      if (!d.derived_from_dataset_ids) return;
+      let parents; try { parents=JSON.parse(d.derived_from_dataset_ids); } catch { return; }
+      const tp = positions[d.dataset_id]; if(!tp) return;
+      parents.forEach(pid => {
+        const pp = positions[pid]; if(!pp) return;
+        const line = document.createElementNS(ns,'line');
+        line.setAttribute('x1',pp.cx); line.setAttribute('y1',pp.cy);
+        line.setAttribute('x2',tp.cx - nodeW/2 + 6); line.setAttribute('y2',tp.cy);
+        line.setAttribute('stroke','#d1d5db'); line.setAttribute('stroke-width','1.5');
+        line.setAttribute('marker-end','url(#dag-arrow)');
+        g.appendChild(line);
+      });
+    });
+
+    // Nodes
+    datasets.forEach(d => {
+      const pos = positions[d.dataset_id]; if(!pos) return;
+      const isActive = d.dataset_id === _dbSelectedId;
+      const isDerived = d.origin === 'derived';
+      const fill = isDerived ? '#dcfce7' : '#eff6ff';
+      const stroke = d.stale ? '#f59e0b' : (isDerived ? '#16a34a' : '#3b82f6');
+      const strokeW = isActive ? 3 : (d.stale ? 2 : 1.5);
+
+      const rect = document.createElementNS(ns,'rect');
+      rect.setAttribute('x',pos.x); rect.setAttribute('y',pos.y);
+      rect.setAttribute('width',nodeW); rect.setAttribute('height',nodeH);
+      rect.setAttribute('rx',nodeRx); rect.setAttribute('fill',fill);
+      rect.setAttribute('stroke',stroke); rect.setAttribute('stroke-width',strokeW);
+      rect.style.cursor='pointer';
+      rect.addEventListener('click',()=>selectDataset(d.dataset_id));
+      g.appendChild(rect);
+
+      const label = document.createElementNS(ns,'text');
+      label.setAttribute('x',pos.cx); label.setAttribute('y',pos.cy-6);
+      label.setAttribute('text-anchor','middle'); label.setAttribute('font-size','11');
+      label.setAttribute('font-weight','600'); label.setAttribute('fill','#1f2937');
+      label.style.cursor='pointer'; label.style.pointerEvents='none';
+      label.textContent = d.filename.length>20?d.filename.slice(0,18)+'…':d.filename;
+      g.appendChild(label);
+
+      const sub = document.createElementNS(ns,'text');
+      sub.setAttribute('x',pos.cx); sub.setAttribute('y',pos.cy+9);
+      sub.setAttribute('text-anchor','middle'); sub.setAttribute('font-size','10');
+      sub.setAttribute('fill','#6b7280'); sub.style.pointerEvents='none';
+      sub.textContent = `${(d.row_count||0).toLocaleString()} rows${d.stale?' · stale':''}`;
+      g.appendChild(sub);
+
+      // Invisible click overlay
+      const overlay = document.createElementNS(ns,'rect');
+      overlay.setAttribute('x',pos.x); overlay.setAttribute('y',pos.y);
+      overlay.setAttribute('width',nodeW); overlay.setAttribute('height',nodeH);
+      overlay.setAttribute('fill','transparent'); overlay.style.cursor='pointer';
+      overlay.addEventListener('click',()=>selectDataset(d.dataset_id));
+      g.appendChild(overlay);
+    });
+
+    svgEl.appendChild(g);
+
+    // Pan
+    let _dragging=false, _px=0, _py=0;
+    svgEl.addEventListener('mousedown',e=>{_dragging=true;_px=e.clientX;_py=e.clientY;e.preventDefault();svgEl.style.cursor='grabbing';});
+    window.addEventListener('mouseup',()=>{_dragging=false;svgEl.style.cursor='grab';});
+    window.addEventListener('mousemove',e=>{
+      if(!_dragging)return;
+      _dagTranslate.x+=e.clientX-_px; _dagTranslate.y+=e.clientY-_py;
+      _px=e.clientX; _py=e.clientY;
+      g.setAttribute('transform',`translate(${_dagTranslate.x},${_dagTranslate.y}) scale(${_dagScale})`);
+    });
+    // Zoom
+    svgEl.addEventListener('wheel',e=>{
+      e.preventDefault();
+      _dagScale=Math.max(0.2,Math.min(4,_dagScale*(e.deltaY<0?1.1:0.9)));
+      g.setAttribute('transform',`translate(${_dagTranslate.x},${_dagTranslate.y}) scale(${_dagScale})`);
+    },{passive:false});
+  }
+
+  function fitLineageDag() {
+    _dagTranslate={x:0,y:0}; _dagScale=1;
+    const g=document.getElementById('dag-g');
+    if(g) g.setAttribute('transform','translate(0,0) scale(1)');
+  }
+  function zoomLineageDag(factor) {
+    _dagScale=Math.max(0.2,Math.min(4,_dagScale*factor));
+    const g=document.getElementById('dag-g');
+    if(g) g.setAttribute('transform',`translate(${_dagTranslate.x},${_dagTranslate.y}) scale(${_dagScale})`);
+  }
+
+  // ── Dataset strip ─────────────────────────────────────────────────────────
+  function _renderDbStrip(datasets) {
+    const strip = document.getElementById('db-strip');
+    strip.innerHTML = '';
+    if (!datasets.length) {
+      strip.innerHTML = '<span style="color:#9ca3af;font-size:12px;white-space:nowrap;">No datasets in scope</span>';
+      return;
+    }
+    const sorted = [
+      ...datasets.filter(d=>d.origin!=='derived'),
+      ...datasets.filter(d=>d.origin==='derived').sort((a,b)=>new Date(a.created_at)-new Date(b.created_at)),
+    ];
+    sorted.forEach(d => {
+      const chip = document.createElement('button');
+      chip.type='button';
+      chip.className='db-chip'+(d.dataset_id===_dbSelectedId?' active':'');
+      chip.dataset.id=d.dataset_id;
+      const badge = d.origin==='derived'?'🧩':'📄';
+      chip.innerHTML=`${badge} ${esc(d.filename.length>22?d.filename.slice(0,20)+'…':d.filename)}`
+        +(d.stale?' <span style="color:#f59e0b;" title="Stale">⚠</span>':'');
+      chip.addEventListener('click',()=>selectDataset(d.dataset_id));
+      strip.appendChild(chip);
+    });
+  }
+
+  // ── Schema panel ──────────────────────────────────────────────────────────
+  async function selectDataset(id) {
+    _dbSelectedId = id;
+    document.querySelectorAll('#db-strip .db-chip').forEach(c=>c.classList.toggle('active',c.dataset.id===id));
+    renderLineageDAG(_dbDatasets);
+
+    const emptyEl=document.getElementById('db-schema-empty');
+    const contentEl=document.getElementById('db-schema-content');
+    emptyEl.style.display='none';
+    contentEl.style.display='block';
+    contentEl.innerHTML='<div style="padding:20px;color:#9ca3af;font-size:13px;">Loading…</div>';
+
+    try {
+      let schema = _dbSchemaCache[id];
+      if (!schema) {
+        const body = await fetch(`/datasets/${id}`).then(r=>r.json());
+        schema = body.data;
+        _dbSchemaCache[id] = schema;
+      }
+      contentEl.innerHTML = _renderSchemaPanel(schema);
+      const notesEl=contentEl.querySelector('.db-notes-input');
+      if(notesEl) notesEl.addEventListener('blur',()=>_saveDbContext(id,notesEl.value));
+    } catch(e) {
+      contentEl.innerHTML=`<div style="padding:12px;color:#b91c1c;font-size:12px;">Error: ${esc(e.message)}</div>`;
+    }
+  }
+
+  function _renderSchemaPanel(ds) {
+    const isDerived = ds.origin==='derived';
+    const staleTag = ds.stale
+      ? '<span style="background:#fef3c7;color:#92400e;font-size:11px;padding:1px 6px;border-radius:4px;margin-left:5px;">stale</span>'
+      : '';
+    const originBadge = isDerived
+      ? '<span style="background:#dcfce7;color:#166534;font-size:11px;padding:1px 6px;border-radius:4px;">derived</span>'
+      : '<span style="background:#eff6ff;color:#1e40af;font-size:11px;padding:1px 6px;border-radius:4px;">uploaded</span>';
+
+    const colRows = (ds.columns_schema||[]).map(c=>
+      `<tr><td style="padding:3px 8px;font-family:monospace;font-size:12px;color:#374151;">${esc(c.name)}</td>`
+      +`<td style="padding:3px 8px;font-size:11px;color:#6b7280;">${esc(c.dtype)}</td></tr>`
+    ).join('');
+
+    const parentChips = (isDerived&&ds.derived_from_dataset_ids)
+      ? ds.derived_from_dataset_ids.map(pid=>{
+          const p=_dbDatasets.find(d=>d.dataset_id===pid);
+          const nm=p?p.filename:pid.slice(0,8)+'…';
+          return `<button type="button" class="col-chip" style="cursor:pointer;margin-right:4px;" onclick="selectDataset('${esc(pid)}')">${esc(nm)}</button>`;
+        }).join('')
+      : '';
+
+    const derivedBlock = isDerived ? `
+      <div style="margin-bottom:10px;">
+        ${parentChips?`<div style="font-size:11px;color:#6b7280;margin-bottom:3px;">Derived from:</div><div style="margin-bottom:6px;">${parentChips}</div>`:''}
+        ${ds.derivation_code?`<details style="margin-top:4px;">
+          <summary style="font-size:11px;color:#6b7280;cursor:pointer;">Derivation code ▸</summary>
+          <pre style="background:#1e293b;color:#e2e8f0;padding:8px 10px;border-radius:4px;font-size:11px;margin-top:5px;white-space:pre-wrap;word-break:break-all;max-height:160px;overflow-y:auto;">${esc(ds.derivation_code)}</pre>
+        </details>`:''}
+      </div>` : '';
+
+    const actions = isDerived
+      ? `<button type="button" class="btn btn-ghost btn-xs" onclick="dbRederive('${ds.dataset_id}')">🔄 Re-derive</button> `
+        +`<button type="button" class="btn btn-ghost btn-xs" style="color:#b91c1c;" onclick="dbDelete('${ds.dataset_id}')">🗑 Delete</button>`
+      : `<button type="button" class="btn btn-ghost btn-xs" onclick="dbClean('${ds.dataset_id}')">🧹 Clean</button> `
+        +`<button type="button" class="btn btn-ghost btn-xs" style="color:#b91c1c;" onclick="dbDelete('${ds.dataset_id}')">🗑 Delete</button>`;
+
+    return `<div style="padding:14px 16px;">
+      <div style="display:flex;align-items:flex-start;gap:6px;margin-bottom:6px;flex-wrap:wrap;">
+        <span style="font-weight:600;font-size:14px;color:#111827;word-break:break-all;">${esc(ds.filename)}</span>
+        ${originBadge}${staleTag}
+      </div>
+      <div style="font-size:12px;color:#6b7280;margin-bottom:10px;">${(ds.row_count||0).toLocaleString()} rows × ${ds.col_count} cols · ${(ds.format||'csv').toUpperCase()}</div>
+      ${derivedBlock}
+      <div style="margin-bottom:10px;">
+        <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:5px;">Schema</div>
+        <div style="border:1px solid #e5e7eb;border-radius:4px;overflow:hidden;max-height:240px;overflow-y:auto;">
+          <table style="width:100%;border-collapse:collapse;">
+            <thead><tr>
+              <th style="padding:4px 8px;background:#f8fafc;font-size:11px;color:#6b7280;text-align:left;font-weight:600;position:sticky;top:0;">Name</th>
+              <th style="padding:4px 8px;background:#f8fafc;font-size:11px;color:#6b7280;text-align:left;font-weight:600;position:sticky;top:0;">Type</th>
+            </tr></thead>
+            <tbody>${colRows}</tbody>
+          </table>
+        </div>
+      </div>
+      <div style="margin-bottom:10px;">
+        <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;">Context notes</div>
+        <textarea class="db-notes-input" style="height:52px;font-size:12px;width:100%;box-sizing:border-box;resize:vertical;" placeholder="Notes about this dataset…">${esc(ds.context||'')}</textarea>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+        ${actions}
+        <span id="db-action-status-${ds.dataset_id}" style="font-size:12px;color:#6b7280;"></span>
+      </div>
+    </div>`;
+  }
+
+  async function _saveDbContext(id, ctx) {
+    try {
+      const resp = await fetch(`/datasets/${id}/context`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({context:ctx})});
+      if(resp.ok){
+        if(_dbSchemaCache[id]) _dbSchemaCache[id].context=ctx;
+        const ds=_dbDatasets.find(d=>d.dataset_id===id); if(ds) ds.context=ctx;
+      }
+    } catch {}
+  }
+
+  async function dbRederive(id) {
+    const statusEl=document.getElementById(`db-action-status-${id}`);
+    if(statusEl){statusEl.textContent='Re-deriving…';statusEl.style.color='#6b7280';}
+    try {
+      const resp=await fetch(`/datasets/${id}/re-derive`,{method:'POST'});
+      const body=await resp.json();
+      if(resp.ok){
+        if(statusEl){statusEl.textContent='Done!';statusEl.style.color='#16a34a';}
+        delete _dbSchemaCache[id];
+        await loadDatabaseTab();
+      } else {
+        if(statusEl){statusEl.textContent=body.detail?.message||'Failed';statusEl.style.color='#b91c1c';}
+      }
+    } catch(e){
+      if(statusEl){statusEl.textContent='Error';statusEl.style.color='#b91c1c';}
+    }
+  }
+
+  function dbClean(id) {
+    openCleanModal(id, {preventDefault:()=>{},stopPropagation:()=>{}});
+  }
+
+  async function dbDelete(id) {
+    if(!confirm('Delete this dataset and all its sessions? This cannot be undone.')) return;
+    try {
+      const resp=await fetch(`/datasets/${id}`,{method:'DELETE'});
+      if(resp.ok){
+        delete _dbSchemaCache[id]; _dbSelectedId=null;
+        document.querySelector(`.ds-row[data-id="${id}"]`)?.remove();
+        _updateStorageStat();
+        await loadDatabaseTab();
+      }
+    } catch(e){console.error(e);}
+  }
+
+  async function confirmClearDatabase() {
+    closeModal('clear-db-modal');
+    try {
+      const resp=await fetch('/datasets',{method:'DELETE'});
+      if(resp.ok){
+        _dbDatasets=[]; _dbSelectedId=null;
+        Object.keys(_dbSchemaCache).forEach(k=>delete _dbSchemaCache[k]);
+        document.getElementById('dataset-checkboxes').innerHTML='';
+        document.getElementById('no-datasets-msg').style.display='block';
+        document.getElementById('clear-all-btn').style.display='none';
+        document.getElementById('select-all-btn').style.display='none';
+        document.getElementById('session-list').innerHTML='<div id="no-sessions-msg" class="empty-msg">No sessions yet</div>';
+        startNewSession(); _updateStorageStat();
+        await loadDatabaseTab();
+        announce('Database cleared');
+      }
+    } catch(e){console.error(e);}
+  }
 </script>
 {% endblock %}

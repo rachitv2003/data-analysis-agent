@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends
@@ -14,22 +15,85 @@ router = APIRouter()
 _CONTEXT_MAX_LEN = 4000
 
 
+def _stale(row: DatasetRow, db: Session) -> bool:
+    """True if any parent dataset was updated after this derived dataset was created."""
+    if row.origin != "derived" or not row.derived_from_dataset_ids:
+        return False
+    try:
+        parent_ids = json.loads(row.derived_from_dataset_ids)
+    except Exception:
+        return False
+    for pid in parent_ids:
+        parent = db.get(DatasetRow, pid)
+        if parent is None:
+            return True  # parent deleted → treat as stale
+        parent_updated = getattr(parent, "updated_at", None) or parent.created_at
+        if parent_updated > row.created_at:
+            return True
+    return False
+
+
+def _row_dict(row: DatasetRow, db: Session) -> dict:
+    return {
+        "dataset_id": row.id,
+        "filename": row.filename,
+        "format": row.format,
+        "context": row.context or "",
+        "row_count": row.row_count,
+        "col_count": row.col_count,
+        "columns": json.loads(row.columns_json),
+        "created_at": row.created_at.isoformat(),
+        "origin": row.origin or "uploaded",
+        "stale": _stale(row, db),
+        "derived_from_run_id": row.derived_from_run_id,
+        "derived_from_dataset_ids": (
+            json.loads(row.derived_from_dataset_ids)
+            if row.derived_from_dataset_ids else None
+        ),
+        "derivation_description": row.context if row.origin == "derived" else None,
+    }
+
+
 @router.get("/datasets")
 def list_datasets(session: Session = Depends(get_session)):
     rows = session.query(DatasetRow).order_by(DatasetRow.created_at.desc()).all()
-    return ok([
-        {
-            "dataset_id": row.id,
-            "filename": row.filename,
-            "format": row.format,
-            "context": row.context or "",
-            "row_count": row.row_count,
-            "col_count": row.col_count,
-            "columns": json.loads(row.columns_json),
-            "created_at": row.created_at.isoformat(),
-        }
-        for row in rows
-    ])
+    return ok([_row_dict(r, session) for r in rows])
+
+
+@router.get("/datasets/{dataset_id}")
+def get_dataset(dataset_id: str, session: Session = Depends(get_session)):
+    row = session.get(DatasetRow, dataset_id)
+    if row is None:
+        raise api_error("dataset_not_found", f"Dataset {dataset_id} not found.", 404)
+
+    # Build columns_schema from Parquet dtypes (fast) or CSV header (fallback)
+    columns_schema: list[dict] = []
+    try:
+        if row.parquet_path and Path(row.parquet_path).exists():
+            import pandas as pd
+            df0 = pd.read_parquet(row.parquet_path, engine="pyarrow")
+            columns_schema = [
+                {"name": col, "dtype": str(dtype)}
+                for col, dtype in df0.dtypes.items()
+            ]
+        elif row.file_path and Path(row.file_path).exists():
+            import pandas as pd
+            df0 = pd.read_csv(row.file_path, nrows=0)
+            columns_schema = [
+                {"name": col, "dtype": str(dtype)}
+                for col, dtype in df0.dtypes.items()
+            ]
+    except Exception:
+        # Fall back to columns_json without dtype info
+        columns_schema = [
+            {"name": col, "dtype": "unknown"}
+            for col in json.loads(row.columns_json)
+        ]
+
+    data = _row_dict(row, session)
+    data["columns_schema"] = columns_schema
+    data["derivation_code"] = row.derivation_code
+    return ok(data)
 
 
 class ContextUpdate(BaseModel):
@@ -51,6 +115,91 @@ def update_context(
 
     row.context = body.context.strip() or None
     return ok({"dataset_id": dataset_id, "context": row.context or ""})
+
+
+@router.post("/datasets/{dataset_id}/re-derive")
+def re_derive_dataset(dataset_id: str, session: Session = Depends(get_session)):
+    """C25: Re-execute the derivation code against current parent versions."""
+    row = session.get(DatasetRow, dataset_id)
+    if row is None:
+        raise api_error("dataset_not_found", f"Dataset {dataset_id} not found.", 404)
+    if row.origin != "derived":
+        raise api_error("not_derived", "Only derived datasets can be re-derived.", 400)
+    if not row.derivation_code:
+        raise api_error("no_derivation_code", "Dataset has no stored derivation code.", 400)
+
+    parent_ids: list[str] = []
+    if row.derived_from_dataset_ids:
+        try:
+            parent_ids = json.loads(row.derived_from_dataset_ids)
+        except Exception:
+            raise api_error("re_derive_error", "Could not parse parent dataset IDs.", 400)
+
+    import pandas as pd
+    from data_analyst.graph.nodes import _var_name
+
+    ns: dict = {"pd": pd}
+    for pid in parent_ids:
+        parent = session.get(DatasetRow, pid)
+        if parent is None:
+            raise api_error("parent_not_found", f"Parent dataset {pid} not found.", 404)
+        try:
+            if parent.parquet_path and Path(parent.parquet_path).exists():
+                df = pd.read_parquet(parent.parquet_path, engine="pyarrow")
+            else:
+                df = pd.read_csv(parent.file_path)
+            var = _var_name(parent.filename)
+            ns[var] = df
+            ns["df"] = df
+        except Exception as exc:
+            raise api_error("re_derive_error", f"Could not load parent {pid}: {exc}", 400)
+
+    try:
+        lines = row.derivation_code.strip().splitlines()
+        preamble = "\n".join(lines[:-1])
+        last = lines[-1].strip()
+        if preamble:
+            exec(preamble, ns)  # noqa: S102
+        try:
+            result = eval(last, ns)  # noqa: S307
+        except SyntaxError:
+            exec(last, ns)  # noqa: S102
+            result = None
+
+        if result is None or not isinstance(result, pd.DataFrame):
+            raise ValueError("Derivation code did not return a DataFrame as its last expression")
+        cleaned = result
+    except Exception as exc:
+        raise api_error("re_derive_error", f"Derivation code failed: {exc}", 400)
+
+    # Overwrite CSV + Parquet
+    csv_path = Path(row.file_path)
+    cleaned.to_csv(csv_path, index=False)
+    if row.parquet_path:
+        try:
+            cleaned.to_parquet(row.parquet_path, engine="pyarrow", index=False)
+        except Exception:
+            pass
+
+    # Update DB metadata and timestamp
+    row.row_count = len(cleaned)
+    row.col_count = len(cleaned.columns)
+    row.columns_json = json.dumps(cleaned.columns.tolist())
+    row.updated_at = datetime.now(timezone.utc)
+
+    # Invalidate session cache
+    try:
+        from data_analyst.graph.nodes import _invalidate_dataset
+        _invalidate_dataset(dataset_id)
+    except Exception:
+        pass
+
+    return ok({
+        "dataset_id": dataset_id,
+        "row_count": len(cleaned),
+        "col_count": len(cleaned.columns),
+        "columns": cleaned.columns.tolist(),
+    })
 
 
 @router.delete("/datasets/{dataset_id}")
@@ -88,14 +237,34 @@ def delete_all_datasets(session: Session = Depends(get_session)):
 def _cascade_delete(db: Session, dataset_ids: list[str]) -> dict:
     deleted_run_count = 0
     deleted_session_count = 0
+    derived_deleted = 0
     id_set = set(dataset_ids)
+
+    # C25: recursively collect derived datasets that depend on any deleted dataset
+    def _collect_derived(ids: set[str]) -> set[str]:
+        derived_ids: set[str] = set()
+        all_derived = db.query(DatasetRow).filter(DatasetRow.origin == "derived").all()
+        for d in all_derived:
+            if not d.derived_from_dataset_ids:
+                continue
+            try:
+                parents = set(json.loads(d.derived_from_dataset_ids))
+            except Exception:
+                continue
+            if parents & ids:
+                derived_ids.add(d.id)
+        return derived_ids
+
+    extra = _collect_derived(id_set)
+    all_ids = id_set | extra
+    derived_deleted = len(extra)
 
     # Find sessions that reference any of these datasets
     all_sessions = db.query(ConversationSessionRow).all()
     sessions_to_delete: set[str] = set()
     for sess in all_sessions:
         sess_ids = set(json.loads(sess.dataset_ids_json)) if sess.dataset_ids_json else {sess.dataset_id}
-        if sess_ids & id_set:
+        if sess_ids & all_ids:
             sessions_to_delete.add(sess.id)
 
     # Delete runs in those sessions + orphan runs directly linked to the datasets
@@ -108,7 +277,7 @@ def _cascade_delete(db: Session, dataset_ids: list[str]) -> dict:
             db.delete(sess_row)
             deleted_session_count += 1
 
-    for did in dataset_ids:
+    for did in all_ids:
         for run in db.query(QueryRunRow).filter(
             QueryRunRow.dataset_id == did,
             QueryRunRow.session_id.is_(None),
@@ -116,21 +285,32 @@ def _cascade_delete(db: Session, dataset_ids: list[str]) -> dict:
             db.delete(run)
             deleted_run_count += 1
 
-    # Delete dataset rows + CSV files
-    for did in dataset_ids:
+    # Delete dataset rows + CSV + Parquet files
+    for did in all_ids:
         row = db.get(DatasetRow, did)
         if row:
             try:
                 Path(row.file_path).unlink(missing_ok=True)
             except Exception:
                 pass
+            if row.parquet_path:
+                try:
+                    Path(row.parquet_path).unlink(missing_ok=True)
+                except Exception:
+                    pass
             db.delete(row)
 
-    # derived_deleted is always 0 until C25 ships (DatasetRow gains derived_from_dataset_ids
-    # and recursive child deletion is implemented alongside save_dataset).
+    # Evict from session cache
+    try:
+        from data_analyst.graph.nodes import _invalidate_dataset
+        for did in all_ids:
+            _invalidate_dataset(did)
+    except Exception:
+        pass
+
     return {
         "deleted_dataset_ids": list(dataset_ids),
         "deleted_session_count": deleted_session_count,
         "deleted_run_count": deleted_run_count,
-        "derived_deleted": 0,
+        "derived_deleted": derived_deleted,
     }
