@@ -16,9 +16,9 @@
 
 **Google Gemini**
 
-**Model:** `gemini-2.0-flash` (configurable via `DATA_ANALYST_LLM_MODEL`)
+**Model:** `gemini-3.1-flash-lite` (configurable via `DATA_ANALYST_LLM_MODEL`)
 
-**Why:** User has a Gemini API key. Tested and working; default can be changed via env var.
+**Why:** Lightweight, fast, and tested thoroughly for ReAct loops. Configurable via env var; defaults to `gemini-3.1-flash-lite`.
 
 ## Backend Framework
 

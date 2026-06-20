@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     llm_provider: str = Field(default="")          # gemini | openrouter | stub | "" (auto)
     gemini_api_key: str = Field(default="")
     openrouter_api_key: str = Field(default="")
-    llm_model: str = Field(default="gemini-2.5-flash")
+    llm_model: str = Field(default="gemini-3.1-flash-lite")
     max_iterations: int = Field(default=6)
     log_level: str = Field(default="INFO")
     upload_dir: str = Field(default="uploads")
