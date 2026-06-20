@@ -106,6 +106,8 @@ def ask_question(
                 answer=clarify.question,
                 status="clarification",
                 iteration_count=0,
+                tokens_input=clarify.tokens_input or 0,
+                tokens_output=clarify.tokens_output or 0,
             )
             session.add(clarify_run)
             session.flush()

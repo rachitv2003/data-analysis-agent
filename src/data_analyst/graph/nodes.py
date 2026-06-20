@@ -230,20 +230,34 @@ def _build_prompt(state: AgentState) -> str:
         action_lines.append(f"Action: {entry['action']}\n{prefix}: {result}")
     history_text = "\n\n".join(action_lines) if action_lines else "None yet."
 
-    # C25: derived datasets manifest
+    # C25: derived datasets manifest — session-scoped
     derived_lines: list[str] = []
+    session_id_for_manifest = state.get("session_id")
     try:
         from data_analyst.db.session import create_db_session
-        from data_analyst.db.models import DatasetRow
+        from data_analyst.db.models import DatasetRow, QueryRunRow
         with create_db_session() as _db:
-            derived = (
-                _db.query(DatasetRow)
-                .filter(
-                    DatasetRow.derived_from_run_id.isnot(None),
-                    DatasetRow.origin == "derived",
+            if session_id_for_manifest:
+                # Collect run IDs belonging to this session
+                session_run_ids = {
+                    r.id for r in _db.query(QueryRunRow).filter(
+                        QueryRunRow.session_id == session_id_for_manifest
+                    ).all()
+                }
+                derived = (
+                    _db.query(DatasetRow)
+                    .filter(
+                        DatasetRow.derived_from_run_id.isnot(None),
+                        DatasetRow.origin == "derived",
+                    )
+                    .all()
                 )
-                .all()
-            )
+                derived = [
+                    d for d in derived
+                    if d.derived_from_run_id in session_run_ids
+                ]
+            else:
+                derived = []
             for d in derived:
                 derived_lines.append(
                     f"- `{_var_name(d.filename)}` ({d.filename}): "

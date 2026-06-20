@@ -14,6 +14,8 @@ _TIMEOUT_SECS = 60
 class ClarifyResult:
     needs_clarification: bool
     question: str  # the clarification question to present to the user
+    tokens_input: int = 0
+    tokens_output: int = 0
 
 
 def check_clarification(
@@ -76,6 +78,8 @@ def check_clarification(
 
             llm = _get_llm()
             resp = llm.complete(prompt)
+            ti = getattr(resp, "tokens_input", 0) or 0
+            to = getattr(resp, "tokens_output", 0) or 0
             text = resp.text.strip()
             text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
             text = re.sub(r"\n?```$", "", text).strip()
@@ -83,10 +87,10 @@ def check_clarification(
 
             if parsed.get("needs_clarification") and parsed.get("question"):
                 result_holder.append(
-                    ClarifyResult(needs_clarification=True, question=parsed["question"])
+                    ClarifyResult(needs_clarification=True, question=parsed["question"], tokens_input=ti, tokens_output=to)
                 )
             else:
-                result_holder.append(ClarifyResult(needs_clarification=False, question=""))
+                result_holder.append(ClarifyResult(needs_clarification=False, question="", tokens_input=ti, tokens_output=to))
         except Exception as exc:
             exception_holder.append(exc)
 

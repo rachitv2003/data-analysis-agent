@@ -194,12 +194,22 @@ def re_derive_dataset(dataset_id: str, session: Session = Depends(get_session)):
     except Exception:
         pass
 
-    return ok({
-        "dataset_id": dataset_id,
-        "row_count": len(cleaned),
-        "col_count": len(cleaned.columns),
-        "columns": cleaned.columns.tolist(),
-    })
+    # Refresh row from DB and return full GET /datasets/{id} shape
+    session.refresh(row)
+    columns_schema: list[dict] = []
+    try:
+        if row.parquet_path and Path(row.parquet_path).exists():
+            cols_schema_df = cleaned
+        else:
+            cols_schema_df = cleaned
+        columns_schema = [{"name": col, "dtype": str(dtype)} for col, dtype in cleaned.dtypes.items()]
+    except Exception:
+        columns_schema = [{"name": col, "dtype": "unknown"} for col in json.loads(row.columns_json)]
+
+    data = _row_dict(row, session)
+    data["columns_schema"] = columns_schema
+    data["derivation_code"] = row.derivation_code
+    return ok(data)
 
 
 @router.delete("/datasets/{dataset_id}")
