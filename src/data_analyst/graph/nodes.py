@@ -140,6 +140,17 @@ _SAVE_DATASET_INSTRUCTION = (
     "that can be trivially reproduced.\n"
 )
 
+_REUSE_DERIVED_INSTRUCTION = (
+    "Reusing prior analysis results:\n"
+    "- When the user refers to analysis results created earlier in this conversation (e.g. 'the clusters "
+    "you created', 'the segmented data', 'the chart from before', 'use those results'), FIRST check the "
+    "'Previously saved derived datasets' list above.\n"
+    "- If a derived dataset exists that already contains those results, query it directly — do NOT "
+    "re-run the original analysis from scratch.\n"
+    "- Example: if K-Means clustering was run in a prior turn and the clustered DataFrame was saved, "
+    "the next question about clusters should load that derived dataset, not re-run KMeans.\n"
+)
+
 _MAX_ROWS = 100
 _MAX_COLS = 20
 
@@ -334,6 +345,7 @@ def _build_prompt(state: AgentState) -> tuple[str, dict]:
         f"{_CHART_INSTRUCTION}"
         f"{_LIBRARIES_INSTRUCTION}"
         f"{_SAVE_DATASET_INSTRUCTION}"
+        f"{_REUSE_DERIVED_INSTRUCTION}"
         f"- If you still need data or need to produce a chart, respond with a Python code block "
         f"(one or more lines). The last line must be an expression whose value is the result "
         f"(a DataFrame, Series, scalar, or a Plotly `fig` object). Do NOT use print(). "

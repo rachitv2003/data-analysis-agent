@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func
@@ -48,8 +48,9 @@ def get_context_limit(model: str) -> int:
 
 @router.get("/stats/daily")
 def daily_stats(session: Session = Depends(get_session)):
-    # Use UTC date to match how created_at is stored (datetime.now(timezone.utc))
-    today = datetime.now(timezone.utc).date().isoformat()
+    # Compare using server local time — SQLite datetime('localtime') converts stored
+    # UTC timestamps to the server's local timezone (IST when running in India).
+    today = datetime.now().date().isoformat()
     row = (
         session.query(
             func.coalesce(func.sum(QueryRunRow.tokens_input), 0).label("tokens_input"),
@@ -58,7 +59,7 @@ def daily_stats(session: Session = Depends(get_session)):
         )
         .filter(
             QueryRunRow.status == "completed",
-            func.date(QueryRunRow.created_at) == today,
+            func.date(func.datetime(QueryRunRow.created_at, "localtime")) == today,
         )
         .one()
     )

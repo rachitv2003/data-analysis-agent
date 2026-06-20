@@ -307,7 +307,6 @@
     }
 
     // ── Token usage widget ─────────────────────────────────────────────────────
-    const _TU_KEY = 'tokenUsage';
     const _MODEL  = document.querySelector('meta[name="llm-model"]')?.content || '';
 
     // Prices per 1M tokens (USD). Sources: ai.google.dev/pricing (Jun 2026),
@@ -351,25 +350,13 @@
       return '$' + ((ti / 1e6) * p.in + (to / 1e6) * p.out).toPrecision(4);
     };
 
-    function _getSession() {
-      try { return JSON.parse(sessionStorage.getItem(_TU_KEY) || '{"ti":0,"to":0,"qc":0}'); }
-      catch { return {ti:0,to:0,qc:0}; }
-    }
-    function _saveSession(s) { try { sessionStorage.setItem(_TU_KEY, JSON.stringify(s)); } catch {} }
-
     function tuAddRun(ti, to) {
-      const s = _getSession();
-      s.ti += (ti||0); s.to += (to||0); s.qc += 1;
-      _saveSession(s); _tuRenderSession(s); tuRefreshDaily();
-    }
-
-    function _tuRenderSession(s) {
-      _setText('ses-ti', (s.ti||0).toLocaleString());
-      _setText('ses-to', (s.to||0).toLocaleString());
-      _setText('ses-qc', (s.qc||0).toLocaleString());
-      const cost = _fmtCost(s.ti||0, s.to||0, _MODEL);
+      _setText('ses-ti', (ti||0).toLocaleString());
+      _setText('ses-to', (to||0).toLocaleString());
+      const cost = _fmtCost(ti||0, to||0, _MODEL);
       const el = document.getElementById('ses-cost');
       if (el) { el.textContent = cost || 'N/A'; el.className = 'tu-val ' + (cost ? 'cost' : 'na'); }
+      tuRefreshDaily();
     }
 
     function _tuRenderDaily(d) {
@@ -398,7 +385,6 @@
 
     document.addEventListener('DOMContentLoaded', () => {
       _setText('tu-model-name', _MODEL || '—');
-      _tuRenderSession(_getSession());
       tuRefreshDaily();
     });
   </script>

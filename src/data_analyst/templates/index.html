@@ -137,14 +137,13 @@
       <div id="tu-model-name" class="tu-model-name">—</div>
       <div class="tu-cols">
         <div class="tu-section">
-          <div class="tu-section-title">This session</div>
-          <div class="tu-row"><span class="tu-key">In</span><span class="tu-val" id="ses-ti">0</span></div>
-          <div class="tu-row"><span class="tu-key">Out</span><span class="tu-val" id="ses-to">0</span></div>
-          <div class="tu-row"><span class="tu-key">Queries</span><span class="tu-val" id="ses-qc">0</span></div>
-          <div class="tu-row"><span class="tu-key">Cost</span><span class="tu-val cost" id="ses-cost">—</span></div>
+          <div class="tu-section-title">Last query</div>
+          <div class="tu-row"><span class="tu-key">In</span><span class="tu-val" id="ses-ti">—</span></div>
+          <div class="tu-row"><span class="tu-key">Out</span><span class="tu-val" id="ses-to">—</span></div>
+          <div class="tu-row"><span class="tu-key">Cost</span><span class="tu-val" id="ses-cost">—</span></div>
         </div>
         <div class="tu-section">
-          <div class="tu-section-title">Today (UTC)</div>
+          <div class="tu-section-title">Today</div>
           <div class="tu-row"><span class="tu-key">In</span><span class="tu-val" id="day-ti">—</span></div>
           <div class="tu-row"><span class="tu-key">Out</span><span class="tu-val" id="day-to">—</span></div>
           <div class="tu-row"><span class="tu-key">Queries</span><span class="tu-val" id="day-qc">—</span></div>
@@ -219,7 +218,6 @@
                   {% if ds.origin == 'derived' and ds.stale %}
                   <button type="button" class="ds-rederive-btn" onclick="rederiveDataset('{{ ds.dataset_id }}',event)" title="Re-derive from parents" aria-label="Re-derive {{ ds.filename }}">🔄</button>
                   {% endif %}
-                  <button type="button" class="ds-notes-btn" onclick="showNotesForDataset('{{ ds.dataset_id }}',event)" title="View/edit dataset notes" aria-label="Notes for {{ ds.filename }}">📝</button>
                   <button type="button" class="ds-cols-btn" onclick="toggleColumns('{{ ds.dataset_id }}',event)" title="View columns" aria-label="Toggle columns for {{ ds.filename }}">▸ cols</button>
                   <button type="button" class="ds-clean-btn" onclick="openCleanModal('{{ ds.dataset_id }}',event)" title="Clean data" aria-label="Clean {{ ds.filename }}">🧹</button>
                   <button type="button" class="del-btn" onclick="deleteDataset('{{ ds.dataset_id }}',event)" title="Delete dataset" aria-label="Delete {{ ds.filename }}">🗑</button>
@@ -800,13 +798,14 @@
 
   // ── C29: context window bar ───────────────────────────────────────────────────
   var _ctxLimit = 0; // var (not let) so base.html's tuRefreshDaily can write to window._ctxLimit
+  var _lastActualPromptTokens = 0;
 
   function _renderBreakdown(bd) {
     if (!bd) return '';
     const keys = [
       ['system_overhead','System overhead'],['dataset_schemas','Dataset schemas'],
       ['dataset_notes','Dataset notes'],['memory','Project notes'],
-      ['history','History'],['action_history','Steps (this run)'],
+      ['action_history','Steps (this run)'],
     ];
     const rows = keys.filter(([k])=>bd[k]).map(([k,label])=>
       `<div class="bd-row"><span class="bd-key">${label}</span><span class="bd-val">${bd[k].toLocaleString()} tok</span></div>`
@@ -825,18 +824,20 @@
     const fill = document.getElementById('cw-fill');
     const count = document.getElementById('cw-count');
     if (!fill || !count) return;
-    const estimated = 500 + ids.length * 200;
     const fmtK = n => n >= 1000 ? Math.round(n / 1000) + 'k' : String(n);
     const limit = _ctxLimit || window._ctxLimit || 0;
+    const actual = _lastActualPromptTokens || 0;
+    const value = actual || (500 + ids.length * 200);
+    const isActual = actual > 0;
     if (limit) {
-      const pct = Math.min(100, Math.round(estimated / limit * 100));
+      const pct = Math.min(100, Math.round(value / limit * 100));
       fill.style.width = Math.max(pct, 1) + '%';
       fill.className = 'cw-fill' + (pct >= 90 ? ' danger' : pct >= 70 ? ' warn' : '');
-      count.textContent = `~${fmtK(estimated)} / ${fmtK(limit)}`;
+      count.textContent = (isActual ? '' : '~') + fmtK(value) + ' / ' + fmtK(limit);
     } else {
       fill.style.width = '2%';
       fill.className = 'cw-fill';
-      count.textContent = `~${fmtK(estimated)} tok`;
+      count.textContent = (isActual ? '' : '~') + fmtK(value) + ' tok';
     }
     wrap.style.display = 'block';
   }
@@ -863,7 +864,6 @@
         </label>
         <div class="ds-actions">
           ${rederiveBtn}
-          <button type="button" class="ds-notes-btn" data-id="${id}" aria-label="Dataset notes">📝</button>
           <button type="button" class="ds-cols-btn" data-id="${id}" aria-label="Toggle columns">▸ cols</button>
           <button type="button" class="ds-clean-btn" data-id="${id}" aria-label="Clean dataset">🧹</button>
           <button type="button" class="del-btn" data-id="${id}" aria-label="Delete dataset">🗑</button>
@@ -876,7 +876,6 @@
     row.querySelector('.ds-check')?.addEventListener('change', onDatasetCheckChange);
     row.querySelector('.ds-cols-btn')?.addEventListener('click', e => toggleColumns(id, e));
     row.querySelector('.ds-clean-btn')?.addEventListener('click', e => openCleanModal(id, e));
-    row.querySelector('.ds-notes-btn')?.addEventListener('click', e => showNotesForDataset(id, e));
     row.querySelector('.ds-rederive-btn')?.addEventListener('click', e => rederiveDataset(id, e));
     row.querySelector('.del-btn')?.addEventListener('click', e => deleteDataset(id, e));
   }
@@ -1164,17 +1163,6 @@
     } catch {}
   }
 
-  async function showNotesForDataset(id, event) {
-    if (event) event.stopPropagation();
-    try {
-      const ds = (await (await fetch(`/datasets/${id}`)).json()).data;
-      if (ds) {
-        _ctxCache[id] = ds.context || '';
-        _showCtxPanel(id, _ctxCache[id], ds.auto_notes_status);
-      }
-    } catch {}
-  }
-
   // ── Storage stat ──────────────────────────────────────────────────────────────
   function _updateStorageStat() {
     const rows = document.querySelectorAll('.ds-row');
@@ -1345,20 +1333,32 @@
       dsFooter = `<details class="datasets-used-footer"><summary>Datasets used (${datasetsUsed.length})</summary><span>${names}</span></details>`;
     }
     const badge = isBestEffort?`<div class="best-effort-badge">&#9888; Best effort</div>`:'';
+    if (breakdown && breakdown.total_prompt) {
+      _lastActualPromptTokens = breakdown.total_prompt;
+      _updateCtxBar();
+    }
     let stepsFooter = '';
     if (steps != null) {
+      const bdHtml = _renderBreakdown(breakdown);
+      const panelId = 'sp-' + (++_stepSeq);
+      const bdPanelId = 'bd-' + _stepSeq;
       if (steps.length) {
         const errCount = steps.filter(s=>s.is_error).length;
         const label = errCount>0
           ? `${steps.length} steps &middot; ${errCount} error${errCount!==1?'s':''}`
           : `${steps.length} step${steps.length!==1?'s':''}`;
-        const panelId = 'sp-' + (++_stepSeq);
         stepsFooter = `<div class="steps-footer">
+          ${bdHtml ? `<button type="button" class="steps-toggle" onclick="toggleSteps(this,'${bdPanelId}')">&#9654; Token breakdown</button>
+          <div id="${bdPanelId}" class="steps-panel" style="display:none;">${bdHtml}</div>` : ''}
           <button type="button" class="steps-toggle" onclick="toggleSteps(this,'${panelId}')">&#9654; ${label}</button>
-          <div id="${panelId}" class="steps-panel" style="display:none;">${_renderBreakdown(breakdown)}${steps.map((s,i)=>renderStep(s,i+1)).join('')}</div>
+          <div id="${panelId}" class="steps-panel" style="display:none;">${steps.map((s,i)=>renderStep(s,i+1)).join('')}</div>
         </div>`;
       } else {
-        stepsFooter = `<div class="steps-footer"><span class="steps-zero">0 code steps — answered from schema</span></div>`;
+        stepsFooter = `<div class="steps-footer">
+          ${bdHtml ? `<button type="button" class="steps-toggle" onclick="toggleSteps(this,'${bdPanelId}')">&#9654; Token breakdown</button>
+          <div id="${bdPanelId}" class="steps-panel" style="display:none;">${bdHtml}</div>` : ''}
+          <span class="steps-zero">0 code steps — answered from schema</span>
+        </div>`;
       }
     }
     div.innerHTML = `<div class="turn-q">Q: ${esc(q)}</div>${badge}<div class="answer-body">${html}</div><div class="turn-meta">${meta}</div>${dsFooter}${stepsFooter}`;
