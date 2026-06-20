@@ -792,11 +792,14 @@
   function _updateDsRow(ds) {
     const row = document.querySelector(`.ds-row[data-id="${ds.dataset_id}"]`);
     if (!row) return;
+    const wasChecked = row.querySelector('.ds-check')?.checked ?? true;
     row.dataset.origin = ds.origin || 'uploaded';
     row.dataset.stale = ds.stale ? 'true' : 'false';
     row.dataset.rowCount = ds.row_count;
     row.dataset.colCount = ds.col_count || '';
     row.innerHTML = _dsRowInner(ds.dataset_id, ds.filename, ds.row_count, ds.col_count, ds.columns||[], ds.origin, ds.stale);
+    const cb = row.querySelector('.ds-check');
+    if (cb) cb.checked = wasChecked;
     _attachDsRowListeners(row, ds.dataset_id);
     _applyDsFilter();
   }
@@ -805,7 +808,7 @@
     if (!ds.dataset_id) return;
     if (document.querySelector(`.ds-check[value="${ds.dataset_id}"]`)) {
       _updateDsRow(ds);
-      onDatasetCheckChange();
+      // do NOT call onDatasetCheckChange() here — background refresh must not reset the session
       return;
     }
     const div = document.createElement('div');

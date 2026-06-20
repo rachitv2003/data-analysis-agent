@@ -15,6 +15,19 @@ router = APIRouter()
 _CONTEXT_MAX_LEN = 4000
 
 
+def _friendly_dtype(dtype_str: str) -> str:
+    s = dtype_str.lower()
+    if s == "object": return "text"
+    if s.startswith("int"): return "integer"
+    if s.startswith("uint"): return "integer"
+    if s.startswith("float"): return "float"
+    if s.startswith("datetime"): return "datetime"
+    if s.startswith("timedelta"): return "duration"
+    if s in ("bool", "boolean"): return "boolean"
+    if s.startswith("category"): return "category"
+    return dtype_str
+
+
 def _stale(row: DatasetRow, db: Session) -> bool:
     """True if any parent dataset was updated after this derived dataset was created."""
     if row.origin != "derived" or not row.derived_from_dataset_ids:
@@ -73,14 +86,14 @@ def get_dataset(dataset_id: str, session: Session = Depends(get_session)):
             import pandas as pd
             df0 = pd.read_parquet(row.parquet_path, engine="pyarrow")
             columns_schema = [
-                {"name": col, "dtype": str(dtype)}
+                {"name": col, "dtype": _friendly_dtype(str(dtype))}
                 for col, dtype in df0.dtypes.items()
             ]
         elif row.file_path and Path(row.file_path).exists():
             import pandas as pd
             df0 = pd.read_csv(row.file_path, nrows=0)
             columns_schema = [
-                {"name": col, "dtype": str(dtype)}
+                {"name": col, "dtype": _friendly_dtype(str(dtype))}
                 for col, dtype in df0.dtypes.items()
             ]
     except Exception:
@@ -202,7 +215,7 @@ def re_derive_dataset(dataset_id: str, session: Session = Depends(get_session)):
             cols_schema_df = cleaned
         else:
             cols_schema_df = cleaned
-        columns_schema = [{"name": col, "dtype": str(dtype)} for col, dtype in cleaned.dtypes.items()]
+        columns_schema = [{"name": col, "dtype": _friendly_dtype(str(dtype))} for col, dtype in cleaned.dtypes.items()]
     except Exception:
         columns_schema = [{"name": col, "dtype": "unknown"} for col in json.loads(row.columns_json)]
 

@@ -131,11 +131,13 @@ _SAVE_DATASET_INSTRUCTION = (
     "Derived dataset persistence:\n"
     "- `save_dataset(df, name, description='')` — persists a DataFrame as a named dataset in the "
     "database so it survives beyond this session.\n"
-    "- Use it when you produce a cleaned, filtered, merged, or aggregated result that the user "
-    "might want to query later — e.g. 'save the cleaned sales data', 'materialise this join'.\n"
-    "- Call it in its own code block: `save_dataset(result_df, 'clean_sales', 'Rows with nulls removed')`\n"
+    "- Call it whenever you create a merged, joined, cleaned, or aggregated DataFrame that is the "
+    "main subject of your analysis. Do not wait for the user to ask — if you built a meaningful "
+    "derived table, save it so they can query it in future sessions.\n"
+    "- Call it in its own code block: `save_dataset(result_df, 'merged_products', 'Products joined with category translations')`\n"
     "- The last expression in that block must be the save_dataset call (its return value is the result).\n"
-    "- Do NOT call save_dataset for intermediate scratch DataFrames or chart data.\n"
+    "- Do NOT call save_dataset for chart-only data, single-value summaries, or one-liner filters "
+    "that can be trivially reproduced.\n"
 )
 
 _MAX_ROWS = 100
