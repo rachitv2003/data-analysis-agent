@@ -172,8 +172,6 @@
         <div class="card-header">
           <h2 class="card-title">Datasets</h2>
           <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;">
-            <button type="button" id="lineage-modal-btn" class="btn btn-ghost btn-xs"
-                    style="display:none;" onclick="openLineageModal()">🔗 Lineage</button>
             <button type="button" id="select-all-btn" class="btn btn-ghost btn-xs"
                     style="display:{% if datasets %}inline-flex{% else %}none{% endif %};"
                     onclick="toggleSelectAll()">Select all</button>
@@ -1284,10 +1282,15 @@
       } catch {}
     },1000);
 
+    // C26: if a clarification was pending, combine original + user's addendum and skip re-checking
+    const skipClarification = !!_pendingQuestion;
+    const effectiveQuestion = _pendingQuestion ? `${_pendingQuestion}\n\nUser clarification: ${q}` : q;
+    if (skipClarification) _pendingQuestion = '';
+
     try {
       const resp = await fetch('/ask',{
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({question:q, session_id:currentSessionId}),
+        body: JSON.stringify({question:effectiveQuestion, session_id:currentSessionId, skip_clarification:skipClarification}),
         signal: _askController.signal,
       });
       const body = await resp.json();
@@ -1298,7 +1301,7 @@
         currentSessionId = r.session_id;
         if (r.type === 'clarification') {
           // C26: pre-flight clarification — show amber turn, don't clear input
-          _pendingQuestion = q;
+          _pendingQuestion = effectiveQuestion;
           appendClarification(r.clarification_question);
           await loadSessionList();
           announce('Clarification needed');
@@ -1307,7 +1310,9 @@
           if(dsUsed.length>1) document.getElementById('querying-label').textContent=`Querying ${dsUsed.length} datasets`;
           appendTurn(q,r.answer_html||esc(r.answer_markdown||'(no answer)'),r.iteration_count,r.tokens_input,r.tokens_output,r.status,dsUsed,!!r.is_best_effort,r.steps||[],firedAt,Date.now()-firedAt.getTime(),r.suggested_questions||[]);
           if(typeof tuAddRun==='function') tuAddRun(r.tokens_input||0, r.tokens_output||0);
-          _updateSessionDatasetIds(r.dataset_ids||dsUsed.map(d=>d.id)||[]);
+          // Include derived dataset IDs created this run so "This session" filter shows them
+          const allSessionIds = [...(r.dataset_ids||dsUsed.map(d=>d.id)||[]), ...(r.derived_dataset_ids||[])];
+          _updateSessionDatasetIds(allSessionIds);
           qEl.value = '';
           // Auto-refresh datasets card so agent-saved derived datasets appear
           await _refreshDatasetsCard();
@@ -1742,17 +1747,24 @@
       svgEl.appendChild(t); return;
     }
 
+    // Normalise derived_from_dataset_ids: API returns a parsed array; HTML attrs are JSON strings
+    function _parentIds(d) {
+      if (!d.derived_from_dataset_ids) return null;
+      if (Array.isArray(d.derived_from_dataset_ids)) return d.derived_from_dataset_ids;
+      try { return JSON.parse(d.derived_from_dataset_ids); } catch { return null; }
+    }
+
     // Assign topological levels
     const levels = {};
     datasets.forEach(d => {
-      if (!d.derived_from_dataset_ids) levels[d.dataset_id] = 0;
+      if (!_parentIds(d)) levels[d.dataset_id] = 0;
     });
     let changed = true, iter = 0;
     while (changed && iter++ < 20) {
       changed = false;
       datasets.forEach(d => {
-        if (!d.derived_from_dataset_ids) return;
-        let parents; try { parents = JSON.parse(d.derived_from_dataset_ids); } catch { return; }
+        const parents = _parentIds(d);
+        if (!parents) return;
         const parentLevels = parents.map(pid => levels[pid]).filter(l => l !== undefined);
         if (parentLevels.length) {
           const newLv = Math.max(...parentLevels) + 1;
@@ -1798,8 +1810,7 @@
 
     // Edges
     datasets.forEach(d => {
-      if (!d.derived_from_dataset_ids) return;
-      let parents; try { parents=JSON.parse(d.derived_from_dataset_ids); } catch { return; }
+      const parents = _parentIds(d); if (!parents) return;
       const tp = positions[d.dataset_id]; if(!tp) return;
       parents.forEach(pid => {
         const pp = positions[pid]; if(!pp) return;

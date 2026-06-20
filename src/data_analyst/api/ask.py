@@ -20,6 +20,7 @@ class AskRequest(BaseModel):
     dataset_ids: list[str] | None = None # explicit multi-dataset; if omitted C19 auto-selects
     question: str
     session_id: str | None = None
+    skip_clarification: bool = False     # set by frontend after first clarification response
 
 
 @router.post("/ask")
@@ -80,7 +81,11 @@ def ask_question(
         ]
 
         from data_analyst.graph.clarify import check_clarification
-        clarify = check_clarification(body.question, datasets_for_clarify, history)
+        clarify = (
+            check_clarification(body.question, datasets_for_clarify, history)
+            if not body.skip_clarification
+            else type("_", (), {"needs_clarification": False, "question": "", "tokens_input": 0, "tokens_output": 0})()
+        )
 
         if clarify.needs_clarification:
             # Resolve or create session for this clarification turn
@@ -158,6 +163,11 @@ def ask_question(
 
     is_best_effort = run.error_message in ("max_iterations", "consecutive_errors")
     steps = _json.loads(run.action_history) if run.action_history else []
+    derived_dataset_ids = [
+        r.id for r in session.query(DatasetRow).filter(
+            DatasetRow.derived_from_run_id == run_id
+        ).all()
+    ]
     suggested_questions, sug_ti, sug_to = generate_suggestions(body.question, answer_md)
 
     # Add suggestion-call tokens to the run totals
@@ -172,6 +182,7 @@ def ask_question(
         "run_id": run.id,
         "session_id": session_id,
         "dataset_ids": sandbox_ids,
+        "derived_dataset_ids": derived_dataset_ids,
         "datasets_used": datasets_used,
         "selector_reasoning": run.selector_reasoning,
         "answer_markdown": answer_md,
