@@ -15,10 +15,9 @@
 <div id="memory-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="memory-title">
   <div class="modal modal--md">
     <button type="button" class="modal__close" onclick="closeModal('memory-modal')" aria-label="Close">&#10005;</button>
-    <h3 class="modal__title" id="memory-title">Persistent Memory</h3>
-    <p class="modal__desc">Facts saved here are injected into every query. E.g. "Fiscal year starts in April", "Revenue is always in USD".</p>
-    <label class="field-label" for="memory-input">Memory content</label>
-    <textarea id="memory-input" style="height:110px;font-size:13px;" placeholder="No memory saved yet. Add facts line by line…"></textarea>
+    <h3 class="modal__title" id="memory-title">Project notes</h3>
+    <p class="modal__desc">Notes saved here are injected into every query — dataset README, domain facts, conventions. E.g. "Fiscal year starts in April", "Revenue is always in USD".</p>
+    <textarea id="memory-input" style="height:110px;font-size:13px;margin-top:4px;" placeholder="No project notes yet. Folder READMEs land here automatically when you drop a folder."></textarea>
     <div class="modal__actions">
       <button type="button" class="btn btn-primary" onclick="saveMemory()">Save</button>
       <button type="button" class="btn btn-ghost" onclick="closeModal('memory-modal')">Close</button>
@@ -283,11 +282,9 @@
         <div id="staged-panel" style="display:none;margin-top:14px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
             <span style="font-size:13px;font-weight:600;color:#374151;" id="staged-header">0 files staged</span>
-            <div style="display:flex;gap:6px;">
-              <button type="button" id="clear-folder-notes-btn" class="btn btn-ghost btn-xs" onclick="clearAllFolderNotes()" style="display:none;color:#d97706;border-color:#fcd34d;">Clear all notes</button>
-              <button type="button" class="btn btn-ghost btn-xs" onclick="clearStaged()">Clear staged</button>
-            </div>
+            <button type="button" class="btn btn-ghost btn-xs" onclick="clearStaged()">Clear staged</button>
           </div>
+          <div id="staged-readme-notice" style="display:none;font-size:11px;color:#16a34a;padding-bottom:6px;">📎 Folder README saved to Project notes</div>
           <div id="staged-rows" style="max-height:160px;overflow-y:auto;"></div>
           <div style="margin-top:10px;">
             <button type="button" id="upload-staged-btn" class="btn btn-primary" onclick="uploadStaged()">
@@ -582,9 +579,6 @@
     document.getElementById('drop-zone-text').textContent = 'Drop more files to add to the list';
     document.getElementById('staged-header').textContent = `${n} file${n!==1?'s':''} staged — review before uploading`;
     document.getElementById('upload-btn-count').textContent = n;
-    const hasFolderNotes = [..._staged.values()].some(s => s.notesFilename === '_folder_notes');
-    const cfnBtn = document.getElementById('clear-folder-notes-btn');
-    if (cfnBtn) cfnBtn.style.display = hasFolderNotes ? 'inline-flex' : 'none';
     const uploaded = new Set([...document.querySelectorAll('.ds-check')].map(c => {
       const s = c.parentElement?.querySelector('span'); return s?s.textContent.split(' (')[0]:'';
     }));
@@ -626,12 +620,6 @@
   function clearNotesFile(id) {
     const s = _staged.get(id); if(!s) return;
     s.notesContent = ''; s.notesFilename = ''; s.context = '';
-    _renderStaged();
-  }
-  function clearAllFolderNotes() {
-    for (const s of _staged.values()) {
-      if (s.notesFilename === '_folder_notes') { s.notesContent = ''; s.notesFilename = ''; s.context = ''; }
-    }
     _renderStaged();
   }
   function toggleNotes(id) {
@@ -723,10 +711,24 @@
         dataFiles.push(f);
       }
     }));
+    // Folder-level README goes to Project notes, not individual dataset notes
+    if (notesMap['_default']) await _saveFolderReadmeToProjectNotes(notesMap['_default']);
     stageWithNotes(dataFiles.map(f => ({
       file: f,
-      context: notesMap[f.name.toLowerCase().replace(/\.(csv|tsv|txt|json)$/,'')] || notesMap['_default'] || '',
+      context: notesMap[f.name.toLowerCase().replace(/\.(csv|tsv|txt|json)$/,'')] || '',
     })));
+  }
+
+  async function _saveFolderReadmeToProjectNotes(text) {
+    try {
+      const existing = ((await (await fetch('/memory')).json()).data?.content) || '';
+      const merged = existing.trim() ? existing.trim() + '\n\n---\n\n' + text.trim() : text.trim();
+      await fetch('/memory', {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({content: merged})});
+      const ta = document.getElementById('memory-input');
+      if (ta) ta.value = merged;
+      const notice = document.getElementById('staged-readme-notice');
+      if (notice) { notice.style.display = 'block'; setTimeout(() => { notice.style.display='none'; }, 6000); }
+    } catch {}
   }
 
   function onFilesSelected() {
@@ -803,7 +805,7 @@
     if (!bd) return '';
     const keys = [
       ['system_overhead','System overhead'],['dataset_schemas','Dataset schemas'],
-      ['dataset_notes','Dataset notes'],['memory','Memory'],
+      ['dataset_notes','Dataset notes'],['memory','Project notes'],
       ['history','History'],['action_history','Steps (this run)'],
     ];
     const rows = keys.filter(([k])=>bd[k]).map(([k,label])=>
@@ -1513,7 +1515,7 @@
       if(resp.ok){
         document.getElementById('memory-status').textContent = 'Saved!';
         setTimeout(()=>document.getElementById('memory-status').textContent='', 2000);
-        announce('Memory saved');
+        announce('Project notes saved');
       }
     } catch(e) { document.getElementById('memory-status').textContent = 'Error: '+e.message; }
   }
