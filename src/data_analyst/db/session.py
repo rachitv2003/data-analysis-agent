@@ -65,8 +65,10 @@ def init_db() -> None:
 
         ds_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(datasets)"))}
         _ds_migrations = [
-            ("updated_at", "TIMESTAMP DEFAULT (datetime('now'))"),
-            ("origin", "TEXT NOT NULL DEFAULT 'uploaded'"),
+            # SQLite ALTER TABLE only allows constant/NULL defaults; datetime('now') is a function
+            # SQLAlchemy's Python-side default=_now handles new rows; NULLs are tolerated in _stale()
+            ("updated_at", "TIMESTAMP"),
+            ("origin", "TEXT DEFAULT 'uploaded'"),
             ("derived_from_run_id", "TEXT"),
             ("derived_from_dataset_ids", "TEXT"),
             ("derivation_code", "TEXT"),
