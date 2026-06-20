@@ -16,9 +16,9 @@
 
 **Google Gemini**
 
-**Model:** `gemini-2.5-flash` (configurable via `DATA_ANALYST_LLM_MODEL`)
+**Model:** `gemini-2.0-flash` (configurable via `DATA_ANALYST_LLM_MODEL`)
 
-**Why:** User has a Gemini API key. `gemini-2.5-flash` is the current safe default as of 2026 (see tech-stack rule).
+**Why:** User has a Gemini API key. Tested and working; default can be changed via env var.
 
 ## Backend Framework
 
@@ -38,19 +38,63 @@
 
 ## Key Libraries
 
+### Core Framework & Backend
+
 | Library | Version | Purpose |
 |---------|---------|---------|
 | fastapi | >=0.115 | HTTP server + routing |
-| uvicorn | >=0.30 | ASGI server |
+| uvicorn | >=0.30 | ASGI server; [standard] includes extra workers |
 | jinja2 | >=3.1 | Server-rendered HTML templates |
-| python-multipart | >=0.0.9 | File upload parsing |
+| python-multipart | >=0.0.9 | File upload parsing (multipart/form-data) |
+| aiofiles | >=23.0 | Async file I/O (background tasks) |
+
+### Database & ORM
+
+| Library | Version | Purpose |
+|---------|---------|---------|
 | sqlalchemy | >=2.0 | ORM + SQLite driver |
-| alembic | >=1.13 | Database migrations |
-| pydantic-settings | >=2.0 | Settings from env vars |
-| langgraph | >=0.2 | ReAct agent orchestration |
-| google-generativeai | >=0.8 | Gemini API client |
-| pandas | >=2.0 | CSV loading + data operations |
-| structlog | >=24.0 | Structured logging |
+| alembic | >=1.13 | Database schema migrations |
+| pydantic-settings | >=2.0 | Settings from env vars (.env) |
+
+### Agent & LLM
+
+| Library | Version | Purpose |
+|---------|---------|---------|
+| langgraph | >=0.2 | ReAct agent orchestration; StateGraph |
+| google-genai | >=1.0 | Google Gemini API client; fallback to stub |
+
+### Data Processing & Analysis
+
+| Library | Version | Purpose |
+|---------|---------|---------|
+| pandas | >=2.0 | CSV/Parquet loading, DataFrame operations, agent sandbox |
+| numpy | >=2.4.6 | Numerical arrays (agent sandbox, pandas backend) |
+| pyarrow | >=17.0 | Parquet file I/O (C27 pre-conversion on upload) |
+| openpyxl | >=3.1.5 | Excel file reading (supported in C11 multi-format) |
+| xlrd | >=2.0.2 | Legacy Excel file reading fallback |
+
+### Visualization & Charting
+
+| Library | Version | Purpose |
+|---------|---------|---------|
+| plotly | >=5.0 | Interactive charts (C4; captured as JSON in agent sandbox) |
+| matplotlib | >=3.8 | Plotting library (agent sandbox, used by some operations) |
+| seaborn | >=0.13.2 | Statistical data visualization (agent sandbox) |
+
+### Statistical & ML Models
+
+| Library | Version | Purpose |
+|---------|---------|---------|
+| scikit-learn | >=1.9.0 | ML algorithms (agent sandbox; used in agent code) |
+| statsmodels | >=0.14.6 | Statistical modeling (agent sandbox; regression, ANOVA, etc.) |
+
+### Utilities
+
+| Library | Version | Purpose |
+|---------|---------|---------|
+| markdown-it-py | >=3.0 | Markdown → HTML rendering (C6 response rendering) |
+| structlog | >=24.0 | Structured logging (JSON + console output) |
+| tabulate | >=0.9 | Table formatting (agent sandbox output) |
 
 ## What to Avoid
 
