@@ -36,11 +36,11 @@ def _gen_clean_code(df: pd.DataFrame, var: str, instruction: str) -> str:
         f"The DataFrame variable is named `{var}`.\n"
         f"Instruction: {instruction}\n\n"
         "Rules:\n"
-        "- Use only pandas operations on `{var}`\n"
-        "- The last expression must be the cleaned DataFrame (assign to `{var}` and return it, or just return it)\n"
+        f"- Use only pandas operations on `{var}`\n"
+        f"- The last expression must be the cleaned DataFrame (assign to `{var}` and return it, or just return it)\n"
         "- Do NOT write to files or import anything\n"
-        "- If the last line is an assignment like `{var} = ...`, add a final line `{var}` so the result is returned\n"
-    ).format(var=var)
+        f"- If the last line is an assignment like `{var} = ...`, add a final line `{var}` so the result is returned\n"
+    )
 
     llm = _get_llm()
     resp = llm.complete(prompt)

@@ -227,9 +227,11 @@ def test_ask_unknown_dataset(client):
     assert resp.status_code == 404
 
 
-def test_upload_non_csv(client):
+def test_upload_invalid_excel_bytes(client):
+    # .xlsx IS a supported format; this tests that corrupt Excel content returns 400 (parse error).
     resp = client.post("/upload", files={"file": ("data.xlsx", io.BytesIO(b"hello world"), "application/octet-stream")})
     assert resp.status_code == 400
+    assert resp.json()["detail"]["code"] == "parse_error"
 
 
 # ── C10: Duplicate upload detection ──────────────────────────────────────────

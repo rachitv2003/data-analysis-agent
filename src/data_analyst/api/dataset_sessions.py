@@ -40,6 +40,7 @@ def list_dataset_sessions(
         )
         result.append({
             "session_id": s.id,
+            "name": s.name,
             "created_at": s.created_at.isoformat(),
             "updated_at": s.updated_at.isoformat(),
             "turn_count": turn_count or 0,

@@ -75,7 +75,7 @@ def delete_dataset(dataset_id: str, session: Session = Depends(get_session)):
 def delete_all_datasets(session: Session = Depends(get_session)):
     rows = session.query(DatasetRow).all()
     if not rows:
-        return ok({"deleted_dataset_ids": [], "deleted_session_count": 0, "deleted_run_count": 0})
+        return ok({"deleted_dataset_ids": [], "deleted_session_count": 0, "deleted_run_count": 0, "derived_deleted": 0})
 
     running = session.query(QueryRunRow).filter(QueryRunRow.status == "running").first()
     if running:
@@ -126,8 +126,11 @@ def _cascade_delete(db: Session, dataset_ids: list[str]) -> dict:
                 pass
             db.delete(row)
 
+    # derived_deleted is always 0 until C25 ships (DatasetRow gains derived_from_dataset_ids
+    # and recursive child deletion is implemented alongside save_dataset).
     return {
         "deleted_dataset_ids": list(dataset_ids),
         "deleted_session_count": deleted_session_count,
         "deleted_run_count": deleted_run_count,
+        "derived_deleted": 0,
     }
