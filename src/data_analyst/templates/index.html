@@ -212,7 +212,6 @@
                   <span>{{ ds.filename }} <span class="row-cnt">({{ ds.row_count }} rows &middot; {{ ds.col_count }} cols)</span></span>
                   {% if ds.origin == 'derived' %}<span class="ds-badge ds-badge--derived">derived</span>{% endif %}
                   {% if ds.stale %}<span class="ds-badge ds-badge--stale">⚠ stale</span>{% endif %}
-                  {% if ds.auto_notes_status == 'pending' %}<span class="ds-badge ds-badge--notes" title="Auto-generating notes…">✍ noting</span>{% endif %}
                 </label>
                 <div class="ds-actions">
                   {% if ds.origin == 'derived' and ds.stale %}
@@ -234,27 +233,6 @@
           </div>
         </div>
 
-        <!-- Dataset notes panel -->
-        <div id="dataset-notes-panel" style="display:none;border-top:1px solid #f3f4f6;padding-top:10px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-            <div style="display:flex;align-items:center;gap:6px;">
-              <span class="field-label" style="margin:0;">Dataset notes</span>
-              <span id="notes-gen-status" class="notes-gen-badge" style="display:none;"><span class="spinner" style="width:10px;height:10px;border-width:1.5px;"></span> Generating…</span>
-            </div>
-            <div style="display:flex;gap:4px;align-items:center;">
-              <button type="button" id="notes-regen-btn" class="btn-icon" style="display:none;" onclick="regenerateNotes()">Regenerate</button>
-              <button type="button" id="notes-edit-btn" class="btn-icon" onclick="toggleCtxEdit()">Edit</button>
-            </div>
-          </div>
-          <div id="context-display" style="font-size:12px;color:#374151;background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px;padding:6px 10px;white-space:pre-wrap;line-height:1.55;max-height:80px;overflow-y:auto;"></div>
-          <div id="context-edit-area" style="display:none;">
-            <textarea id="context-edit-input" style="height:56px;font-size:12px;margin-top:6px;margin-bottom:0;" aria-label="Edit dataset notes"></textarea>
-            <div style="display:flex;gap:6px;margin-top:4px;">
-              <button type="button" class="btn btn-primary btn-xs" onclick="saveCtxEdit()">Save</button>
-              <button type="button" class="btn btn-ghost btn-xs" onclick="cancelCtxEdit()">Cancel</button>
-            </div>
-          </div>
-        </div>
       </div><!-- /.card datasets -->
 
       <!-- Upload card -->
@@ -843,24 +821,19 @@
   }
 
   // ── Register dataset ──────────────────────────────────────────────────────────
-  const _ctxCache = {};
-
-  function _dsRowInner(id, filename, rowCount, colCount, columns, origin, stale, autoNotesStatus) {
+  function _dsRowInner(id, filename, rowCount, colCount, columns, origin, stale) {
     const dims = colCount ? `${rowCount} rows &middot; ${colCount} cols` : `${rowCount} rows`;
     const colChips = (columns||[]).map(c=>`<span class="col-chip">${esc(c)}</span>`).join('');
     const isDerived = origin === 'derived';
     const derivedBadge = isDerived ? '<span class="ds-badge ds-badge--derived">derived</span>' : '';
     const staleBadge = stale ? '<span class="ds-badge ds-badge--stale">⚠ stale</span>' : '';
-    const notesBadge = autoNotesStatus === 'pending'
-      ? '<span class="ds-badge ds-badge--notes" title="Auto-generating notes…">✍ noting</span>'
-      : '';
     const rederiveBtn = (isDerived && stale)
       ? `<button type="button" class="ds-rederive-btn" data-id="${id}" aria-label="Re-derive dataset" title="Re-derive from parents">🔄</button>`
       : '';
     return `
       <div class="ds-main-row">
         <label><input type="checkbox" class="ds-check" value="${id}" checked onchange="onDatasetCheckChange()" aria-label="${esc(filename)}">
-          <span>${esc(filename)} <span class="row-cnt">(${dims})</span>${derivedBadge}${staleBadge}${notesBadge}</span>
+          <span>${esc(filename)} <span class="row-cnt">(${dims})</span>${derivedBadge}${staleBadge}</span>
         </label>
         <div class="ds-actions">
           ${rederiveBtn}
@@ -888,7 +861,7 @@
     row.dataset.stale = ds.stale ? 'true' : 'false';
     row.dataset.rowCount = ds.row_count;
     row.dataset.colCount = ds.col_count || '';
-    row.innerHTML = _dsRowInner(ds.dataset_id, ds.filename, ds.row_count, ds.col_count, ds.columns||[], ds.origin, ds.stale, ds.auto_notes_status);
+    row.innerHTML = _dsRowInner(ds.dataset_id, ds.filename, ds.row_count, ds.col_count, ds.columns||[], ds.origin, ds.stale);
     const cb = row.querySelector('.ds-check');
     if (cb) cb.checked = wasChecked;
     _attachDsRowListeners(row, ds.dataset_id);
@@ -908,7 +881,7 @@
     div.dataset.rowCount = ds.row_count; div.dataset.colCount = ds.col_count||'';
     div.dataset.origin = ds.origin || 'uploaded';
     div.dataset.stale = ds.stale ? 'true' : 'false';
-    div.innerHTML = _dsRowInner(ds.dataset_id, ds.filename, ds.row_count, ds.col_count, ds.columns||[], ds.origin, ds.stale, ds.auto_notes_status);
+    div.innerHTML = _dsRowInner(ds.dataset_id, ds.filename, ds.row_count, ds.col_count, ds.columns||[], ds.origin, ds.stale);
     _attachDsRowListeners(div, ds.dataset_id);
     document.getElementById('dataset-checkboxes').appendChild(div);
     document.getElementById('no-datasets-msg').style.display = 'none';
@@ -1050,8 +1023,6 @@
     const delBtn = document.getElementById('ds-del-sel-btn');
     if(delBtn){ delBtn.style.display=checked?'inline-flex':'none'; delBtn.textContent=`Delete ${checked} selected`; }
     startNewSession();
-    if(ids.length) loadDatasetCtx(ids);
-    else { document.getElementById('dataset-notes-panel').style.display = 'none'; _stopNotesPolling(); }
     _updateCtxBar();
   }
 
@@ -1085,82 +1056,6 @@
     _updateStorageStat();
     await loadSessionList();
     announce('Selected datasets deleted');
-  }
-
-  // ── Dataset notes panel ───────────────────────────────────────────────────────
-  let _notesPollingTimer = null;
-  let _activeNotesId = null; // tracks which dataset the notes panel is showing
-
-  function _stopNotesPolling() {
-    if (_notesPollingTimer) { clearInterval(_notesPollingTimer); _notesPollingTimer = null; }
-  }
-
-  function _startNotesPolling(id) {
-    _stopNotesPolling();
-    _notesPollingTimer = setInterval(async () => {
-      try {
-        const ds = (await (await fetch(`/datasets/${id}`)).json()).data;
-        if (!ds || ds.auto_notes_status === 'pending') return;
-        _stopNotesPolling();
-        _ctxCache[id] = ds.context || '';
-        _showCtxPanel(id, _ctxCache[id], ds.auto_notes_status);
-        // Remove the "noting" badge from the dataset row
-        const row = document.querySelector(`.ds-row[data-id="${id}"]`);
-        row?.querySelector('.ds-badge--notes')?.remove();
-      } catch {}
-    }, 2000);
-  }
-
-  async function loadDatasetCtx(ids) {
-    if(ids.length!==1){ document.getElementById('dataset-notes-panel').style.display='none'; _stopNotesPolling(); return; }
-    const id = ids[0];
-    try {
-      const ds = (await (await fetch(`/datasets/${id}`)).json()).data;
-      if (ds) { _ctxCache[id] = ds.context||''; _showCtxPanel(id, _ctxCache[id], ds.auto_notes_status); }
-    } catch {}
-  }
-
-  function _showCtxPanel(id, ctx, autoNotesStatus) {
-    _activeNotesId = id;
-    document.getElementById('context-display').textContent = ctx||'No notes added yet.';
-    document.getElementById('context-edit-input').value = ctx||'';
-    document.getElementById('context-edit-area').style.display = 'none';
-    document.getElementById('context-display').style.display = 'block';
-    document.getElementById('dataset-notes-panel').style.display = 'block';
-    const badge = document.getElementById('notes-gen-status');
-    const regenBtn = document.getElementById('notes-regen-btn');
-    const editBtn = document.getElementById('notes-edit-btn');
-    const isPending = autoNotesStatus === 'pending';
-    if (badge) badge.style.display = isPending ? 'inline-flex' : 'none';
-    if (regenBtn) regenBtn.style.display = isPending ? 'none' : 'inline-block';
-    if (editBtn) editBtn.disabled = isPending;
-    if (isPending) _startNotesPolling(id); else _stopNotesPolling();
-  }
-
-  function toggleCtxEdit() {
-    const ea=document.getElementById('context-edit-area'), cd=document.getElementById('context-display');
-    ea.style.display = ea.style.display==='none'?'block':'none';
-    cd.style.display = ea.style.display==='none'?'block':'none';
-  }
-  function cancelCtxEdit() {
-    document.getElementById('context-edit-area').style.display = 'none';
-    document.getElementById('context-display').style.display = 'block';
-  }
-  async function saveCtxEdit() {
-    const id = _activeNotesId || getSelectedDatasetIds()[0]; if(!id) return;
-    const ctx=document.getElementById('context-edit-input').value.trim();
-    try {
-      const resp = await fetch(`/datasets/${id}/context`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({context:ctx})});
-      if(resp.ok){ _ctxCache[id]=ctx; _showCtxPanel(id, ctx, 'done'); }
-    } catch {}
-  }
-
-  async function regenerateNotes() {
-    const id = _activeNotesId || getSelectedDatasetIds()[0]; if(!id) return;
-    try {
-      const resp = await fetch(`/datasets/${id}/describe`, {method:'POST'});
-      if(resp.ok) _showCtxPanel(id, _ctxCache[id]||'', 'pending');
-    } catch {}
   }
 
   // ── Storage stat ──────────────────────────────────────────────────────────────
@@ -2289,14 +2184,52 @@
         </div>
       </div>
       <div style="margin-bottom:10px;">
-        <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;">Context notes</div>
-        <textarea class="db-notes-input" style="height:52px;font-size:12px;width:100%;box-sizing:border-box;resize:vertical;" placeholder="Notes about this dataset…">${esc(ds.context||'')}</textarea>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+          <span style="font-size:12px;font-weight:600;color:#374151;">Context notes</span>
+          <span id="db-notes-status-${ds.dataset_id}" style="font-size:11px;color:#6b7280;display:none;"><span class="spinner" style="width:9px;height:9px;border-width:1.5px;vertical-align:middle;"></span> Generating…</span>
+          <button type="button" class="btn btn-ghost btn-xs" onclick="dbGenerateNotes('${ds.dataset_id}')">Generate notes</button>
+        </div>
+        <textarea class="db-notes-input" style="height:72px;font-size:12px;width:100%;box-sizing:border-box;resize:vertical;" placeholder="Notes about this dataset…">${esc(ds.context||'')}</textarea>
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
         ${actions}
         <span id="db-action-status-${ds.dataset_id}" style="font-size:12px;color:#6b7280;"></span>
       </div>
     </div>`;
+  }
+
+  const _dbNotesPolling = {};
+
+  async function dbGenerateNotes(id) {
+    const statusEl = document.getElementById(`db-notes-status-${id}`);
+    const btn = document.querySelector(`[onclick="dbGenerateNotes('${id}')"]`);
+    if (statusEl) statusEl.style.display = 'inline-flex';
+    if (btn) btn.disabled = true;
+    try {
+      const resp = await fetch(`/datasets/${id}/describe`, {method: 'POST'});
+      if (!resp.ok) { if (statusEl) statusEl.style.display='none'; if(btn) btn.disabled=false; return; }
+    } catch { if (statusEl) statusEl.style.display='none'; if(btn) btn.disabled=false; return; }
+    // Poll until no longer pending
+    if (_dbNotesPolling[id]) clearInterval(_dbNotesPolling[id]);
+    _dbNotesPolling[id] = setInterval(async () => {
+      try {
+        const body = await fetch(`/datasets/${id}`).then(r => r.json());
+        const ds = body.data;
+        if (!ds || ds.auto_notes_status === 'pending') return;
+        clearInterval(_dbNotesPolling[id]);
+        delete _dbNotesPolling[id];
+        if (statusEl) statusEl.style.display = 'none';
+        if (btn) btn.disabled = false;
+        // Update textarea with generated notes
+        const contentEl = document.getElementById('db-schema-content');
+        const textarea = contentEl?.querySelector('.db-notes-input');
+        if (textarea) textarea.value = ds.context || '';
+        // Invalidate cache so re-clicking the table shows fresh notes
+        delete _dbSchemaCache[id];
+        const cached = _dbDatasets.find(d => d.dataset_id === id);
+        if (cached && ds.context) cached.context = ds.context;
+      } catch {}
+    }, 2000);
   }
 
   async function _saveDbContext(id, ctx) {

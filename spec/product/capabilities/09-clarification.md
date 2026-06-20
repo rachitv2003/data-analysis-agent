@@ -1,6 +1,6 @@
 # Pre-flight Clarification Check
 
-**Status:** planned
+**Status:** implemented
 **Covers:** C26 (pre-flight clarification check)
 
 Before invoking the ReAct agent, a lightweight pre-flight LLM call determines whether the question is sufficiently clear to proceed. If genuine ambiguity is detected, the agent returns a clarification question to the user instead of running the full analysis. The user's response is incorporated into the session history, and the next `/ask` call proceeds normally.

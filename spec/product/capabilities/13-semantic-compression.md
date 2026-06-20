@@ -1,5 +1,10 @@
 # C31 — Semantic Context Compression
 
+**Status:** implemented
+**Covers:** C31 (semantic context compression)
+
+---
+
 ## Overview
 
 Instead of injecting the full raw text of dataset notes and global memory into every agent prompt, an LLM extraction step distils each text into a compact, structured list of atomic facts. The facts are stored separately and injected at query time in place of the full text, dramatically reducing per-prompt token cost while preserving analytical fidelity.

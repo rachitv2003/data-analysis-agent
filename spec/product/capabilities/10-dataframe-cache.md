@@ -1,6 +1,6 @@
 # Session DataFrame Cache and Parquet Pre-conversion
 
-**Status:** planned
+**Status:** implemented
 **Covers:** C27 (session-scoped DataFrame cache + Parquet pre-conversion)
 
 Two complementary optimisations that eliminate repeated disk I/O across queries in the same session:

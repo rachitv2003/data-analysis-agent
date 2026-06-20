@@ -115,7 +115,6 @@ def upload_file(
         format=fmt,
         context=context.strip() or None,
         origin="uploaded",
-        auto_notes_status=None if has_user_notes else "pending",
     )
     session.add(dataset)
     session.flush()
@@ -132,16 +131,10 @@ def upload_file(
     except Exception:
         pass
 
-    # C30 / C31: queue background tasks
+    # C31: if user supplied notes on upload, compress them immediately
     if has_user_notes:
-        # User supplied notes — skip generation, compress what we have (C31)
-        dataset.auto_notes_status = "done"
         from data_analyst.graph.compress import compress_dataset_context
         background_tasks.add_task(compress_dataset_context, dataset.id)
-    else:
-        # No notes yet — auto-generate (C30), which triggers C31 on completion
-        from data_analyst.graph.describe import generate_dataset_notes
-        background_tasks.add_task(generate_dataset_notes, dataset.id, False)
 
     return ok({
         "dataset_id": dataset.id,

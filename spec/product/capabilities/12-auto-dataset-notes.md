@@ -1,28 +1,30 @@
-# C30 — Auto-generated Dataset Notes
+# C30 — On-demand Dataset Notes Generation
 
-## Overview
-
-Immediately after a dataset is uploaded, a background LLM call analyses the file structure and sample rows and writes a structured description into the dataset's context/notes field. The generated notes are editable — they serve as a pre-populated starting point, not a locked value.
-
-This capability extends C12 (dataset context notes injected into prompts). Auto-generation fills the notes field the user would otherwise have to write by hand.
+**Status:** implemented
+**Covers:** C30 (on-demand dataset notes generation)
 
 ---
 
-## Trigger and Background Task
+## Overview
 
-`POST /upload` completes as normal (synchronous file parse + DB write). Before returning, it registers a FastAPI `BackgroundTasks` job:
+A user-triggered LLM call analyses a dataset's structure and sample rows and writes a structured description into the dataset's `context` field. Notes are generated on demand (Database tab button), not automatically on upload. The generated notes are always editable and are overwritten each time the user triggers regeneration.
 
-```python
-background_tasks.add_task(generate_dataset_notes, dataset_id)
-```
+This capability extends C12 (dataset context notes injected into prompts). Generation fills the notes field the user would otherwise have to write by hand.
 
-`generate_dataset_notes` sets `DatasetRow.auto_notes_status = "pending"` immediately, then:
-1. Loads the top 50 rows and the columns schema (name + dtype) from the uploaded file.
+---
+
+## Trigger
+
+The user clicks **"Generate notes"** in the Database tab's Table Description panel (next to the Context notes field). There is no automatic trigger on upload.
+
+`POST /datasets/{dataset_id}/describe` queues the background generation task.
+
+`generate_dataset_notes` then:
+1. Loads the top 50 rows and the columns schema (name + dtype).
 2. Calls the active LLM provider with a one-shot notes prompt (see below).
-3. On success: writes the result to `DatasetRow.context` **only if `context` is currently NULL or empty**, then sets `auto_notes_status = "done"`.
-4. On failure: sets `auto_notes_status = "failed"`, leaves `context` unchanged.
+3. On success: **always overwrites** `DatasetRow.context` with the generated text (explicit user intent).
 
-If the user has already typed notes before the background task completes, the task respects that: it **does not overwrite a non-empty `context` field**.
+4. On failure: leaves `context` unchanged, sets `auto_notes_status = "failed"`.
 
 ---
 
@@ -105,20 +107,20 @@ Gains `"auto_notes_status": "pending" | "done" | "failed" | null`.
 
 ## UI
 
-### Context notes field
+### Database tab panel
 
-While `auto_notes_status == "pending"`, the Context notes textarea in the Database tab right-panel shows a subtle spinner badge labelled *"Generating notes…"*. The UI polls `GET /datasets/{id}` every 2 seconds until status transitions out of `"pending"`.
+A **"Generate notes"** button appears in the Context notes section of the Database tab's Table Description panel. Clicking it calls `POST /datasets/{id}/describe` and immediately shows *"Generating…"* inline text next to the field label. The UI polls `GET /datasets/{id}` every 2 seconds until `auto_notes_status` transitions out of `"pending"`.
 
-When status becomes `"done"`, the textarea populates with the generated text and the spinner disappears. The user can then edit or clear the text normally. The "Regenerate notes" button (a small icon-button next to the field label) calls `POST /datasets/{id}/describe`.
+When done, the textarea is populated with the generated text and the "Generating…" indicator is removed. The user can then edit the textarea directly — changes are saved on blur via `PATCH /datasets/{id}/context`.
 
 ### Sequence
 
-1. User uploads file → upload response returns immediately.
-2. Spinner appears in Context notes field.
+1. User clicks **Generate notes** in the Database tab.
+2. `POST /datasets/{id}/describe` queued; "Generating…" label appears.
 3. UI polls every 2 s.
-4. Background LLM call completes (typically 2–8 s depending on file size and provider latency).
+4. Background LLM call completes (typically 2–8 s).
 5. `auto_notes_status` transitions to `"done"`; `context` now has generated text.
-6. Next poll returns `"done"` → UI fills textarea, removes spinner.
+6. Next poll → UI fills textarea, removes "Generating…" label.
 
 ---
 

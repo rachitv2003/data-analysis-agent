@@ -1,6 +1,6 @@
 # Derived Datasets
 
-**Status:** planned
+**Status:** implemented
 **Covers:** C25 (autonomous derived dataset persistence)
 
 When the agent produces a significant intermediate DataFrame — merged tables, feature-engineered data, cluster assignments, cohort segments — it saves it as a first-class registered dataset using `save_dataset()`. The saved dataset is immediately available to the C19 auto-selector and is loaded into future queries exactly like an uploaded dataset. This eliminates the need to re-derive state across turns and makes cross-query analytical continuity reliable.
