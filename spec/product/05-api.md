@@ -173,8 +173,7 @@ REST. All routes return `{"data": ..., "error": null}` on success or raise HTTP 
 
 `prompt_breakdown` (C29) records per-component token counts from the last `plan_action` call. `null` for runs before C29.
 
-```json
-```
+`suggested_questions` is an array of 0–3 follow-up question strings. The example above shows 3, which is the typical case. Returns an empty array when the LLM call fails or returns unparseable output.
 
 `derived_dataset_ids` is the list of dataset IDs created by `save_dataset()` calls during this run (C25). Empty list when none were created.
 

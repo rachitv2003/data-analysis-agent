@@ -262,11 +262,18 @@ def delete_dataset(dataset_id: str, session: Session = Depends(get_session)):
     if row is None:
         raise api_error("dataset_not_found", f"Dataset {dataset_id} not found.", 404)
 
-    running = (
-        session.query(QueryRunRow)
-        .filter(QueryRunRow.dataset_id == dataset_id, QueryRunRow.status == "running")
-        .first()
-    )
+    running = None
+    for _run in session.query(QueryRunRow).filter(QueryRunRow.status == "running").all():
+        if _run.dataset_id == dataset_id:
+            running = _run
+            break
+        if _run.dataset_ids_json:
+            try:
+                if dataset_id in json.loads(_run.dataset_ids_json):
+                    running = _run
+                    break
+            except Exception:
+                pass
     if running:
         raise api_error("dataset_in_use", "A query is currently running against this dataset.", 409)
 

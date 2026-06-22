@@ -1396,3 +1396,32 @@ def test_bulk_session_delete_evicts_cache(client, monkeypatch):
     assert resp.status_code == 200
     assert sid1 not in nodes_module._session_cache, "Cache must be evicted for session 1"
     assert sid2 not in nodes_module._session_cache, "Cache must be evicted for session 2"
+
+
+# ── C15: DELETE /datasets running-guard covers multi-dataset runs ─────────────
+
+def test_delete_dataset_blocked_when_secondary_dataset_is_running(client, monkeypatch):
+    """Guard must fire even when the target dataset is non-primary in a running multi-dataset run."""
+    from data_analyst.db.models import QueryRunRow
+    import data_analyst.db.session as session_module
+    import json as _json
+
+    id1 = _upload(client)
+    id2 = _upload_extra(client)
+
+    # Inject a fake running QueryRunRow where id1 is primary but id2 is in dataset_ids_json
+    with session_module.create_db_session() as db:
+        run = QueryRunRow(
+            dataset_id=id1,
+            dataset_ids_json=_json.dumps([id1, id2]),
+            session_id=None,
+            question="in-flight",
+            status="running",
+        )
+        db.add(run)
+        db.commit()
+
+    # Deleting id2 (secondary) must be blocked
+    resp = client.delete(f"/datasets/{id2}")
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["code"] == "dataset_in_use"
