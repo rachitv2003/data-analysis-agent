@@ -50,21 +50,40 @@ Text:
 
 ### Failure handling
 
-If the extraction LLM call fails or returns non-parseable JSON, `context_facts` / `global_memory_facts` is left as the previous value (or NULL). At query time, the fallback path injects the raw text instead (see Injection section).
+If the extraction LLM call fails or returns non-parseable JSON, `context_facts` / `global_memory_facts` is left NULL. At query time, the fallback path injects the raw text instead (see Injection section), and the **lazy self-heal** (below) re-attempts compression the next time the agent loads that source — so a transient failure no longer strands a dataset on raw text permanently.
 
 ---
 
 ## Trigger
 
-Compression runs asynchronously (FastAPI `BackgroundTasks`) after the source text changes:
+Compression runs asynchronously after the source text changes (write-path triggers) or is detected to be missing at read time (lazy self-heal):
 
-| Event | Compression triggered for |
-|-------|--------------------------|
-| `PATCH /datasets/{id}/context` saves | `DatasetRow.context_facts` for that dataset |
-| C30 auto-notes background task completes | `DatasetRow.context_facts` for that dataset |
-| `PATCH /memory` saves | `settings['global_memory_facts']` |
+| Event | Mechanism | Compression triggered for |
+|-------|-----------|--------------------------|
+| `PATCH /datasets/{id}/context` saves | FastAPI `BackgroundTasks` | `DatasetRow.context_facts` for that dataset |
+| C30 auto-notes background task completes | in-task synchronous call | `DatasetRow.context_facts` for that dataset |
+| `PATCH /memory` saves | FastAPI `BackgroundTasks` | `settings['global_memory_facts']` |
+| Agent `setup()` loads a dataset with `context` set but `context_facts` NULL | lazy self-heal (daemon thread) | `DatasetRow.context_facts` for that dataset |
+| `plan_action` injects global memory with `global_memory` set but `global_memory_facts` NULL | lazy self-heal (daemon thread) | `settings['global_memory_facts']` |
 
-The triggering endpoint does not wait for compression — it responds immediately and the extraction happens in the background. The next prompt call will use whichever facts are available at that point.
+The triggering endpoint/node does not wait for compression — it responds immediately and the extraction happens in the background. The current prompt call uses whichever facts are available at that point (raw text if facts are not yet ready); the next call uses the freshly-compressed facts.
+
+### Lazy on-read self-heal
+
+The write-path triggers only fire when the user changes text through an endpoint. They do **not** cover:
+
+- Datasets whose notes were set before C31 existed (`context_facts` permanently NULL).
+- Any dataset whose compression failed once (transient LLM error / unparseable output).
+
+To close this gap, the agent self-heals on read: whenever it loads a source that has raw text but no facts, it fires a fire-and-forget background compression (`compress_dataset_context_async` / `compress_memory_async`). That turn still injects raw text; the next turn uses the compact facts. This makes compression eventually-consistent across all existing data without a startup backfill or manual re-save.
+
+### Concurrency guard
+
+The write-path background task and the lazy self-heal can target the same source simultaneously (e.g. rapid-fire queries on a freshly-edited dataset). An in-process guard (`_inflight` set + lock in `compress.py`) ensures at most one compression runs per target at a time; redundant concurrent calls are skipped, not queued.
+
+### Staleness — clear facts on write
+
+When raw text is updated, the old facts describe the **previous** text and must not be served during the recompression window. Both `PATCH /datasets/{id}/context` and `PATCH /memory` therefore set the corresponding `*_facts` field to NULL **before** committing the new text. Until recompression completes, the injection fallback serves the fresh raw text (correct, slightly larger) rather than stale facts (compact but wrong). Recompression — via the background task and, as a backstop, the lazy self-heal — then repopulates the facts.
 
 ---
 

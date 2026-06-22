@@ -252,6 +252,10 @@ def _build_prompt(state: AgentState) -> tuple[str, dict]:
                 _mem = _db.get(SettingsRow, "global_memory")
                 if _mem and _mem.value and _mem.value.strip():
                     memory_text = _mem.value.strip()
+                    # C31 lazy self-heal: memory set but facts absent — recompress in
+                    # the background so the next turn uses compact facts, not raw memory.
+                    from data_analyst.graph.compress import compress_memory_async
+                    compress_memory_async()
     except Exception:
         pass
     memory_block = f"{memory_label}:\n{memory_text}\n\n" if memory_text else ""
@@ -417,6 +421,12 @@ def setup(state: AgentState) -> AgentState:
                 ctx_text = _dataset_context_text(row, len(dataset_ids) > 1)
                 if ctx_text:
                     context_parts.append(ctx_text)
+                # C31 lazy self-heal: notes present but never compressed (pre-C31 data,
+                # or a prior compression that failed) — recompress in the background so
+                # the next turn uses compact facts instead of full raw notes.
+                if row.context and not row.context_facts:
+                    from data_analyst.graph.compress import compress_dataset_context_async
+                    compress_dataset_context_async(did)
 
         # Always provide df / df1 / df2 / … aliases
         final_map: dict[str, pd.DataFrame] = {}

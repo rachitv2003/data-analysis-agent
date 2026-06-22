@@ -184,8 +184,10 @@ def update_context(
         raise api_error("dataset_not_found", f"Dataset {dataset_id} not found.", 404)
 
     row.context = body.context.strip() or None
-    if not row.context:
-        row.context_facts = None
+    # C31: clear stale facts immediately — they describe the OLD text. Until
+    # recompression completes, the prompt builder falls back to the fresh raw
+    # notes rather than serving facts that no longer match.
+    row.context_facts = None
     # Commit before queuing background task so the task sees the new context
     session.commit()
     # C31: compress updated notes into facts in background

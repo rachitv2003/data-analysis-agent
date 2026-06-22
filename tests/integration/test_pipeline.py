@@ -1226,6 +1226,87 @@ def test_memory_patch_triggers_compression(client, monkeypatch):
     assert isinstance(facts, list)
 
 
+# ── C31: lazy on-read self-heal + clear-on-write staleness ───────────────────
+
+def test_lazy_self_heal_compresses_uncompressed_notes(client, monkeypatch):
+    """C31: a dataset with raw context but null context_facts gets compressed
+    in the background when the agent loads it for a query (lazy self-heal)."""
+    import json
+    import time
+    import data_analyst.graph.nodes as nodes_module
+    from data_analyst.llm.providers.base import LLMResponse
+    from data_analyst.llm.client import LLMClient
+    from data_analyst.db.models import DatasetRow
+    from data_analyst.db import session as session_module
+
+    class DualProvider:
+        """Returns facts JSON for the extraction prompt, FINAL ANSWER otherwise."""
+        def complete(self, prompt: str) -> LLMResponse:
+            if "Extract the key analytical facts" in prompt:
+                return LLMResponse(text='["revenue is in USD"]', tokens_input=5, tokens_output=5)
+            return LLMResponse(text="FINAL ANSWER: done", tokens_input=5, tokens_output=5)
+
+    monkeypatch.setattr(nodes_module, "_llm_client", LLMClient(DualProvider()))
+
+    dataset_id = _upload(client)
+
+    # Simulate pre-C31 / failed-compression state: raw notes present, no facts.
+    factory = session_module._get_session_factory()
+    with factory() as db:
+        row = db.get(DatasetRow, dataset_id)
+        row.context = "Revenue is in USD."
+        row.context_facts = None
+        db.commit()
+
+    # Running a query loads the dataset in setup() → fires lazy compression.
+    resp = client.post("/ask", json={"dataset_id": dataset_id, "question": "how many rows?"})
+    assert resp.status_code == 200, resp.text
+
+    # The self-heal thread compresses in the background; poll until it commits.
+    deadline = time.time() + 5.0
+    facts = None
+    while time.time() < deadline:
+        with factory() as db:
+            row = db.get(DatasetRow, dataset_id)
+            if row and row.context_facts is not None:
+                facts = json.loads(row.context_facts)
+                break
+        time.sleep(0.1)
+    assert facts is not None, "lazy self-heal must populate context_facts"
+    assert isinstance(facts, list) and len(facts) >= 1
+
+
+def test_context_patch_clears_stale_facts(client, monkeypatch):
+    """C31: PATCH /context clears the old facts immediately so the recompression
+    window serves fresh raw notes, not stale facts describing the previous text."""
+    import data_analyst.graph.compress as compress_module
+    from data_analyst.db.models import DatasetRow
+    from data_analyst.db import session as session_module
+
+    # No-op compression so we can observe the cleared state without it being
+    # immediately repopulated by the background task.
+    monkeypatch.setattr(compress_module, "compress_dataset_context", lambda *a, **k: None)
+
+    dataset_id = _upload(client)
+    factory = session_module._get_session_factory()
+    with factory() as db:
+        row = db.get(DatasetRow, dataset_id)
+        row.context = "Old notes."
+        row.context_facts = '["old fact that no longer matches"]'
+        db.commit()
+
+    resp = client.patch(
+        f"/datasets/{dataset_id}/context",
+        json={"context": "Completely different new notes."},
+    )
+    assert resp.status_code == 200, resp.text
+
+    with factory() as db:
+        row = db.get(DatasetRow, dataset_id)
+        assert row.context == "Completely different new notes."
+        assert row.context_facts is None, "stale facts must be cleared on context update"
+
+
 # ── C18: context_limit in daily stats ────────────────────────────────────────
 
 def test_daily_stats_context_limit(client):

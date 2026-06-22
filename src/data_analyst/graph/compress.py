@@ -1,9 +1,43 @@
 """C31: Semantic context compression — LLM structured fact extraction."""
 import json
 import re
+import threading
+
 import structlog
 
 logger = structlog.get_logger()
+
+# Guard against concurrent duplicate compression of the same target. The lazy
+# on-read self-heal (agent setup path) and the write-path background tasks can
+# both fire for the same dataset/memory; only one should run at a time.
+_inflight_lock = threading.Lock()
+_inflight: set[str] = set()
+
+
+def _claim(key: str) -> bool:
+    """Reserve a compression slot for `key`. Returns False if already in flight."""
+    with _inflight_lock:
+        if key in _inflight:
+            return False
+        _inflight.add(key)
+        return True
+
+
+def _release(key: str) -> None:
+    with _inflight_lock:
+        _inflight.discard(key)
+
+
+def compress_dataset_context_async(dataset_id: str) -> None:
+    """Fire-and-forget background compression — used by the lazy on-read self-heal."""
+    threading.Thread(
+        target=compress_dataset_context, args=(dataset_id,), daemon=True
+    ).start()
+
+
+def compress_memory_async() -> None:
+    """Fire-and-forget background memory compression — used by the lazy on-read self-heal."""
+    threading.Thread(target=compress_memory, daemon=True).start()
 
 _EXTRACT_PROMPT = (
     "Extract the key analytical facts from the following text as a JSON array of strings.\n"
@@ -36,6 +70,8 @@ def extract_facts(text: str) -> list[str]:
 
 def compress_dataset_context(dataset_id: str) -> None:
     """Background task: extract facts from DatasetRow.context → context_facts."""
+    if not _claim(f"ds:{dataset_id}"):
+        return
     try:
         from data_analyst.db.session import create_db_session
         from data_analyst.db.models import DatasetRow
@@ -49,10 +85,14 @@ def compress_dataset_context(dataset_id: str) -> None:
                 logger.info("compress.dataset.ok", dataset_id=dataset_id, n_facts=len(facts))
     except Exception as exc:
         logger.warning("compress.dataset.error", dataset_id=dataset_id, error=str(exc))
+    finally:
+        _release(f"ds:{dataset_id}")
 
 
 def compress_memory() -> None:
     """Background task: extract facts from global_memory → global_memory_facts."""
+    if not _claim("memory"):
+        return
     try:
         from data_analyst.db.session import create_db_session
         from data_analyst.db.models import SettingsRow
@@ -76,3 +116,5 @@ def compress_memory() -> None:
             logger.info("compress.memory.ok", n_facts=len(facts))
     except Exception as exc:
         logger.warning("compress.memory.error", error=str(exc))
+    finally:
+        _release("memory")

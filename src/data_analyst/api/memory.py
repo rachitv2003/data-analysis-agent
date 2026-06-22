@@ -9,6 +9,7 @@ from data_analyst.db.models import SettingsRow
 router = APIRouter()
 
 _MEMORY_KEY = "global_memory"
+_MEMORY_FACTS_KEY = "global_memory_facts"
 
 
 class MemoryUpdate(BaseModel):
@@ -33,6 +34,13 @@ def update_memory(
         session.add(row)
     else:
         row.value = body.content
+
+    # C31: clear stale facts immediately — they describe the OLD memory text. Until
+    # recompression completes, the prompt builder falls back to the fresh raw memory
+    # rather than serving facts that no longer match.
+    facts_row = session.get(SettingsRow, _MEMORY_FACTS_KEY)
+    if facts_row:
+        facts_row.value = None
 
     # Commit before queuing background task so compress_memory sees the new value
     session.commit()
