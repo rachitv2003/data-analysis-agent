@@ -56,6 +56,14 @@ class OpenRouterProvider(LLMProvider):
                     tokens_output=usage.get("completion_tokens", 0),
                 )
             except httpx.HTTPStatusError as exc:
+                if exc.response.status_code in (401, 403):
+                    logger.error("openrouter.auth_error", model=self._model)
+                    raise RuntimeError(
+                        "OpenRouter authentication failed — the API key is missing, invalid, or "
+                        "expired. OpenRouter keys start with 'sk-or-'. Get one at "
+                        "https://openrouter.ai/keys and set DATA_ANALYST_OPENROUTER_API_KEY in your "
+                        ".env, then restart the server."
+                    ) from exc
                 raise RuntimeError(
                     f"OpenRouter API error {exc.response.status_code}: {exc.response.text[:200]}"
                 ) from exc

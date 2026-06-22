@@ -96,6 +96,27 @@ class TestGeminiRateLimit:
 
         assert sleep_calls == [45]
 
+    def test_auth_error_raises_clean_message_without_retry(self):
+        from data_analyst.llm.providers.gemini import GeminiProvider
+        mock_client = MagicMock()
+        # Mirrors the real google-genai 401 when a non-API-key (e.g. OAuth token) is sent
+        auth_exc = RuntimeError(
+            "401 UNAUTHENTICATED. Expected OAuth 2 access token... "
+            "reason: ACCESS_TOKEN_TYPE_UNSUPPORTED"
+        )
+        mock_client.models.generate_content.side_effect = auth_exc
+
+        with patch("data_analyst.llm.providers.gemini.genai") as mock_genai, \
+             patch("data_analyst.llm.providers.gemini.time.sleep") as mock_sleep:
+            mock_genai.Client.return_value = mock_client
+            provider = GeminiProvider("AQ.not-an-api-key", "model")
+            with pytest.raises(RuntimeError, match="authentication failed"):
+                provider.complete("prompt")
+
+        # Auth errors are terminal — no retries, no sleeps, no raw error leakage.
+        assert mock_client.models.generate_content.call_count == 1
+        assert mock_sleep.call_count == 0
+
 
 # ── OpenRouter provider ──────────────────────────────────────────────────────
 
@@ -185,4 +206,20 @@ class TestOpenRouterRateLimit:
                    return_value=mock_resp):
             provider = OpenRouterProvider("key", "model")
             with pytest.raises(RuntimeError, match="OpenRouter API error 500"):
+                provider.complete("prompt")
+
+    def test_401_raises_clean_auth_message(self):
+        import httpx
+        from data_analyst.llm.providers.openrouter import OpenRouterProvider
+
+        mock_resp = MagicMock(spec=httpx.Response)
+        mock_resp.status_code = 401
+        mock_resp.text = "No auth credentials found"
+        http_err = httpx.HTTPStatusError("401", request=MagicMock(), response=mock_resp)
+        mock_resp.raise_for_status.side_effect = http_err
+
+        with patch("data_analyst.llm.providers.openrouter.httpx.post",
+                   return_value=mock_resp):
+            provider = OpenRouterProvider("bad-key", "model")
+            with pytest.raises(RuntimeError, match="authentication failed"):
                 provider.complete("prompt")
