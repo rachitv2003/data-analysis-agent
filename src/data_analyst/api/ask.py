@@ -53,6 +53,20 @@ def ask_question(
             raise api_error("no_datasets", "No datasets uploaded yet.", 400)
         full_ids = [ds.id for ds in all_datasets]
 
+        # When continuing a session, scope the dataset pool to the session's stored datasets.
+        # This prevents a mismatch when new datasets are uploaded after the session started.
+        if body.session_id:
+            sess_row = session.get(ConversationSessionRow, body.session_id)
+            if sess_row:
+                _sess_ids = set(
+                    _json.loads(sess_row.dataset_ids_json) if sess_row.dataset_ids_json
+                    else [sess_row.dataset_id]
+                )
+                _scoped = [ds for ds in all_datasets if ds.id in _sess_ids]
+                if _scoped:
+                    all_datasets = _scoped
+                    full_ids = [ds.id for ds in all_datasets]
+
         # C26: pre-flight clarification check (fail-open, 60s timeout)
         history: list[dict] = []
         if body.session_id:

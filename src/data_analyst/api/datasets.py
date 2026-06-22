@@ -111,6 +111,50 @@ def get_dataset(dataset_id: str, session: Session = Depends(get_session)):
     return ok(data)
 
 
+@router.get("/datasets/{dataset_id}/preview")
+def preview_dataset(dataset_id: str, rows: int = 10, session: Session = Depends(get_session)):
+    """Return the first N rows of a dataset as a list of formatted value objects."""
+    record = session.get(DatasetRow, dataset_id)
+    if record is None:
+        raise api_error("dataset_not_found", f"Dataset {dataset_id} not found.", 404)
+
+    n = max(1, min(rows, 50))
+    import pandas as pd
+    import numpy as np
+
+    if record.parquet_path and Path(record.parquet_path).exists():
+        df = pd.read_parquet(record.parquet_path, engine="pyarrow").head(n)
+    elif record.file_path and Path(record.file_path).exists():
+        df = pd.read_csv(record.file_path, nrows=n)
+    else:
+        raise api_error("file_not_found", "Dataset file not found on disk.", 404)
+
+    def _fmt(val):
+        if val is None:
+            return None
+        try:
+            if pd.isna(val):
+                return None
+        except (TypeError, ValueError):
+            pass
+        if isinstance(val, (bool, np.bool_)):
+            return bool(val)
+        if isinstance(val, (float, np.floating)):
+            fval = float(val)
+            if fval.is_integer() and abs(fval) < 1e15:
+                return int(fval)
+            return round(fval, 4)
+        if isinstance(val, (int, np.integer)):
+            return int(val)
+        return str(val) if not isinstance(val, str) else val
+
+    preview_rows = [
+        {col: _fmt(row_vals[col]) for col in df.columns}
+        for _, row_vals in df.iterrows()
+    ]
+    return ok({"columns": df.columns.tolist(), "rows": preview_rows})
+
+
 class ContextUpdate(BaseModel):
     context: str
 
