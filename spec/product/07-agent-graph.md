@@ -29,13 +29,18 @@ class AgentState(TypedDict, total=False):
 ## Nodes
 
 ### `setup`
-**Reads from state:** `run_id`, `dataset_id`
-**Writes to state:** nothing (side effect: loads DataFrame into module-level cache keyed by `run_id`)
+**Reads from state:** `run_id`, `session_id`, `dataset_ids`
+**Writes to state:** nothing (side effect: populates DataFrame cache)
 **External calls:**
+
 | System | Operation | On Failure |
-|--------|-----------|------------|
-| filesystem | `pandas.read_csv(file_path)` | fatal — set error, route to handle_error |
+| ------ | --------- | ---------- |
+| memory | `_session_cache[session_id][dataset_id]` lookup (C27) | cache miss — fall through to disk |
+| filesystem | `pd.read_parquet(parquet_path)` (C27, preferred) | fall back to CSV |
+| filesystem | `pd.read_csv(file_path)` (fallback when no Parquet) | fatal — set error, route to handle_error |
 | SQLite | fetch Dataset by dataset_id | fatal — set error, route to handle_error |
+
+**Behaviour:** For each `dataset_id`, check `_session_cache[session_id]` first. On hit, use the cached DataFrame and update the LRU order. On miss, load from `parquet_path` if set, else from `file_path` (CSV); store result in session cache. Single-turn queries (no `session_id`) use the existing run-scoped `_dataframes[run_id]` dict instead of the session cache.
 
 ### `plan_action`
 **Reads from state:** `question`, `action_history`, `iteration_count`, `conversation_history`, `dataset_context`
@@ -50,9 +55,13 @@ class AgentState(TypedDict, total=False):
 ### `execute_action`
 **Reads from state:** `llm_response` (pandas expression)
 **Writes to state:** appends `{action, result, is_error}` to `action_history`
-**External calls:** none (pure pandas eval against cached DataFrame)
+**External calls:**
 
-**Behaviour:** `eval(llm_response, {"df": df})`, converts result to string. On exception, marks `is_error=True` and routes back to plan_action for self-correction.
+| System | Operation | On Failure |
+|--------|-----------|------------|
+| SQLite | `_update_iteration_count(run_id, n)` — writes `iteration_count` to `QueryRunRow` mid-run for live progress polling | non-fatal — ignored silently |
+
+**Behaviour:** `eval(llm_response, {"df": df})`, converts result to string. Calls `_update_iteration_count` after each successful eval so the progress bar stays current. On exception, marks `is_error=True` and routes back to plan_action for self-correction.
 
 ### `finalize`
 **Reads from state:** `llm_response` (after stripping `FINAL ANSWER:` prefix)
@@ -94,7 +103,7 @@ force_finalize → END
 
 ## Termination Signal
 
-`FINAL ANSWER:` prefix (case-insensitive). `plan_action` router checks `llm_response.strip().upper().startswith("FINAL ANSWER:")`. If yes → strip prefix → set `answer` → route to `finalize`.
+`FINAL ANSWER:` substring (case-insensitive). `plan_action` router checks `"FINAL ANSWER:" in llm_response.upper()`. If found → extract text after the marker → set `answer` → route to `finalize`. This tolerates models that embed `FINAL ANSWER:` after preamble rather than strictly at the start.
 
 ## Max Iterations
 
@@ -108,11 +117,14 @@ force_finalize → END
 
 ## Setup / Cleanup
 
-- `setup` loads CSV via `pandas.read_csv(dataset.file_path)`, stores DataFrame in `_dataframes: dict[str, pd.DataFrame]` module-level dict keyed by `run_id`
-- `finalize` and `handle_error` both pop `run_id` from `_dataframes` (release memory)
+- `setup` checks `_session_cache[session_id][dataset_id]` first (C27). On hit, reuses the cached DataFrame. On miss, loads from `parquet_path` (preferred) or `file_path` (CSV fallback), then stores in `_session_cache` and the per-run `_dataframes[run_id]` dict.
+- Single-turn queries (no `session_id`) bypass the session cache and use `_dataframes[run_id]` only.
+- `finalize` and `handle_error` both pop `run_id` from `_dataframes` (release run-scoped memory). The session cache (`_session_cache`) is not cleared on finalize — it persists across turns in the same session and is only evicted by LRU pressure or `DELETE /sessions/{id}`.
 
 ## Stub Provider
 
 When `DATA_ANALYST_GEMINI_API_KEY` is not set (and no other provider is configured), the stub LLM branches on the prompt tag:
-- `<node:plan>` — First call: returns `df.describe().to_string()` (a real pandas expression). Second call: returns `FINAL ANSWER: [stub] The dataset has {N} rows and {M} columns based on df.describe().`. Never returns identical output on two consecutive calls (iteration distinguishes them).
-- `<node:finalize>` — Returns a canned best-effort summary: `Based on the work done, here is a partial summary: [stub] The analysis reached the iteration limit. The dataset was loaded and partial results were computed.`
+- `<node:finalize>` — Returns a canned best-effort summary: `**[stub mode — best-effort summary]**\n\nThe analysis loop ended before a definitive answer was reached. Set DATA_ANALYST_GEMINI_API_KEY in your .env for real analysis.`
+- `<node:select>` — Extracts the first dataset ID from the schema block (regex `\(id: ([^)]+)\)`) and returns it as a one-element JSON array; returns `[]` if none found.
+- `<node:plan>` — First call (iteration 0): returns `df.describe().to_string()` (a real pandas expression). Second call: returns a `FINAL ANSWER:` Markdown summary beginning `FINAL ANSWER: **[stub mode]** Here is a summary of your dataset:` (bullet list + a small Status/Iterations table). Iteration is counted from the number of `Result:`/`Error:` markers in the prompt, so consecutive calls never return identical output.
+- Fall-through (no recognised tag, e.g. `<node:clarify>`): when the `<node:plan>` tag is absent the stub returns `FINAL ANSWER: [stub] Unable to process — missing plan tag.`

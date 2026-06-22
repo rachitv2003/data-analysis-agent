@@ -27,7 +27,7 @@ A dark-background widget in the top-right column of the UI shows:
 **This session** (in-memory, `sessionStorage`):
 - Tokens in / Tokens out / Queries / Est. cost
 
-**Today (UTC)** (from `GET /stats/daily`):
+**Today (server local timezone)** (from `GET /stats/daily`):
 - Tokens in / Tokens out / Queries / Est. cost
 
 **Storage:**
@@ -35,7 +35,7 @@ A dark-background widget in the top-right column of the UI shows:
 
 ### Daily Stats Endpoint
 
-`GET /stats/daily` — aggregates `query_runs` where `status = 'completed'` and `DATE(created_at) = <today UTC>`. Returns `date`, `model`, `tokens_input`, `tokens_output`, `query_count`. Always returns 200 with zero values if no completed runs exist today.
+`GET /stats/daily` — aggregates `query_runs` where `status = 'completed'` and the run's `created_at`, converted to the **server local timezone**, falls on today's local calendar day. The endpoint computes today via `datetime.now().date()` (server local) and filters with `DATE(DATETIME(created_at, 'localtime')) = <today>`, so stored UTC timestamps are converted to local time before comparison. Returns `date`, `model`, `tokens_input`, `tokens_output`, `query_count`, and `context_limit` (the active model's context-window size in tokens; see 05-api.md). Always returns 200 with zero values if no completed runs exist today.
 
 ### Cost Estimation
 

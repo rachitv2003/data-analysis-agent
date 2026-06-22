@@ -53,7 +53,39 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     # Incremental migrations — add columns that create_all won't add to existing tables
     with engine.connect() as conn:
-        existing = {row[1] for row in conn.execute(text("PRAGMA table_info(conversation_sessions)"))}
-        if "name" not in existing:
-            conn.execute(text("ALTER TABLE conversation_sessions ADD COLUMN name TEXT"))
-            conn.commit()
+        sess_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(conversation_sessions)"))}
+        _sess_migrations = [
+            ("name", "TEXT"),
+            ("dataset_ids_json", "TEXT"),
+        ]
+        for col, definition in _sess_migrations:
+            if col not in sess_cols:
+                conn.execute(text(f"ALTER TABLE conversation_sessions ADD COLUMN {col} {definition}"))
+        conn.commit()
+
+        ds_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(datasets)"))}
+        _ds_migrations = [
+            # SQLite ALTER TABLE only allows constant/NULL defaults; datetime('now') is a function
+            # SQLAlchemy's Python-side default=_now handles new rows; NULLs are tolerated in _stale()
+            ("updated_at", "TIMESTAMP"),
+            ("origin", "TEXT DEFAULT 'uploaded'"),
+            ("derived_from_run_id", "TEXT"),
+            ("derived_from_dataset_ids", "TEXT"),
+            ("derivation_code", "TEXT"),
+            ("parquet_path", "TEXT"),
+            ("auto_notes_status", "TEXT"),   # C30
+            ("context_facts", "TEXT"),        # C31
+        ]
+        for col, definition in _ds_migrations:
+            if col not in ds_cols:
+                conn.execute(text(f"ALTER TABLE datasets ADD COLUMN {col} {definition}"))
+        conn.commit()
+
+        run_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(query_runs)"))}
+        _run_migrations = [
+            ("prompt_breakdown", "TEXT"),     # C29
+        ]
+        for col, definition in _run_migrations:
+            if col not in run_cols:
+                conn.execute(text(f"ALTER TABLE query_runs ADD COLUMN {col} {definition}"))
+        conn.commit()

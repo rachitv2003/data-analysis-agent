@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, UploadFile, File, Form, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, UploadFile, File, Form, Depends, Query
 from sqlalchemy.orm import Session
 
 from data_analyst.api._common import ok, api_error
@@ -18,6 +18,7 @@ _NOTES_EXTS = {".txt", ".md"}
 
 @router.post("/upload")
 def upload_file(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     context: str = Form(default=""),
     notes_file: Optional[UploadFile] = File(default=None),
@@ -103,6 +104,7 @@ def upload_file(
     upload_dir = Path(get_settings().upload_dir)
     upload_dir.mkdir(exist_ok=True)
 
+    has_user_notes = bool(context.strip())
     dataset = DatasetRow(
         filename=file.filename,
         file_path="",
@@ -112,6 +114,7 @@ def upload_file(
         content_hash=content_hash,
         format=fmt,
         context=context.strip() or None,
+        origin="uploaded",
     )
     session.add(dataset)
     session.flush()
@@ -120,11 +123,25 @@ def upload_file(
     df.to_csv(dest, index=False)
     dataset.file_path = str(dest.resolve())
 
+    # C27: write Parquet for fast reloading; non-fatal on failure
+    try:
+        parquet_dest = upload_dir / f"{dataset.id}.parquet"
+        df.to_parquet(parquet_dest, engine="pyarrow", index=False)
+        dataset.parquet_path = str(parquet_dest.resolve())
+    except Exception:
+        pass
+
+    # C31: if user supplied notes on upload, compress them immediately
+    if has_user_notes:
+        from data_analyst.graph.compress import compress_dataset_context
+        background_tasks.add_task(compress_dataset_context, dataset.id)
+
     return ok({
         "dataset_id": dataset.id,
         "filename": file.filename,
         "format": fmt,
         "context": dataset.context or "",
+        "auto_notes_status": dataset.auto_notes_status,
         "row_count": len(df),
         "col_count": len(df.columns),
         "columns": df.columns.tolist(),

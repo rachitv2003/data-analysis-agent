@@ -63,11 +63,9 @@ The repo root **is** the agent project. There is no `<agent-slug>/` subdirectory
 │       │   └── providers/
 │       │       ├── base.py           ← abstract LLMProvider
 │       │       ├── factory.py        ← create_llm_client()
-│       │       └── anthropic.py      ← default provider
-│       ├── tools/                    ← pure functions: (inputs) → domain models
-│       │   └── <tool>.py
-│       ├── prompts/                  ← LLM prompt templates (.md files)
-│       │   └── <name>.md
+│       │       ├── gemini.py         ← Gemini provider
+│       │       ├── openrouter.py     ← OpenRouter provider
+│       │       └── stub.py           ← stub / test provider
 │       └── observability/
 │           ├── __init__.py
 │           └── events.py             ← structlog configuration
@@ -77,8 +75,7 @@ The repo root **is** the agent project. There is no `<agent-slug>/` subdirectory
 │   │   ├── test_smoke.py             ← import pkg; assert __version__
 │   │   ├── config/test_settings.py
 │   │   ├── db/test_models.py
-│   │   ├── domain/test_models.py
-│   │   └── graph/test_agent.py       ← graph compiles without env vars
+│   │   └── domain/test_models.py
 │   └── integration/
 │       └── test_pipeline.py          ← stub run, one DB record, status=completed
 ├── alembic/

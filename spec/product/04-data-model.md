@@ -13,7 +13,7 @@ SQLite via SQLAlchemy 2.0 ORM (`DeclarativeBase`). File at `data_analyst.db`. Sc
 Metadata about an uploaded file.
 
 | Column | SQLAlchemy type | Nullable | Default | Description |
-|--------|----------------|----------|---------|-------------|
+| ------ | --------------- | -------- | ------- | ----------- |
 | `id` | TEXT PK | no | `uuid4()` | UUID |
 | `filename` | TEXT | no | — | Original filename from the upload |
 | `file_path` | TEXT | no | — | Absolute path to the saved CSV on disk |
@@ -21,27 +21,36 @@ Metadata about an uploaded file.
 | `col_count` | INTEGER | no | — | Number of columns |
 | `columns_json` | TEXT | no | — | JSON array of column name strings |
 | `content_hash` | TEXT | no | `""` | SHA-256 hex digest of raw uploaded bytes (empty string for rows created before C10) |
-| `format` | TEXT | no | `"csv"` | Source format: `csv`, `tsv`, `txt`, or `json` |
+| `format` | TEXT | no | `"csv"` | Source format: `csv`, `tsv`, `txt`, `json`, or `excel` |
 | `context` | TEXT | yes | NULL | User-provided notes injected into prompts (max 4 000 chars) |
+| `origin` | TEXT | no | `"uploaded"` | `"uploaded"` or `"derived"` — distinguishes user-uploaded from agent-materialised datasets |
+| `derived_from_run_id` | TEXT | yes | NULL | `query_runs.id` of the run that produced this dataset; NULL for uploaded datasets |
+| `derived_from_dataset_ids` | TEXT | yes | NULL | JSON array of parent `dataset_id`s used to produce this dataset; NULL for uploaded |
+| `derivation_code` | TEXT | yes | NULL | The pandas expression that produced this dataset; NULL for uploaded |
+| `parquet_path` | TEXT | yes | NULL | Absolute path to the pre-converted Parquet file (`uploads/{id}.parquet`); NULL if conversion failed or not yet run (C27) |
+| `auto_notes_status` | TEXT | yes | NULL | C30: `"pending"` while notes generation task runs; `"done"` on success; `"failed"` on error; NULL until first generation is triggered |
+| `context_facts` | TEXT | yes | NULL | C31: JSON array of extracted fact strings distilled from `context`; NULL until first C31 compression completes |
 | `created_at` | TIMESTAMP(tz) | no | `now(UTC)` | UTC creation timestamp |
+| `updated_at` | TIMESTAMP(tz) | no | `now(UTC)` | UTC; `onupdate=_now` — set by Clean and re-derive operations |
 
 ### `query_runs`
 
 A single question/answer pair produced by one agent invocation.
 
 | Column | SQLAlchemy type | Nullable | Default | Description |
-|--------|----------------|----------|---------|-------------|
+| ------ | --------------- | -------- | ------- | ----------- |
 | `id` | TEXT PK | no | `uuid4()` | UUID |
 | `dataset_id` | TEXT | no | — | Primary dataset (first ID; backward compat) |
 | `session_id` | TEXT | yes | NULL | `conversation_sessions.id`; null for single-turn runs |
 | `question` | TEXT | no | — | User's natural language question |
 | `answer` | TEXT | yes | NULL | Agent's final answer in Markdown; null while running |
-| `status` | TEXT | no | `"pending"` | `pending`, `running`, `completed`, or `failed` |
+| `status` | TEXT | no | `"pending"` | `pending`, `running`, `completed`, `failed`, or `clarification` |
 | `error_message` | TEXT | yes | NULL | Set on failure or force-finalize (`"max_iterations"`, `"consecutive_errors"`) |
 | `action_history` | TEXT | yes | NULL | JSON array of `{action, result, is_error}` objects |
 | `iteration_count` | INTEGER | no | `0` | ReAct iterations completed; written mid-run for progress polling |
 | `tokens_input` | INTEGER | no | `0` | Total prompt tokens across all LLM calls for this run |
 | `tokens_output` | INTEGER | no | `0` | Total completion tokens across all LLM calls for this run |
+| `prompt_breakdown` | TEXT | yes | NULL | C29: JSON object with per-component token counts for the last plan_action call in this run |
 | `dataset_ids_json` | TEXT | yes | NULL | JSON array of all session dataset IDs; null for single-dataset runs |
 | `selector_reasoning` | TEXT | yes | NULL | Raw LLM output from C19 selector call; null when selection was skipped |
 | `created_at` | TIMESTAMP(tz) | no | `now(UTC)` | UTC creation timestamp |
@@ -52,7 +61,7 @@ A single question/answer pair produced by one agent invocation.
 A session groups multiple `query_runs` into a conversation thread.
 
 | Column | SQLAlchemy type | Nullable | Default | Description |
-|--------|----------------|----------|---------|-------------|
+| ------ | --------------- | -------- | ------- | ----------- |
 | `id` | TEXT PK | no | `uuid4()` | UUID |
 | `dataset_id` | TEXT | no | — | Primary dataset (backward compat; always `dataset_ids[0]`) |
 | `dataset_ids_json` | TEXT | yes | NULL | JSON array of all session dataset IDs; null for single-dataset sessions |
@@ -65,10 +74,18 @@ A session groups multiple `query_runs` into a conversation thread.
 Single-row key-value store for app-wide configuration and persistent memory.
 
 | Column | SQLAlchemy type | Nullable | Default | Description |
-|--------|----------------|----------|---------|-------------|
-| `key` | TEXT PK | no | — | Setting key (e.g. `global_memory`) |
+| ------ | --------------- | -------- | ------- | ----------- |
+| `key` | TEXT PK | no | — | Setting key (e.g. `global_memory`, `global_memory_facts`) |
 | `value` | TEXT | yes | NULL | Setting value |
 | `updated_at` | TIMESTAMP(tz) | no | `now(UTC)` | UTC; `onupdate=_now` |
+
+**Reserved setting keys:**
+
+| Key | Description |
+| --- | ----------- |
+| `global_memory` | User's global persistent memory text (C12) |
+| `global_memory_facts` | C31: JSON array of facts extracted from `global_memory`; NULL until first compression |
+| `llm_model` | Active LLM model name — read by `GET /stats/daily` |
 
 ---
 
@@ -79,12 +96,13 @@ Single-row key-value store for app-wide configuration and persistent memory.
 - `conversation_sessions.dataset_id` → `datasets.id` (many-to-one)
 - A dataset may have many sessions and many runs
 - A session has many runs (turns), ordered by `created_at`
+- A derived dataset references its producing run via `derived_from_run_id` and its parent datasets via `derived_from_dataset_ids` (no FK constraint in SQLite; enforced in code)
 
 ---
 
 ## Data Lifecycle
 
 - Datasets persist indefinitely (no TTL).
-- Deleting a dataset cascades to its sessions and runs and deletes the CSV file from disk.
-- `query_runs.status` transitions: `pending` → `running` → `completed` | `failed`.
+- Deleting a dataset cascades to its sessions, runs, and CSV file on disk. Deleting a source dataset also recursively deletes all derived datasets whose `derived_from_dataset_ids` contains the deleted ID (and their derived children in turn).
+- `query_runs.status` transitions: `pending` → `running` → `completed` | `failed`. A separate non-terminal `clarification` state is also possible: during a C26 pre-flight clarification, `POST /ask` creates a thin `QueryRunRow` with `status="clarification"` (carrying the clarification prompt as its `answer`) and does not advance it — the user's clarified question produces a distinct answer run.
 - CSV files in `uploads/` are the source of truth for DataFrames; `DatasetRow.file_path` is the pointer.

@@ -65,9 +65,16 @@ def get_session_turns(
         .all()
     )
 
+    # C28: resolve dataset_ids for Database tab session scoping
+    if sess.dataset_ids_json:
+        dataset_ids = _json.loads(sess.dataset_ids_json)
+    else:
+        dataset_ids = [sess.dataset_id]
+
     return ok({
         "session_id": sess.id,
         "dataset_id": sess.dataset_id,
+        "dataset_ids": dataset_ids,
         "name": sess.name,
         "turns": [
             {
@@ -82,6 +89,7 @@ def get_session_turns(
                 "is_best_effort": r.error_message in ("max_iterations", "consecutive_errors"),
                 "steps": _json.loads(r.action_history) if r.action_history else [],
                 "created_at": r.created_at.isoformat(),
+                "prompt_breakdown": _json.loads(r.prompt_breakdown) if r.prompt_breakdown else None,
             }
             for r in turns
         ],
@@ -111,11 +119,25 @@ def delete_session(
         raise api_error("session_not_found", f"Session {session_id} not found.", 404)
     session.query(QueryRunRow).filter(QueryRunRow.session_id == session_id).delete()
     session.delete(sess)
+    # C27: evict session DataFrame cache
+    try:
+        from data_analyst.graph.nodes import _evict_session
+        _evict_session(session_id)
+    except Exception:
+        pass
     return ok({"deleted": session_id})
 
 
 @router.delete("/sessions")
 def delete_all_sessions(session: Session = Depends(get_session)):
+    session_ids = [s.id for s in session.query(ConversationSessionRow.id).all()]
     session.query(QueryRunRow).filter(QueryRunRow.session_id.isnot(None)).delete()
     session.query(ConversationSessionRow).delete()
+    # C27: evict all session DataFrame caches
+    try:
+        from data_analyst.graph.nodes import _evict_session
+        for sid in session_ids:
+            _evict_session(sid)
+    except Exception:
+        pass
     return ok({"deleted": "all"})

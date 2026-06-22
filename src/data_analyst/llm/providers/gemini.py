@@ -21,6 +21,27 @@ def _is_rate_limit(exc: Exception) -> bool:
     return "resource_exhausted" in msg or "429" in msg or "quota" in msg
 
 
+def _is_auth_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return (
+        "unauthenticated" in msg
+        or "access_token_type_unsupported" in msg
+        or "api key not valid" in msg
+        or "api_key_invalid" in msg
+        or "permission_denied" in msg
+        or "401" in msg
+        or "403" in msg
+    )
+
+
+_AUTH_HELP = (
+    "Gemini authentication failed — the API key is missing, expired, or the wrong type. "
+    "Gemini API keys start with 'AIzaSy' (a value starting with 'AQ.' is a short-lived OAuth "
+    "token, not an API key). Get a key at https://aistudio.google.com/apikey and set "
+    "DATA_ANALYST_GEMINI_API_KEY in your .env, then restart the server."
+)
+
+
 class GeminiProvider(LLMProvider):
     def __init__(self, api_key: str, model: str) -> None:
         self._client = genai.Client(api_key=api_key)
@@ -43,6 +64,9 @@ class GeminiProvider(LLMProvider):
                 )
             except Exception as exc:
                 last_exc = exc
+                if _is_auth_error(exc):
+                    logger.error("gemini.auth_error", model=self._model)
+                    raise RuntimeError(_AUTH_HELP) from exc
                 if not _is_rate_limit(exc):
                     raise
 

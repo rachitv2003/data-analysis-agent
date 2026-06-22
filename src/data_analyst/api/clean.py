@@ -36,11 +36,11 @@ def _gen_clean_code(df: pd.DataFrame, var: str, instruction: str) -> str:
         f"The DataFrame variable is named `{var}`.\n"
         f"Instruction: {instruction}\n\n"
         "Rules:\n"
-        "- Use only pandas operations on `{var}`\n"
-        "- The last expression must be the cleaned DataFrame (assign to `{var}` and return it, or just return it)\n"
+        f"- Use only pandas operations on `{var}`\n"
+        f"- The last expression must be the cleaned DataFrame (assign to `{var}` and return it, or just return it)\n"
         "- Do NOT write to files or import anything\n"
-        "- If the last line is an assignment like `{var} = ...`, add a final line `{var}` so the result is returned\n"
-    ).format(var=var)
+        f"- If the last line is an assignment like `{var} = ...`, add a final line `{var}` so the result is returned\n"
+    )
 
     llm = _get_llm()
     resp = llm.complete(prompt)
@@ -82,7 +82,11 @@ def preview_clean(
     var = re.sub(r"[^\w]", "_", ds.filename.rsplit(".", 1)[0].lower()).strip("_") or "df"
 
     try:
-        df = pd.read_csv(ds.file_path)
+        from pathlib import Path
+        if ds.parquet_path and Path(ds.parquet_path).exists():
+            df = pd.read_parquet(ds.parquet_path, engine="pyarrow")
+        else:
+            df = pd.read_csv(ds.file_path)
     except Exception as exc:
         raise api_error("read_error", f"Could not read dataset: {exc}", 500)
 
@@ -126,7 +130,11 @@ def apply_clean(
     var = re.sub(r"[^\w]", "_", ds.filename.rsplit(".", 1)[0].lower()).strip("_") or "df"
 
     try:
-        df = pd.read_csv(ds.file_path)
+        from pathlib import Path
+        if ds.parquet_path and Path(ds.parquet_path).exists():
+            df = pd.read_parquet(ds.parquet_path, engine="pyarrow")
+        else:
+            df = pd.read_csv(ds.file_path)
     except Exception as exc:
         raise api_error("read_error", f"Could not read dataset: {exc}", 500)
 
@@ -140,10 +148,26 @@ def apply_clean(
     except Exception as exc:
         raise api_error("write_error", f"Could not save cleaned dataset: {exc}", 500)
 
-    # Update DB metadata
+    # C27: regenerate Parquet after clean (non-fatal)
+    if ds.parquet_path:
+        try:
+            cleaned.to_parquet(ds.parquet_path, engine="pyarrow", index=False)
+        except Exception:
+            pass
+
+    # Update DB metadata and timestamp
+    from datetime import datetime, timezone
     ds.row_count = len(cleaned)
     ds.col_count = len(cleaned.columns)
     ds.columns_json = _json.dumps(cleaned.columns.tolist())
+    ds.updated_at = datetime.now(timezone.utc)
+
+    # C27: evict from session cache so next run reloads fresh data
+    try:
+        from data_analyst.graph.nodes import _invalidate_dataset
+        _invalidate_dataset(dataset_id)
+    except Exception:
+        pass
 
     return ok({
         "row_count": len(cleaned),

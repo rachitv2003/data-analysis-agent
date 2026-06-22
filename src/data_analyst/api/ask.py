@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from data_analyst.api._common import ok, api_error
 from data_analyst.db.session import get_session
-from data_analyst.db.models import DatasetRow, QueryRunRow
+from data_analyst.db.models import DatasetRow, QueryRunRow, ConversationSessionRow
 from data_analyst.graph.nodes import generate_suggestions
 from data_analyst.graph.runner import run_agent
 from data_analyst.graph.selector import select_datasets
@@ -20,6 +20,7 @@ class AskRequest(BaseModel):
     dataset_ids: list[str] | None = None # explicit multi-dataset; if omitted C19 auto-selects
     question: str
     session_id: str | None = None
+    skip_clarification: bool = False     # set by frontend after first clarification response
 
 
 @router.post("/ask")
@@ -37,7 +38,7 @@ def ask_question(
         explicit_ids = [body.dataset_id]
 
     if explicit_ids is not None:
-        # Opt-out path: caller supplied IDs — validate and skip selector
+        # Opt-out path: caller supplied IDs — validate and skip selector + clarification
         for did in explicit_ids:
             if session.get(DatasetRow, did) is None:
                 raise api_error("dataset_not_found", f"Dataset {did} not found.", 404)
@@ -51,6 +52,93 @@ def ask_question(
         if not all_datasets:
             raise api_error("no_datasets", "No datasets uploaded yet.", 400)
         full_ids = [ds.id for ds in all_datasets]
+
+        # When continuing a session, scope the dataset pool to the session's stored datasets.
+        # This prevents a mismatch when new datasets are uploaded after the session started.
+        if body.session_id:
+            sess_row = session.get(ConversationSessionRow, body.session_id)
+            if sess_row:
+                _sess_ids = set(
+                    _json.loads(sess_row.dataset_ids_json) if sess_row.dataset_ids_json
+                    else [sess_row.dataset_id]
+                )
+                _scoped = [ds for ds in all_datasets if ds.id in _sess_ids]
+                if _scoped:
+                    all_datasets = _scoped
+                    full_ids = [ds.id for ds in all_datasets]
+
+        # C26: pre-flight clarification check (fail-open, 60s timeout)
+        history: list[dict] = []
+        if body.session_id:
+            prior_runs = (
+                session.query(QueryRunRow)
+                .filter(
+                    QueryRunRow.session_id == body.session_id,
+                    QueryRunRow.status == "completed",
+                )
+                .order_by(QueryRunRow.created_at)
+                .all()
+            )
+            history = [
+                {"question": r.question, "answer": r.answer or ""}
+                for r in prior_runs[-5:]
+            ]
+
+        datasets_for_clarify = [
+            {
+                "filename": ds.filename,
+                "row_count": ds.row_count,
+                "col_count": ds.col_count,
+                "columns": _json.loads(ds.columns_json),
+            }
+            for ds in all_datasets
+        ]
+
+        from data_analyst.graph.clarify import check_clarification
+        clarify = (
+            check_clarification(body.question, datasets_for_clarify, history)
+            if not body.skip_clarification
+            else type("_", (), {"needs_clarification": False, "question": "", "tokens_input": 0, "tokens_output": 0})()
+        )
+
+        if clarify.needs_clarification:
+            # Resolve or create session for this clarification turn
+            if body.session_id:
+                sess_row = session.get(ConversationSessionRow, body.session_id)
+            else:
+                sess_row = None
+
+            if sess_row is None:
+                primary_id = all_datasets[0].id
+                ds_ids_json = _json.dumps(full_ids) if len(full_ids) > 1 else None
+                sess_row = ConversationSessionRow(
+                    dataset_id=primary_id,
+                    dataset_ids_json=ds_ids_json,
+                )
+                session.add(sess_row)
+                session.flush()
+
+            clarify_run = QueryRunRow(
+                dataset_id=sess_row.dataset_id,
+                session_id=sess_row.id,
+                question=body.question,
+                answer=clarify.question,
+                status="clarification",
+                iteration_count=0,
+                tokens_input=clarify.tokens_input or 0,
+                tokens_output=clarify.tokens_output or 0,
+            )
+            session.add(clarify_run)
+            session.flush()
+            session.commit()
+
+            return ok({
+                "type": "clarification",
+                "run_id": clarify_run.id,
+                "session_id": sess_row.id,
+                "clarification_question": clarify.question,
+            })
+
         sandbox_ids, selector_reasoning, sel_ti, sel_to = select_datasets(body.question, all_datasets)
 
     try:
@@ -89,12 +177,26 @@ def ask_question(
 
     is_best_effort = run.error_message in ("max_iterations", "consecutive_errors")
     steps = _json.loads(run.action_history) if run.action_history else []
-    suggested_questions = generate_suggestions(body.question, answer_md)
+    derived_dataset_ids = [
+        r.id for r in session.query(DatasetRow).filter(
+            DatasetRow.derived_from_run_id == run_id
+        ).all()
+    ]
+    suggested_questions, sug_ti, sug_to = generate_suggestions(body.question, answer_md)
+
+    # Add suggestion-call tokens to the run totals
+    if sug_ti or sug_to:
+        run.tokens_input = (run.tokens_input or 0) + sug_ti
+        run.tokens_output = (run.tokens_output or 0) + sug_to
+        session.add(run)
+        session.commit()
 
     return ok({
+        "type": "answer",
         "run_id": run.id,
         "session_id": session_id,
         "dataset_ids": sandbox_ids,
+        "derived_dataset_ids": derived_dataset_ids,
         "datasets_used": datasets_used,
         "selector_reasoning": run.selector_reasoning,
         "answer_markdown": answer_md,
@@ -106,4 +208,5 @@ def ask_question(
         "is_best_effort": is_best_effort,
         "steps": steps,
         "suggested_questions": suggested_questions,
+        "prompt_breakdown": _json.loads(run.prompt_breakdown) if run.prompt_breakdown else None,
     })

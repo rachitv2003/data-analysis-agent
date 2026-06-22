@@ -20,7 +20,10 @@ def list_dataset_sessions(
 
     sessions = (
         session.query(ConversationSessionRow)
-        .filter(ConversationSessionRow.dataset_id == dataset_id)
+        .filter(
+            (ConversationSessionRow.dataset_id == dataset_id) |
+            ConversationSessionRow.dataset_ids_json.contains(f'"{dataset_id}"')
+        )
         .order_by(ConversationSessionRow.updated_at.desc())
         .all()
     )
@@ -40,6 +43,7 @@ def list_dataset_sessions(
         )
         result.append({
             "session_id": s.id,
+            "name": s.name,
             "created_at": s.created_at.isoformat(),
             "updated_at": s.updated_at.isoformat(),
             "turn_count": turn_count or 0,

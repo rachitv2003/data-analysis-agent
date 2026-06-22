@@ -29,9 +29,15 @@ def parse_file(raw: bytes, fmt: str) -> pd.DataFrame:
         except Exception as exc:
             raise ValueError(f"Could not parse Excel file: {exc}") from exc
     if fmt == "csv":
-        return pd.read_csv(io.BytesIO(raw), encoding="utf-8", encoding_errors="replace")
+        try:
+            return pd.read_csv(io.BytesIO(raw), encoding="utf-8", encoding_errors="replace")
+        except Exception as exc:
+            raise ValueError(f"Could not parse CSV file: {exc}") from exc
     if fmt == "tsv":
-        return pd.read_csv(io.BytesIO(raw), sep="\t", encoding="utf-8", encoding_errors="replace")
+        try:
+            return pd.read_csv(io.BytesIO(raw), sep="\t", encoding="utf-8", encoding_errors="replace")
+        except Exception as exc:
+            raise ValueError(f"Could not parse TSV file: {exc}") from exc
     if fmt == "txt":
         try:
             return pd.read_csv(
