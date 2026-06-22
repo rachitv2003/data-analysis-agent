@@ -747,7 +747,8 @@
     if (ctx) fd.append('context', ctx);
     try {
       const resp = await fetch(force?'/upload?force=true':'/upload', {method:'POST',body:fd});
-      const body = await resp.json();
+      let body;
+      try { body = await resp.json(); } catch { body = {detail:{message: resp.statusText||'Server error'}}; }
       if (resp.status === 409) {
         const det = body.detail;
         _qst(qIdx,'⚠','#d97706');

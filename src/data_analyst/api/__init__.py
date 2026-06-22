@@ -1,7 +1,8 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -22,6 +23,13 @@ async def _lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Data Analysis Agent", version="0.1.0", lifespan=_lifespan)
+
+    @app.exception_handler(Exception)
+    async def _unhandled_exception(request: Request, exc: Exception):
+        return JSONResponse(
+            status_code=500,
+            content={"detail": {"code": "internal_error", "message": str(exc)}},
+        )
 
     from data_analyst.api import health, upload, ask, datasets, sessions, dataset_sessions, stats, runs, memory, clean, ui
     app.include_router(health.router)
