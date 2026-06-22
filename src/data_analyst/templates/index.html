@@ -953,7 +953,6 @@
         }
         if (!getSelectedDatasetIds().length) {
           startNewSession();
-          document.getElementById('dataset-notes-panel').style.display = 'none';
         }
         _updateStorageStat();
         announce('Dataset deleted');
@@ -1016,7 +1015,6 @@
         document.getElementById('clear-all-btn').style.display = 'none';
         document.getElementById('select-all-btn').style.display = 'none';
         startNewSession();
-        document.getElementById('dataset-notes-panel').style.display = 'none';
         document.getElementById('session-list').innerHTML =
           '<div id="no-sessions-msg" class="empty-msg">No sessions yet</div>';
         _updateStorageStat();
@@ -1073,7 +1071,6 @@
     const delBtn = document.getElementById('ds-del-sel-btn');
     if (delBtn) delBtn.style.display = 'none';
     startNewSession();
-    document.getElementById('dataset-notes-panel').style.display = 'none';
     _updateStorageStat();
     await loadSessionList();
     announce('Selected datasets deleted');
@@ -1874,6 +1871,62 @@
   }
 
   // ── ER schema diagram ─────────────────────────────────────────────────────
+  // ── Shared FK inference — used by BOTH the ER diagram edges and the right-panel
+  //    PK/FK badges so the two can never disagree ──────────────────────────────
+  const _ER_GENERIC=new Set(['id','name','date','value','type','status','city','state',
+    'description','title','count','price','category','code','year','month','day','time',
+    'timestamp','created_at','updated_at','quantity','amount','label','key','total']);
+  function _erCols(d){ return d.columns_schema||(d.columns||[]).map(c=>({name:c,dtype:'?'})); }
+  function _erNormKey(name){
+    const n=(name||'').toLowerCase();
+    if(n.endsWith('zip_code_prefix')) return 'zip_code_prefix'; // family → one logical key
+    if(n.endsWith('_id')) return n;                             // id key by exact name
+    if(n==='id'||_ER_GENERIC.has(n)) return null;               // too generic to be an FK
+    return n;                                                   // specific non-id column
+  }
+  function _erKeyNoun(key){
+    if(key==='zip_code_prefix') return 'geolocation';
+    return key.replace(/_id$/,'').split('_')[0];
+  }
+  // Returns FK links among uploaded tables:
+  //   { from(parent/canonical/PK), to(child/FK), key, fromCol, toCol }
+  function _erFkLinks(datasets){
+    const uploaded=datasets.filter(d=>d.origin!=='derived');
+    const fnOf=id=>{ const ds=datasets.find(d=>d.dataset_id===id); return (ds?.filename||'').toLowerCase().replace(/\.(csv|parquet|tsv|json)$/i,''); };
+    const colMap={}, colNameOf={};
+    uploaded.forEach(d=>{
+      const seen=new Set();
+      _erCols(d).forEach(c=>{
+        if(!c.name) return;
+        const k=_erNormKey(c.name);
+        if(!k||seen.has(k)) return;
+        seen.add(k);
+        (colMap[k]=colMap[k]||[]).push(d.dataset_id);
+        (colNameOf[k]=colNameOf[k]||{})[d.dataset_id]=c.name;
+      });
+    });
+    // Canonical (PK-owning) hub: prefer the table whose filename contains the FULL
+    // key (product_category_name → product_category_name_translation), else the
+    // entity noun (order_id → "order" → olist_orders_*; zip → "geolocation").
+    function findCanonical(key,ids){
+      const full=ids.find(id=>fnOf(id).includes(key));
+      if(full) return full;
+      const noun=_erKeyNoun(key);
+      return ids.find(id=>fnOf(id).includes(noun));
+    }
+    const drawn=new Set(), links=[];
+    function push(from,to,key){
+      const k=[from,to].sort().join('|'); if(drawn.has(k)) return; drawn.add(k);
+      links.push({from,to,key,fromCol:colNameOf[key]?.[from],toCol:colNameOf[key]?.[to]});
+    }
+    Object.entries(colMap).filter(([,ids])=>ids.length>=2).forEach(([key,ids])=>{
+      const canonical=findCanonical(key,ids);
+      if(canonical) ids.filter(id=>id!==canonical).forEach(o=>push(canonical,o,key));
+      else for(let i=0;i<ids.length;i++) for(let j=i+1;j<ids.length;j++) push(ids[i],ids[j],key);
+    });
+    return links;
+  }
+
   function renderERDiagram(datasets) {
     const svgEl = document.getElementById('lineage-svg');
     svgEl.innerHTML = '';
@@ -1886,6 +1939,10 @@
     }
 
     const CW=180, H_HDR=28, H_ROW=18, MAX_ROWS=8;
+
+    // The Schema pane is wide; capture its aspect ratio so the layout can fill it.
+    const _pr=svgEl.getBoundingClientRect();
+    const paneAspect=(_pr.width>40&&_pr.height>40)?_pr.width/_pr.height:1.7;
 
     function getCols(d){ return d.columns_schema||(d.columns||[]).map(c=>({name:c,dtype:'?'})); }
     function cardH(d){ const n=getCols(d); const vis=Math.min(n.length,MAX_ROWS); return H_HDR+vis*H_ROW+(n.length>MAX_ROWS?H_ROW:0)+4; }
@@ -1906,43 +1963,9 @@
     const uploaded=datasets.filter(d=>d.origin!=='derived');
     const derived=datasets.filter(d=>d.origin==='derived');
 
-    // FK inference: columns ending in _id shared by exactly 2 uploaded tables
-    const colMap={};
-    uploaded.forEach(d=>{
-      getCols(d).forEach(c=>{
-        if(c.name&&c.name.endsWith('_id')){
-          if(!colMap[c.name]) colMap[c.name]=[];
-          if(!colMap[c.name].includes(d.dataset_id)) colMap[c.name].push(d.dataset_id);
-        }
-      });
-    });
-    // Find the "canonical" (PK-owning) table for a shared _id column:
-    // it's the one whose filename contains the bare noun (order_id → "order" → olist_orders_*)
-    function findCanonical(col, ids){
-      const base=col.replace(/_id$/,'');
-      return ids.find(id=>{
-        const ds=datasets.find(d=>d.dataset_id===id);
-        const fn=(ds?.filename||'').toLowerCase().replace(/\.(csv|parquet|tsv|json)$/i,'');
-        return fn.includes(base);
-      });
-    }
-    const drawnPairs=new Set(), fkLinks=[];
-    Object.entries(colMap).filter(([,ids])=>ids.length>=2).forEach(([col,ids])=>{
-      const canonical=findCanonical(col,ids);
-      if(canonical){
-        // Star: canonical → every other table that shares the column
-        ids.filter(id=>id!==canonical).forEach(other=>{
-          const k=[canonical,other].sort().join('|');
-          if(!drawnPairs.has(k)){drawnPairs.add(k); fkLinks.push({from:canonical,to:other,col});}
-        });
-      } else {
-        // Fallback: all pairs when no canonical table found
-        for(let i=0;i<ids.length;i++) for(let j=i+1;j<ids.length;j++){
-          const k=[ids[i],ids[j]].sort().join('|');
-          if(!drawnPairs.has(k)){drawnPairs.add(k); fkLinks.push({from:ids[i],to:ids[j],col});}
-        }
-      }
-    });
+    // FK links — shared inference (see _erFkLinks above); the right-panel badges
+    // use the same function so edges and badges always agree.
+    const fkLinks=_erFkLinks(datasets);
 
     // All edges for force simulation
     const allEdges=[...fkLinks.map(l=>({a:l.from,b:l.to}))];
@@ -2024,68 +2047,143 @@
     const minY=Math.min(...Object.values(pos).map(p=>p.y));
     Object.values(pos).forEach(p=>{p.x=Math.round(p.x-minX+20); p.y=Math.round(p.y-minY+20);});
 
+    // Horizontal fill: the Schema pane is wide, so widen a too-tall layout to use
+    // the horizontal space. Stretching x-positions (cards keep fixed size) only
+    // increases horizontal gaps — it can never introduce overlaps.
+    {
+      const cW=Math.max(...datasets.map(d=>pos[d.dataset_id].x+CW));
+      const cH=Math.max(...datasets.map(d=>pos[d.dataset_id].y+cardH(d)));
+      const contentAspect=cW/Math.max(cH,1);
+      if(paneAspect>contentAspect*1.05){
+        const sx=Math.min(paneAspect/contentAspect, 1.85);
+        datasets.forEach(d=>{ pos[d.dataset_id].x=Math.round(20+(pos[d.dataset_id].x-20)*sx); });
+      }
+    }
+
     // Store content bounds for fit-to-viewport
     _dagContentW=Math.max(...datasets.map(d=>pos[d.dataset_id].x+CW))+20;
     _dagContentH=Math.max(...datasets.map(d=>pos[d.dataset_id].y+cardH(d)))+20;
 
-    // ── Edge routing helpers ───────────────────────────────────────────────
-    function cardCenter(id){
-      const p=pos[id], d=datasets.find(x=>x.dataset_id===id);
-      return {x:p.x+CW/2, y:p.y+(d?cardH(d):100)/2};
+    // ── Edge routing: column-anchored orthogonal connectors ────────────────
+    const STUB=16, CORNER=6, FK_COLOR='#94a3b8', FK_HI='#2563eb', DRV_COLOR='#22c55e', DRV_HI='#16a34a';
+    const edgeRegistry=[];           // {els, label, from, to, kind} — for hover highlight
+    const edgeLabels=[];             // label <g>s, appended above cards
+    const cardRegistry={};           // dataset_id → card <g>
+    const neighbors={};              // dataset_id → Set(connected ids)
+    datasets.forEach(d=>neighbors[d.dataset_id]=new Set());
+
+    function cardCX(id){ return pos[id].x+CW/2; }
+    // local y of a column's row centre; clamps hidden columns to the "+more" row
+    function rowCenterY(d,colName){
+      const cols=getCols(d);
+      const idx=cols.findIndex(c=>(c.name||'')===colName);
+      const visRows=Math.min(cols.length,MAX_ROWS);
+      if(idx>=0&&idx<MAX_ROWS) return H_HDR+idx*H_ROW+H_ROW/2;
+      if(cols.length>MAX_ROWS) return H_HDR+visRows*H_ROW+H_ROW/2;
+      return (H_HDR+visRows*H_ROW)/2;
     }
-    // Return the point on card id's boundary on the ray from its center toward (tx,ty)
-    function cardEdgePoint(id,tx,ty){
-      const p=pos[id], d=datasets.find(x=>x.dataset_id===id);
-      const h=d?cardH(d):100;
-      const cx=p.x+CW/2, cy=p.y+h/2;
-      const dx=tx-cx, dy=ty-cy;
-      if(Math.abs(dx)<0.01&&Math.abs(dy)<0.01) return {x:cx,y:p.y,dir:'top'};
-      let bestT=Infinity, dir='right', ex=cx, ey=cy;
-      if(dx>0.01){const t=(CW/2)/dx; if(t<bestT){bestT=t;dir='right';ex=cx+CW/2;ey=cy+dy*t;}}
-      if(dx<-0.01){const t=(CW/2)/(-dx); if(t<bestT){bestT=t;dir='left';ex=cx-CW/2;ey=cy+dy*t;}}
-      if(dy>0.01){const t=(h/2)/dy; if(t<bestT){bestT=t;dir='bottom';ex=cx+dx*t;ey=cy+h/2;}}
-      if(dy<-0.01){const t=(h/2)/(-dy); if(t<bestT){bestT=t;dir='top';ex=cx+dx*t;ey=cy-h/2;}}
-      return {x:ex,y:ey,dir};
+    function anchor(id,side,localY){
+      const p=pos[id];
+      return {id,side,x:side==='right'?p.x+CW:p.x,y:p.y+localY};
     }
-    // Control point extending outward from a card edge point
-    function ctrlPt(ep,dist){
-      if(ep.dir==='right')  return {x:ep.x+dist,y:ep.y};
-      if(ep.dir==='left')   return {x:ep.x-dist,y:ep.y};
-      if(ep.dir==='bottom') return {x:ep.x,y:ep.y+dist};
-      return {x:ep.x,y:ep.y-dist};
-    }
-    function drawEdge(fromId,toId,color,dashed,label,markerId){
-      if(!pos[fromId]||!pos[toId]) return;
-      const fc=cardCenter(toId), tc=cardCenter(fromId);
-      const ep1=cardEdgePoint(fromId,fc.x,fc.y);
-      const ep2=cardEdgePoint(toId,tc.x,tc.y);
-      const edgeDist=Math.sqrt((ep1.x-ep2.x)**2+(ep1.y-ep2.y)**2);
-      const ctrl=Math.min(80,edgeDist*0.38)+20;
-      const c1=ctrlPt(ep1,ctrl), c2=ctrlPt(ep2,ctrl);
-      const path=document.createElementNS(ns,'path');
-      path.setAttribute('d',`M${ep1.x},${ep1.y} C${c1.x},${c1.y} ${c2.x},${c2.y} ${ep2.x},${ep2.y}`);
-      path.setAttribute('stroke',color); path.setAttribute('stroke-width','1.5');
-      path.setAttribute('fill','none');
-      if(dashed) path.setAttribute('stroke-dasharray','5,3');
-      path.setAttribute('marker-end',`url(#${markerId})`);
-      g.appendChild(path);
-      if(label){
-        // Bezier midpoint at t=0.5
-        const mx=0.125*ep1.x+0.375*c1.x+0.375*c2.x+0.125*ep2.x;
-        const my=0.125*ep1.y+0.375*c1.y+0.375*c2.y+0.125*ep2.y;
-        const lw=label.length*5+8;
-        const bg=document.createElementNS(ns,'rect');
-        bg.setAttribute('x',mx-lw/2); bg.setAttribute('y',my-8);
-        bg.setAttribute('width',lw); bg.setAttribute('height',12);
-        bg.setAttribute('fill','white'); bg.setAttribute('rx','2');
-        bg.setAttribute('stroke','#e2e8f0'); bg.setAttribute('stroke-width','0.5');
-        g.appendChild(bg);
-        const lbl=document.createElementNS(ns,'text');
-        lbl.setAttribute('x',mx); lbl.setAttribute('y',my+1);
-        lbl.setAttribute('text-anchor','middle'); lbl.setAttribute('font-size','8');
-        lbl.setAttribute('fill','#64748b'); lbl.style.pointerEvents='none';
-        lbl.textContent=label; g.appendChild(lbl);
+    // nudge a vertical run at x out of any card it would otherwise cross
+    function dodgeX(x,yTop,yBot,exclude){
+      for(let pass=0;pass<5;pass++){
+        let hit=null;
+        for(const d of datasets){
+          if(exclude.includes(d.dataset_id)) continue;
+          const p=pos[d.dataset_id], h=cardH(d);
+          if(x>p.x-8&&x<p.x+CW+8&&yBot>p.y-8&&yTop<p.y+h+8){ hit={p,h}; break; }
+        }
+        if(!hit) break;
+        const leftX=hit.p.x-STUB, rightX=hit.p.x+CW+STUB;
+        x=(Math.abs(x-leftX)<=Math.abs(x-rightX))?leftX:rightX;
       }
+      return x;
+    }
+    function roundedPath(pts){
+      const P=[];
+      for(const p of pts){ if(!P.length||Math.abs(P[P.length-1][0]-p[0])>0.5||Math.abs(P[P.length-1][1]-p[1])>0.5) P.push(p); }
+      if(P.length<3) return `M${P[0][0]},${P[0][1]} L${P[P.length-1][0]},${P[P.length-1][1]}`;
+      let s=`M${P[0][0].toFixed(1)},${P[0][1].toFixed(1)}`;
+      for(let i=1;i<P.length-1;i++){
+        const a=P[i-1],b=P[i],c=P[i+1];
+        const v1x=b[0]-a[0],v1y=b[1]-a[1],l1=Math.hypot(v1x,v1y)||1;
+        const v2x=c[0]-b[0],v2y=c[1]-b[1],l2=Math.hypot(v2x,v2y)||1;
+        const r1=Math.min(CORNER,l1/2),r2=Math.min(CORNER,l2/2);
+        s+=` L${(b[0]-v1x/l1*r1).toFixed(1)},${(b[1]-v1y/l1*r1).toFixed(1)}`
+          +` Q${b[0].toFixed(1)},${b[1].toFixed(1)} ${(b[0]+v2x/l2*r2).toFixed(1)},${(b[1]+v2y/l2*r2).toFixed(1)}`;
+      }
+      const L=P[P.length-1]; s+=` L${L[0].toFixed(1)},${L[1].toFixed(1)}`;
+      return s;
+    }
+    function mkPath(dStr,color,width,dashed){
+      const path=document.createElementNS(ns,'path');
+      path.setAttribute('d',dStr); path.setAttribute('stroke',color);
+      path.setAttribute('stroke-width',width); path.setAttribute('fill','none');
+      path.setAttribute('stroke-linejoin','round'); path.setAttribute('stroke-linecap','round');
+      if(dashed) path.setAttribute('stroke-dasharray','5,4');
+      return path;
+    }
+    function mkLine(x1,y1,x2,y2,color,width){
+      const ln=document.createElementNS(ns,'line');
+      ln.setAttribute('x1',x1.toFixed(1));ln.setAttribute('y1',y1.toFixed(1));
+      ln.setAttribute('x2',x2.toFixed(1));ln.setAttribute('y2',y2.toFixed(1));
+      ln.setAttribute('stroke',color);ln.setAttribute('stroke-width',width);ln.setAttribute('stroke-linecap','round');
+      return ln;
+    }
+    function elbow(e1,e2,excludeIds){
+      const d1=e1.side==='right'?1:-1, d2=e2.side==='right'?1:-1;
+      const m1x=e1.x+d1*STUB, m2x=e2.x+d2*STUB;
+      let midX=(m1x+m2x)/2;
+      midX=dodgeX(midX,Math.min(e1.y,e2.y),Math.max(e1.y,e2.y),excludeIds);
+      return {pts:[[e1.x,e1.y],[m1x,e1.y],[midX,e1.y],[midX,e2.y],[m2x,e2.y],[e2.x,e2.y]],midX};
+    }
+    // FK edge: parent (canonical, "one") → child ("many"); column-anchored with crow's-foot
+    function drawFkEdge(link){
+      const {from,to,fromCol,toCol,key}=link;
+      if(!pos[from]||!pos[to]) return;
+      const pd=datasets.find(x=>x.dataset_id===from), cd=datasets.find(x=>x.dataset_id===to);
+      const pSide=cardCX(to)>=cardCX(from)?'right':'left';
+      const cSide=cardCX(from)>=cardCX(to)?'right':'left';
+      const e1=anchor(from,pSide,rowCenterY(pd,fromCol));   // parent ("one")
+      const e2=anchor(to,cSide,rowCenterY(cd,toCol));       // child ("many")
+      const {pts,midX}=elbow(e1,e2,[from,to]);
+      const els=[];
+      els.push(g.appendChild(mkPath(roundedPath(pts),FK_COLOR,'1.5',false)));
+      // crow's-foot at child end
+      const d2=cSide==='right'?1:-1, apexX=e2.x+d2*11;
+      els.push(g.appendChild(mkLine(apexX,e2.y,e2.x,e2.y-5,FK_COLOR,'1.5')));
+      els.push(g.appendChild(mkLine(apexX,e2.y,e2.x,e2.y+5,FK_COLOR,'1.5')));
+      // single tick ("one") at parent end
+      const d1=pSide==='right'?1:-1, tickX=e1.x+d1*7;
+      els.push(g.appendChild(mkLine(tickX,e1.y-4,tickX,e1.y+4,FK_COLOR,'1.5')));
+      // hover label on the vertical channel
+      const lblG=document.createElementNS(ns,'g'); lblG.style.opacity='0'; lblG.style.pointerEvents='none';
+      const lw=key.length*5.2+10, ly=(e1.y+e2.y)/2;
+      const bg=document.createElementNS(ns,'rect');
+      bg.setAttribute('x',midX-lw/2);bg.setAttribute('y',ly-7.5);bg.setAttribute('width',lw);bg.setAttribute('height',15);
+      bg.setAttribute('rx','3');bg.setAttribute('fill','#1e293b');lblG.appendChild(bg);
+      const lt=document.createElementNS(ns,'text');
+      lt.setAttribute('x',midX);lt.setAttribute('y',ly+3);lt.setAttribute('text-anchor','middle');
+      lt.setAttribute('font-size','8.5');lt.setAttribute('fill','#fff');
+      lt.textContent=key;lblG.appendChild(lt);
+      edgeLabels.push(lblG);
+      neighbors[from].add(to); neighbors[to].add(from);
+      edgeRegistry.push({els,label:lblG,from,to,kind:'fk'});
+    }
+    function drawDerivedEdge(fromId,toId){
+      if(!pos[fromId]||!pos[toId]) return;
+      const fd=datasets.find(x=>x.dataset_id===fromId), td=datasets.find(x=>x.dataset_id===toId);
+      const pSide=cardCX(toId)>=cardCX(fromId)?'right':'left';
+      const cSide=cardCX(fromId)>=cardCX(toId)?'right':'left';
+      const e1=anchor(fromId,pSide,cardH(fd)/2), e2=anchor(toId,cSide,cardH(td)/2);
+      const {pts}=elbow(e1,e2,[fromId,toId]);
+      const path=mkPath(roundedPath(pts),DRV_COLOR,'1.5',true);
+      path.setAttribute('marker-end','url(#dag-arrow-drv)');
+      g.appendChild(path);
+      neighbors[fromId].add(toId); neighbors[toId].add(fromId);
+      edgeRegistry.push({els:[path],label:null,from:fromId,to:toId,kind:'drv'});
     }
 
     // Defs: arrow markers
@@ -2107,10 +2205,10 @@
     g.id='dag-g';
     g.setAttribute('transform',`translate(${_dagTranslate.x},${_dagTranslate.y}) scale(${_dagScale})`);
 
-    // Edges behind cards
-    fkLinks.forEach(({from,to,col})=>drawEdge(from,to,'#94a3b8',false,col,'dag-arrow-fk'));
+    // Edges behind cards — column-anchored FK connectors, then derived/lineage
+    fkLinks.forEach(drawFkEdge);
     derived.forEach(d=>parentIds(d).forEach(pid=>{
-      if(pos[pid]) drawEdge(pid,d.dataset_id,'#22c55e',true,null,'dag-arrow-drv');
+      if(pos[pid]) drawDerivedEdge(pid,d.dataset_id);
     }));
 
     // Table cards
@@ -2202,7 +2300,41 @@
         mt.textContent=`+ ${cols.length-MAX_ROWS} more`; cg.appendChild(mt);
       }
 
+      cardRegistry[d.dataset_id]=cg;
       g.appendChild(cg);
+    });
+
+    // Edge labels above cards (hidden until hover)
+    edgeLabels.forEach(l=>g.appendChild(l));
+
+    // ── Hover-to-highlight relationships ───────────────────────────────────
+    function setHighlight(id){
+      edgeRegistry.forEach(e=>{
+        const on=e.from===id||e.to===id;
+        e.els.forEach(el=>{
+          el.setAttribute('stroke', on?(e.kind==='drv'?DRV_HI:FK_HI):(e.kind==='drv'?DRV_COLOR:FK_COLOR));
+          el.setAttribute('stroke-width', on?'2.2':'1.5');
+          el.setAttribute('opacity', on?'1':'0.1');
+        });
+        if(e.label) e.label.style.opacity = on?'1':'0';
+      });
+      Object.entries(cardRegistry).forEach(([cid,cg])=>{
+        cg.setAttribute('opacity', (cid===id||neighbors[id]?.has(cid))?'1':'0.32');
+      });
+    }
+    function clearHighlight(){
+      edgeRegistry.forEach(e=>{
+        e.els.forEach(el=>{
+          el.setAttribute('stroke', e.kind==='drv'?DRV_COLOR:FK_COLOR);
+          el.setAttribute('stroke-width','1.5'); el.setAttribute('opacity','1');
+        });
+        if(e.label) e.label.style.opacity='0';
+      });
+      Object.values(cardRegistry).forEach(cg=>cg.setAttribute('opacity','1'));
+    }
+    Object.entries(cardRegistry).forEach(([cid,cg])=>{
+      cg.addEventListener('mouseenter',()=>setHighlight(cid));
+      cg.addEventListener('mouseleave',clearHighlight);
     });
 
     svgEl.appendChild(g);
@@ -2213,10 +2345,14 @@
   function _fitDagToViewport(){
     const svgEl=document.getElementById('lineage-svg'); if(!svgEl||!_dagContentW) return;
     const vb=svgEl.getBoundingClientRect(); if(!vb.width||!vb.height) return;
-    const scaleX=(vb.width-40)/_dagContentW, scaleY=(vb.height-40)/_dagContentH;
-    _dagScale=Math.min(scaleX,scaleY,1.0);
-    _dagScale=Math.max(_dagScale,0.5);
-    _dagTranslate={x:20,y:20};
+    const scaleX=(vb.width-48)/_dagContentW, scaleY=(vb.height-48)/_dagContentH;
+    _dagScale=Math.min(scaleX,scaleY,1.4);
+    _dagScale=Math.max(_dagScale,0.4);
+    // Centre the diagram in the viewport rather than pinning to the top-left
+    _dagTranslate={
+      x:Math.max(16,(vb.width-_dagContentW*_dagScale)/2),
+      y:Math.max(16,(vb.height-_dagContentH*_dagScale)/2),
+    };
     const g=document.getElementById('dag-g');
     if(g) g.setAttribute('transform',`translate(${_dagTranslate.x},${_dagTranslate.y}) scale(${_dagScale})`);
   }
@@ -2283,42 +2419,41 @@
 
   // Infer PK/FK from column naming conventions across all loaded datasets
   function _inferKeys(ds) {
-    // Collect columns from every OTHER dataset
+    // Badges come from the SAME inference the diagram uses (_erFkLinks), so a
+    // column shown as connected in the diagram is badged here too. A column on the
+    // parent (canonical) side of a link is a PK; on the child side, an FK.
+    const links = _erFkLinks(_dbDatasets);
+    const pks = new Set(), fks = new Set();
+    links.forEach(l => {
+      if (l.from === ds.dataset_id && l.fromCol) pks.add(l.fromCol);
+      if (l.to === ds.dataset_id && l.toCol) fks.add(l.toCol);
+    });
+
+    // A table's own *_id whose noun matches its filename is its primary key, even
+    // when nothing references it (e.g. order_item_id, review_id).
     const otherCols = new Set();
     _dbDatasets.forEach(d => {
       if (d.dataset_id === ds.dataset_id) return;
-      const cols = d.columns_schema || (d.columns||[]).map(c=>({name:c}));
-      cols.forEach(c => otherCols.add(c.name));
+      _erCols(d).forEach(c => otherCols.add(c.name));
     });
-
-    // Derive stem words from filename (e.g. "olist_orders_dataset.csv" → ["orders"])
     const stemWords = ds.filename
       .replace(/\.(csv|parquet|json|xlsx?|tsv)$/i,'')
       .toLowerCase()
       .split(/[_\s\-]+/)
       .filter(w => !['olist','dataset','data','file','table','db','_'].includes(w));
-
     const cols = ds.columns_schema || (ds.columns||[]).map(c=>({name:c,dtype:'?'}));
-    const pks = [], fks = [];
-
     cols.forEach(c => {
-      const lname = c.name.toLowerCase();
-      if (lname === 'id') {
-        pks.push(c.name);
-      } else if (lname.endsWith('_id')) {
-        const prefix = lname.slice(0,-3); // remove "_id"
-        const matchesStem = stemWords.some(s => s.includes(prefix) || prefix.includes(s));
-        if (matchesStem) {
-          pks.push(c.name);
-        } else if (otherCols.has(c.name)) {
-          fks.push(c.name);
-        } else {
-          pks.push(c.name); // unique ID column in this table only
-        }
+      const lname = (c.name||'').toLowerCase();
+      if (fks.has(c.name)) return;            // already an FK from the link inference
+      if (lname === 'id') { pks.add(c.name); return; }
+      if (lname.endsWith('_id')) {
+        const prefix = lname.slice(0,-3);
+        if (stemWords.some(s => s.includes(prefix) || prefix.includes(s))) pks.add(c.name);
+        else if (!otherCols.has(c.name)) pks.add(c.name); // unique ID local to this table
       }
     });
 
-    return { pks, fks };
+    return { pks: [...pks], fks: [...fks] };
   }
 
   function _renderSchemaPanel(ds) {
