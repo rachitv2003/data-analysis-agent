@@ -339,9 +339,14 @@
           <!-- Panel header -->
           <div style="padding:7px 12px;background:#f8fafc;border-bottom:1px solid #e5e7eb;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;">
             <span style="font-size:12px;font-weight:600;color:#374151;">Schema</span>
-            <div style="display:flex;gap:8px;font-size:11px;color:#6b7280;">
+            <div style="display:flex;gap:10px;font-size:11px;color:#6b7280;flex-wrap:wrap;align-items:center;">
               <span style="display:flex;align-items:center;gap:3px;"><span style="width:9px;height:9px;border-radius:2px;background:#eff6ff;border:1.5px solid #3b82f6;display:inline-block;"></span>uploaded</span>
               <span style="display:flex;align-items:center;gap:3px;"><span style="width:9px;height:9px;border-radius:2px;background:#dcfce7;border:1.5px solid #16a34a;display:inline-block;"></span>derived</span>
+              <span style="width:1px;height:12px;background:#e5e7eb;display:inline-block;"></span>
+              <span style="display:flex;align-items:center;gap:3px;"><span style="width:7px;height:7px;border-radius:50%;background:#3b82f6;display:inline-block;"></span>number</span>
+              <span style="display:flex;align-items:center;gap:3px;"><span style="width:7px;height:7px;border-radius:50%;background:#8b5cf6;display:inline-block;"></span>text</span>
+              <span style="display:flex;align-items:center;gap:3px;"><span style="width:7px;height:7px;border-radius:50%;background:#f59e0b;display:inline-block;"></span>date</span>
+              <span style="display:flex;align-items:center;gap:3px;"><span style="width:7px;height:7px;border-radius:50%;background:#9ca3af;display:inline-block;"></span>other</span>
             </div>
           </div>
           <!-- SVG area -->
@@ -356,7 +361,7 @@
         </div>
 
         <!-- Table Description panel -->
-        <div id="db-schema-panel" style="flex:4;min-width:240px;display:flex;flex-direction:column;background:#fff;overflow:hidden;">
+        <div id="db-schema-panel" style="flex:2.8;min-width:170px;display:flex;flex-direction:column;background:#fff;overflow:hidden;">
           <div style="padding:7px 12px;background:#f8fafc;border-bottom:1px solid #e5e7eb;flex-shrink:0;">
             <span style="font-size:12px;font-weight:600;color:#374151;">Table Description</span>
           </div>
@@ -1774,6 +1779,7 @@
   let _dbSelectedId = null;
   let _dagTranslate = {x:0, y:0};
   let _dagScale = 1;
+  let _dagContentW = 800, _dagContentH = 600;
 
   async function loadDatabaseTab() {
     try {
@@ -1859,7 +1865,7 @@
     });
     svgEl.addEventListener('wheel',e=>{
       e.preventDefault();
-      _dagScale=Math.max(0.2,Math.min(4,_dagScale*(e.deltaY<0?1.1:0.9)));
+      _dagScale=Math.max(0.5,Math.min(3,_dagScale*(e.deltaY<0?1.1:0.9)));
       const g=document.getElementById('dag-g');
       if(g) g.setAttribute('transform',`translate(${_dagTranslate.x},${_dagTranslate.y}) scale(${_dagScale})`);
     },{passive:false});
@@ -1877,7 +1883,7 @@
       t.textContent='No datasets in this scope'; svgEl.appendChild(t); return;
     }
 
-    const CW=210, H_HDR=30, H_ROW=22, MAX_ROWS=10, GAP_X=50, GAP_Y=40, GRID_COLS=3;
+    const CW=180, H_HDR=28, H_ROW=18, MAX_ROWS=8;
 
     function getCols(d){ return d.columns_schema||(d.columns||[]).map(c=>({name:c,dtype:'?'})); }
     function cardH(d){ const n=getCols(d); const vis=Math.min(n.length,MAX_ROWS); return H_HDR+vis*H_ROW+(n.length>MAX_ROWS?H_ROW:0)+4; }
@@ -1886,38 +1892,17 @@
       if(Array.isArray(d.derived_from_dataset_ids)) return d.derived_from_dataset_ids;
       try{return JSON.parse(d.derived_from_dataset_ids);}catch{return [];}
     }
+    function dtypeColor(dtype){
+      const t=(dtype||'').toLowerCase();
+      if(t.includes('int')||t.includes('float')||t.includes('numeric')||t.includes('double')) return '#3b82f6';
+      if(t.includes('text')||t.includes('str')||t.includes('object')||t.includes('varchar')) return '#8b5cf6';
+      if(t.includes('date')||t.includes('time')) return '#f59e0b';
+      if(t==='boolean'||t==='bool') return '#10b981';
+      return '#9ca3af';
+    }
 
     const uploaded=datasets.filter(d=>d.origin!=='derived');
     const derived=datasets.filter(d=>d.origin==='derived');
-    const pos={};
-    let yOff=20;
-
-    // Grid layout for uploaded tables
-    for(let r=0;r<Math.ceil(uploaded.length/GRID_COLS);r++){
-      const row=uploaded.slice(r*GRID_COLS,(r+1)*GRID_COLS);
-      const rowH=Math.max(...row.map(cardH));
-      row.forEach((d,c)=>{ pos[d.dataset_id]={x:20+c*(CW+GAP_X),y:yOff}; });
-      yOff+=rowH+GAP_Y;
-    }
-    // Derived tables below
-    derived.forEach((d,i)=>{ pos[d.dataset_id]={x:20+i*(CW+GAP_X),y:yOff}; });
-
-    const svgW=GRID_COLS*(CW+GAP_X)+20;
-    const svgH=derived.length?yOff+Math.max(...derived.map(cardH))+40:yOff+20;
-
-    // Defs: arrow marker
-    const defs=document.createElementNS(ns,'defs');
-    const mk=document.createElementNS(ns,'marker');
-    mk.setAttribute('id','dag-arrow'); mk.setAttribute('markerWidth','8'); mk.setAttribute('markerHeight','6');
-    mk.setAttribute('refX','7'); mk.setAttribute('refY','3'); mk.setAttribute('orient','auto');
-    const ap=document.createElementNS(ns,'path');
-    ap.setAttribute('d','M0,0 L0,6 L8,3 z'); ap.setAttribute('fill','#94a3b8');
-    mk.appendChild(ap); defs.appendChild(mk); svgEl.appendChild(defs);
-
-    // Pan/zoom group
-    const g=document.createElementNS(ns,'g');
-    g.id='dag-g';
-    g.setAttribute('transform',`translate(${_dagTranslate.x},${_dagTranslate.y}) scale(${_dagScale})`);
 
     // FK inference: columns ending in _id shared by exactly 2 uploaded tables
     const colMap={};
@@ -1929,45 +1914,202 @@
         }
       });
     });
-    const drawnPairs=new Set(), fkLinks=[];
-    Object.entries(colMap).filter(([,ids])=>ids.length===2).forEach(([col,[a,b]])=>{
-      const k=[a,b].sort().join('|');
-      if(!drawnPairs.has(k)){drawnPairs.add(k); fkLinks.push({from:a,to:b,col});}
-    });
-
-    // FK lines (drawn behind table cards)
-    fkLinks.forEach(({from,to,col})=>{
-      const fp=pos[from],tp=pos[to]; if(!fp||!tp) return;
-      const fx=fp.x+CW, fy=fp.y+H_HDR+H_ROW*0.8;
-      const tx=tp.x, ty=tp.y+H_HDR+H_ROW*0.8;
-      const cx=(fx+tx)/2;
-      const path=document.createElementNS(ns,'path');
-      path.setAttribute('d',`M${fx},${fy} C${cx},${fy} ${cx},${ty} ${tx},${ty}`);
-      path.setAttribute('stroke','#cbd5e1'); path.setAttribute('stroke-width','1.5');
-      path.setAttribute('fill','none'); path.setAttribute('marker-end','url(#dag-arrow)');
-      g.appendChild(path);
-      const lbl=document.createElementNS(ns,'text');
-      lbl.setAttribute('x',cx); lbl.setAttribute('y',(fy+ty)/2-4);
-      lbl.setAttribute('text-anchor','middle'); lbl.setAttribute('font-size','9');
-      lbl.setAttribute('fill','#94a3b8'); lbl.style.pointerEvents='none';
-      lbl.textContent=col; g.appendChild(lbl);
-    });
-
-    // Derivation lines (dashed green, parent bottom → child top)
-    derived.forEach(d=>{
-      const pids=parentIds(d); const tp=pos[d.dataset_id]; if(!tp) return;
-      pids.forEach(pid=>{
-        const pp=pos[pid]; if(!pp) return;
-        const pd=datasets.find(x=>x.dataset_id===pid);
-        const fy=pp.y+(pd?cardH(pd):100);
-        const fx=pp.x+CW/2, tx=tp.x+CW/2, ty=tp.y;
-        const path=document.createElementNS(ns,'path');
-        path.setAttribute('d',`M${fx},${fy} C${fx},${fy+30} ${tx},${ty-30} ${tx},${ty}`);
-        path.setAttribute('stroke','#16a34a'); path.setAttribute('stroke-width','1.5');
-        path.setAttribute('stroke-dasharray','5,3'); path.setAttribute('fill','none');
-        path.setAttribute('marker-end','url(#dag-arrow)'); g.appendChild(path);
+    // Find the "canonical" (PK-owning) table for a shared _id column:
+    // it's the one whose filename contains the bare noun (order_id → "order" → olist_orders_*)
+    function findCanonical(col, ids){
+      const base=col.replace(/_id$/,'');
+      return ids.find(id=>{
+        const ds=datasets.find(d=>d.dataset_id===id);
+        const fn=(ds?.filename||'').toLowerCase().replace(/\.(csv|parquet|tsv|json)$/i,'');
+        return fn.includes(base);
       });
+    }
+    const drawnPairs=new Set(), fkLinks=[];
+    Object.entries(colMap).filter(([,ids])=>ids.length>=2).forEach(([col,ids])=>{
+      const canonical=findCanonical(col,ids);
+      if(canonical){
+        // Star: canonical → every other table that shares the column
+        ids.filter(id=>id!==canonical).forEach(other=>{
+          const k=[canonical,other].sort().join('|');
+          if(!drawnPairs.has(k)){drawnPairs.add(k); fkLinks.push({from:canonical,to:other,col});}
+        });
+      } else {
+        // Fallback: all pairs when no canonical table found
+        for(let i=0;i<ids.length;i++) for(let j=i+1;j<ids.length;j++){
+          const k=[ids[i],ids[j]].sort().join('|');
+          if(!drawnPairs.has(k)){drawnPairs.add(k); fkLinks.push({from:ids[i],to:ids[j],col});}
+        }
+      }
     });
+
+    // All edges for force simulation
+    const allEdges=[...fkLinks.map(l=>({a:l.from,b:l.to}))];
+    derived.forEach(d=>parentIds(d).forEach(pid=>{ if(datasets.find(x=>x.dataset_id===pid)) allEdges.push({a:pid,b:d.dataset_id}); }));
+
+    // ── Force-directed layout ──────────────────────────────────────────────
+    const pos={};
+    const N=datasets.length;
+    // Deterministic circular init — sorted by dataset_id to break symmetry
+    const sorted=[...datasets].sort((x,y)=>x.dataset_id.localeCompare(y.dataset_id));
+    const R=Math.max(200,N*45);
+    sorted.forEach((d,i)=>{
+      const angle=(2*Math.PI*i/N)-Math.PI/2;
+      pos[d.dataset_id]={x:R+Math.cos(angle)*R, y:R+Math.sin(angle)*R};
+    });
+
+    const REPEL=18000, SPRING=0.06, IDEAL=CW+100, ITERS=200;
+    for(let iter=0;iter<ITERS;iter++){
+      const cool=1-iter/ITERS;
+      const fx={}, fy={};
+      datasets.forEach(d=>{fx[d.dataset_id]=0; fy[d.dataset_id]=0;});
+      // Repulsion 1/dist² — keeps distant nodes spread without blowing them apart
+      for(let i=0;i<datasets.length;i++){
+        for(let j=i+1;j<datasets.length;j++){
+          const a=datasets[i].dataset_id, b=datasets[j].dataset_id;
+          const dx=pos[b].x-pos[a].x, dy=pos[b].y-pos[a].y;
+          const dist2=Math.max(dx*dx+dy*dy,1), dist=Math.sqrt(dist2);
+          const f=REPEL/dist2;
+          fx[a]-=f*dx/dist; fy[a]-=f*dy/dist;
+          fx[b]+=f*dx/dist; fy[b]+=f*dy/dist;
+        }
+      }
+      // Spring — pull-only: attract when farther than IDEAL, never compress closer
+      allEdges.forEach(({a,b})=>{
+        if(!pos[a]||!pos[b]) return;
+        const dx=pos[b].x-pos[a].x, dy=pos[b].y-pos[a].y;
+        const dist=Math.max(Math.sqrt(dx*dx+dy*dy),1);
+        if(dist<=IDEAL) return;
+        const f=SPRING*(dist-IDEAL);
+        fx[a]+=f*dx/dist; fy[a]+=f*dy/dist;
+        fx[b]-=f*dx/dist; fy[b]-=f*dy/dist;
+      });
+      // Apply with cooling
+      datasets.forEach(d=>{
+        pos[d.dataset_id].x+=fx[d.dataset_id]*cool*0.5;
+        pos[d.dataset_id].y+=fy[d.dataset_id]*cool*0.5;
+      });
+    }
+
+    // ── Overlap resolution: guarantee no two cards intersect ─────────────
+    const SEP=25; // minimum gap between cards
+    for(let pass=0;pass<30;pass++){
+      let moved=false;
+      for(let i=0;i<datasets.length;i++){
+        for(let j=i+1;j<datasets.length;j++){
+          const a=datasets[i].dataset_id, b=datasets[j].dataset_id;
+          const pa=pos[a], pb=pos[b];
+          const ha=cardH(datasets[i]), hb=cardH(datasets[j]);
+          // AABB overlap amounts
+          const ox=Math.min(pa.x+CW+SEP-pb.x, pb.x+CW+SEP-pa.x);
+          const oy=Math.min(pa.y+ha+SEP-pb.y, pb.y+hb+SEP-pa.y);
+          if(ox<=0||oy<=0) continue;
+          moved=true;
+          // Push apart along axis of smaller penetration
+          if(ox<oy){
+            const dir=pb.x>=pa.x?1:-1;
+            pa.x-=dir*ox/2; pb.x+=dir*ox/2;
+          } else {
+            const dir=pb.y>=pa.y?1:-1;
+            pa.y-=dir*oy/2; pb.y+=dir*oy/2;
+          }
+        }
+      }
+      if(!moved) break;
+    }
+
+    // Normalize to (20, 20) origin
+    const minX=Math.min(...Object.values(pos).map(p=>p.x));
+    const minY=Math.min(...Object.values(pos).map(p=>p.y));
+    Object.values(pos).forEach(p=>{p.x=Math.round(p.x-minX+20); p.y=Math.round(p.y-minY+20);});
+
+    // Store content bounds for fit-to-viewport
+    _dagContentW=Math.max(...datasets.map(d=>pos[d.dataset_id].x+CW))+20;
+    _dagContentH=Math.max(...datasets.map(d=>pos[d.dataset_id].y+cardH(d)))+20;
+
+    // ── Edge routing helpers ───────────────────────────────────────────────
+    function cardCenter(id){
+      const p=pos[id], d=datasets.find(x=>x.dataset_id===id);
+      return {x:p.x+CW/2, y:p.y+(d?cardH(d):100)/2};
+    }
+    // Return the point on card id's boundary on the ray from its center toward (tx,ty)
+    function cardEdgePoint(id,tx,ty){
+      const p=pos[id], d=datasets.find(x=>x.dataset_id===id);
+      const h=d?cardH(d):100;
+      const cx=p.x+CW/2, cy=p.y+h/2;
+      const dx=tx-cx, dy=ty-cy;
+      if(Math.abs(dx)<0.01&&Math.abs(dy)<0.01) return {x:cx,y:p.y,dir:'top'};
+      let bestT=Infinity, dir='right', ex=cx, ey=cy;
+      if(dx>0.01){const t=(CW/2)/dx; if(t<bestT){bestT=t;dir='right';ex=cx+CW/2;ey=cy+dy*t;}}
+      if(dx<-0.01){const t=(CW/2)/(-dx); if(t<bestT){bestT=t;dir='left';ex=cx-CW/2;ey=cy+dy*t;}}
+      if(dy>0.01){const t=(h/2)/dy; if(t<bestT){bestT=t;dir='bottom';ex=cx+dx*t;ey=cy+h/2;}}
+      if(dy<-0.01){const t=(h/2)/(-dy); if(t<bestT){bestT=t;dir='top';ex=cx+dx*t;ey=cy-h/2;}}
+      return {x:ex,y:ey,dir};
+    }
+    // Control point extending outward from a card edge point
+    function ctrlPt(ep,dist){
+      if(ep.dir==='right')  return {x:ep.x+dist,y:ep.y};
+      if(ep.dir==='left')   return {x:ep.x-dist,y:ep.y};
+      if(ep.dir==='bottom') return {x:ep.x,y:ep.y+dist};
+      return {x:ep.x,y:ep.y-dist};
+    }
+    function drawEdge(fromId,toId,color,dashed,label,markerId){
+      if(!pos[fromId]||!pos[toId]) return;
+      const fc=cardCenter(toId), tc=cardCenter(fromId);
+      const ep1=cardEdgePoint(fromId,fc.x,fc.y);
+      const ep2=cardEdgePoint(toId,tc.x,tc.y);
+      const edgeDist=Math.sqrt((ep1.x-ep2.x)**2+(ep1.y-ep2.y)**2);
+      const ctrl=Math.min(80,edgeDist*0.38)+20;
+      const c1=ctrlPt(ep1,ctrl), c2=ctrlPt(ep2,ctrl);
+      const path=document.createElementNS(ns,'path');
+      path.setAttribute('d',`M${ep1.x},${ep1.y} C${c1.x},${c1.y} ${c2.x},${c2.y} ${ep2.x},${ep2.y}`);
+      path.setAttribute('stroke',color); path.setAttribute('stroke-width','1.5');
+      path.setAttribute('fill','none');
+      if(dashed) path.setAttribute('stroke-dasharray','5,3');
+      path.setAttribute('marker-end',`url(#${markerId})`);
+      g.appendChild(path);
+      if(label){
+        // Bezier midpoint at t=0.5
+        const mx=0.125*ep1.x+0.375*c1.x+0.375*c2.x+0.125*ep2.x;
+        const my=0.125*ep1.y+0.375*c1.y+0.375*c2.y+0.125*ep2.y;
+        const lw=label.length*5+8;
+        const bg=document.createElementNS(ns,'rect');
+        bg.setAttribute('x',mx-lw/2); bg.setAttribute('y',my-8);
+        bg.setAttribute('width',lw); bg.setAttribute('height',12);
+        bg.setAttribute('fill','white'); bg.setAttribute('rx','2');
+        bg.setAttribute('stroke','#e2e8f0'); bg.setAttribute('stroke-width','0.5');
+        g.appendChild(bg);
+        const lbl=document.createElementNS(ns,'text');
+        lbl.setAttribute('x',mx); lbl.setAttribute('y',my+1);
+        lbl.setAttribute('text-anchor','middle'); lbl.setAttribute('font-size','8');
+        lbl.setAttribute('fill','#64748b'); lbl.style.pointerEvents='none';
+        lbl.textContent=label; g.appendChild(lbl);
+      }
+    }
+
+    // Defs: arrow markers
+    const defs=document.createElementNS(ns,'defs');
+    function mkMarker(id,color){
+      const mk=document.createElementNS(ns,'marker');
+      mk.setAttribute('id',id); mk.setAttribute('markerWidth','8'); mk.setAttribute('markerHeight','6');
+      mk.setAttribute('refX','7'); mk.setAttribute('refY','3'); mk.setAttribute('orient','auto');
+      const ap=document.createElementNS(ns,'path');
+      ap.setAttribute('d','M0,0 L0,6 L8,3 z'); ap.setAttribute('fill',color);
+      mk.appendChild(ap); return mk;
+    }
+    defs.appendChild(mkMarker('dag-arrow-fk','#94a3b8'));
+    defs.appendChild(mkMarker('dag-arrow-drv','#22c55e'));
+    svgEl.appendChild(defs);
+
+    // Pan/zoom group
+    const g=document.createElementNS(ns,'g');
+    g.id='dag-g';
+    g.setAttribute('transform',`translate(${_dagTranslate.x},${_dagTranslate.y}) scale(${_dagScale})`);
+
+    // Edges behind cards
+    fkLinks.forEach(({from,to,col})=>drawEdge(from,to,'#94a3b8',false,col,'dag-arrow-fk'));
+    derived.forEach(d=>parentIds(d).forEach(pid=>{
+      if(pos[pid]) drawEdge(pid,d.dataset_id,'#22c55e',true,null,'dag-arrow-drv');
+    }));
 
     // Table cards
     datasets.forEach(d=>{
@@ -1984,17 +2126,24 @@
       cg.style.cursor='pointer';
       cg.addEventListener('click',()=>selectDataset(d.dataset_id));
 
-      // Border rect
+      // Drop shadow
+      const shadow=document.createElementNS(ns,'rect');
+      shadow.setAttribute('x','3'); shadow.setAttribute('y','3');
+      shadow.setAttribute('width',CW); shadow.setAttribute('height',totalH);
+      shadow.setAttribute('rx','5'); shadow.setAttribute('fill','#94a3b8'); shadow.setAttribute('opacity','0.18');
+      cg.appendChild(shadow);
+
+      // Card bg
       const bg=document.createElementNS(ns,'rect');
-      bg.setAttribute('width',CW); bg.setAttribute('height',totalH); bg.setAttribute('rx','4');
+      bg.setAttribute('width',CW); bg.setAttribute('height',totalH); bg.setAttribute('rx','5');
       bg.setAttribute('fill','white');
       bg.setAttribute('stroke',isActive?'#3b82f6':(isDerived?'#16a34a':'#d1d5db'));
       bg.setAttribute('stroke-width',isActive?'2':'1');
       cg.appendChild(bg);
 
-      // Header bg (rounded top, square bottom)
+      // Header (rounded top, flush bottom)
       const hdr=document.createElementNS(ns,'rect');
-      hdr.setAttribute('width',CW); hdr.setAttribute('height',H_HDR); hdr.setAttribute('rx','4');
+      hdr.setAttribute('width',CW); hdr.setAttribute('height',H_HDR); hdr.setAttribute('rx','5');
       hdr.setAttribute('fill',isDerived?'#15803d':'#1e40af'); cg.appendChild(hdr);
       const hdrBot=document.createElementNS(ns,'rect');
       hdrBot.setAttribute('y',H_HDR/2); hdrBot.setAttribute('width',CW); hdrBot.setAttribute('height',H_HDR/2);
@@ -2002,21 +2151,21 @@
 
       // Table name
       const tname=document.createElementNS(ns,'text');
-      tname.setAttribute('x','8'); tname.setAttribute('y','20');
-      tname.setAttribute('fill','white'); tname.setAttribute('font-size','11');
+      tname.setAttribute('x','8'); tname.setAttribute('y','18');
+      tname.setAttribute('fill','white'); tname.setAttribute('font-size','10');
       tname.setAttribute('font-weight','600'); tname.style.pointerEvents='none';
-      const fn=d.filename.replace(/\.(csv|parquet)$/i,'');
-      tname.textContent=fn.length>26?fn.slice(0,24)+'…':fn; cg.appendChild(tname);
+      const fn=d.filename.replace(/\.(csv|parquet|tsv|json)$/i,'');
+      tname.textContent=fn.length>24?fn.slice(0,22)+'…':fn; cg.appendChild(tname);
 
       if(isDerived){
         const badge=document.createElementNS(ns,'text');
-        badge.setAttribute('x',CW-6); badge.setAttribute('y','20');
+        badge.setAttribute('x',CW-6); badge.setAttribute('y','18');
         badge.setAttribute('text-anchor','end'); badge.setAttribute('fill','#bbf7d0');
-        badge.setAttribute('font-size','9'); badge.style.pointerEvents='none';
+        badge.setAttribute('font-size','8'); badge.style.pointerEvents='none';
         badge.textContent='derived'; cg.appendChild(badge);
       }
 
-      // Column rows
+      // Column rows — name + dtype color dot (no dtype text)
       cols.slice(0,MAX_ROWS).forEach((col,i)=>{
         const ry=H_HDR+i*H_ROW;
         if(i%2===0){
@@ -2028,38 +2177,50 @@
         div.setAttribute('x1','0'); div.setAttribute('y1',ry); div.setAttribute('x2',CW); div.setAttribute('y2',ry);
         div.setAttribute('stroke','#e5e7eb'); div.setAttribute('stroke-width','0.5'); cg.appendChild(div);
         const cn=document.createElementNS(ns,'text');
-        cn.setAttribute('x','8'); cn.setAttribute('y',ry+15);
-        cn.setAttribute('fill','#374151'); cn.setAttribute('font-size','10'); cn.style.pointerEvents='none';
-        cn.textContent=col.name&&col.name.length>22?col.name.slice(0,20)+'…':col.name||'?'; cg.appendChild(cn);
-        const ct=document.createElementNS(ns,'text');
-        ct.setAttribute('x',CW-6); ct.setAttribute('y',ry+15);
-        ct.setAttribute('text-anchor','end'); ct.setAttribute('fill','#94a3b8');
-        ct.setAttribute('font-size','10'); ct.setAttribute('font-style','italic'); ct.style.pointerEvents='none';
-        ct.textContent=col.dtype||'?'; cg.appendChild(ct);
+        cn.setAttribute('x','8'); cn.setAttribute('y',ry+12);
+        cn.setAttribute('fill','#374151'); cn.setAttribute('font-size','9.5'); cn.style.pointerEvents='none';
+        const colName=col.name||'?';
+        cn.textContent=colName.length>25?colName.slice(0,23)+'…':colName; cg.appendChild(cn);
+        // Dtype dot replaces dtype text — saves width, adds color meaning
+        const dot=document.createElementNS(ns,'circle');
+        dot.setAttribute('cx',CW-10); dot.setAttribute('cy',ry+H_ROW/2);
+        dot.setAttribute('r','3'); dot.setAttribute('fill',dtypeColor(col.dtype));
+        dot.setAttribute('opacity','0.8'); cg.appendChild(dot);
       });
 
       if(hasMore){
         const moreY=H_HDR+visRows*H_ROW;
+        const rb=document.createElementNS(ns,'rect');
+        rb.setAttribute('y',moreY); rb.setAttribute('width',CW); rb.setAttribute('height',H_ROW);
+        rb.setAttribute('fill',visRows%2===0?'#f8fafc':'white'); cg.appendChild(rb);
         const mt=document.createElementNS(ns,'text');
-        mt.setAttribute('x',CW/2); mt.setAttribute('y',moreY+15);
+        mt.setAttribute('x',CW/2); mt.setAttribute('y',moreY+12);
         mt.setAttribute('text-anchor','middle'); mt.setAttribute('fill','#9ca3af');
-        mt.setAttribute('font-size','10'); mt.style.pointerEvents='none';
-        mt.textContent=`… and ${cols.length-MAX_ROWS} more`; cg.appendChild(mt);
+        mt.setAttribute('font-size','9'); mt.style.pointerEvents='none';
+        mt.textContent=`+ ${cols.length-MAX_ROWS} more`; cg.appendChild(mt);
       }
 
       g.appendChild(cg);
     });
 
     svgEl.appendChild(g);
+    // Auto-fit after layout
+    requestAnimationFrame(_fitDagToViewport);
   }
 
-  function fitLineageDag() {
-    _dagTranslate={x:0,y:0}; _dagScale=1;
+  function _fitDagToViewport(){
+    const svgEl=document.getElementById('lineage-svg'); if(!svgEl||!_dagContentW) return;
+    const vb=svgEl.getBoundingClientRect(); if(!vb.width||!vb.height) return;
+    const scaleX=(vb.width-40)/_dagContentW, scaleY=(vb.height-40)/_dagContentH;
+    _dagScale=Math.min(scaleX,scaleY,1.0);
+    _dagScale=Math.max(_dagScale,0.5);
+    _dagTranslate={x:20,y:20};
     const g=document.getElementById('dag-g');
-    if(g) g.setAttribute('transform','translate(0,0) scale(1)');
+    if(g) g.setAttribute('transform',`translate(${_dagTranslate.x},${_dagTranslate.y}) scale(${_dagScale})`);
   }
-  function zoomLineageDag(factor) {
-    _dagScale=Math.max(0.2,Math.min(4,_dagScale*factor));
+  function fitLineageDag(){ _fitDagToViewport(); }
+  function zoomLineageDag(factor){
+    _dagScale=Math.max(0.5,Math.min(3,_dagScale*factor));
     const g=document.getElementById('dag-g');
     if(g) g.setAttribute('transform',`translate(${_dagTranslate.x},${_dagTranslate.y}) scale(${_dagScale})`);
   }
