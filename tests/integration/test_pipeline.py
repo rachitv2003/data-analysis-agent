@@ -71,6 +71,34 @@ def test_upload(client):
     assert "name" in data["columns"]
 
 
+def test_dataset_preview(client):
+    """GET /datasets/{id}/preview returns formatted head rows."""
+    dataset_id = _upload(client)
+    resp = client.get(f"/datasets/{dataset_id}/preview")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["columns"] == ["name", "value", "region"]
+    rows = data["rows"]
+    assert len(rows) == 3  # the test CSV has 3 rows
+    assert rows[0] == {"name": "alice", "value": 10, "region": "north"}
+    # integer column must come back as int, not float
+    assert isinstance(rows[0]["value"], int)
+
+
+def test_dataset_preview_rows_param_clamped(client):
+    """The rows query param caps how many rows come back."""
+    dataset_id = _upload(client)
+    resp = client.get(f"/datasets/{dataset_id}/preview?rows=2")
+    assert resp.status_code == 200, resp.text
+    assert len(resp.json()["data"]["rows"]) == 2
+
+
+def test_dataset_preview_unknown_dataset_returns_404(client):
+    resp = client.get("/datasets/nonexistent/preview")
+    assert resp.status_code == 404
+    assert resp.json()["detail"]["code"] == "dataset_not_found"
+
+
 def test_ask_golden_path(client):
     dataset_id = _upload(client)
     resp = client.post("/ask", json={"dataset_id": dataset_id, "question": "What is the total value?"})
