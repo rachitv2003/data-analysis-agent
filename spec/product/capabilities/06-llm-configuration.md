@@ -24,7 +24,7 @@ Provider is selected at startup in `src/data_analyst/llm/providers/factory.py`:
 
 ### Model
 
-`DATA_ANALYST_LLM_MODEL` sets the model name (default: `gemini-2.5-flash`). The same model name is passed to both Gemini and OpenRouter; for OpenRouter, use full path slugs like `anthropic/claude-3-5-sonnet`.
+`DATA_ANALYST_LLM_MODEL` sets the model name (default: `gemini-3.1-flash-lite`). The same model name is passed to both Gemini and OpenRouter; for OpenRouter, use full path slugs like `anthropic/claude-3-5-sonnet`.
 
 ### Rate-limit Retry
 
@@ -74,10 +74,11 @@ All configuration is in `src/data_analyst/config/settings.py` via `pydantic-sett
 | `llm_provider` | `DATA_ANALYST_LLM_PROVIDER` | `""` (auto) | `gemini`, `openrouter`, `stub`, or empty for auto |
 | `gemini_api_key` | `DATA_ANALYST_GEMINI_API_KEY` | `""` | |
 | `openrouter_api_key` | `DATA_ANALYST_OPENROUTER_API_KEY` | `""` | |
-| `llm_model` | `DATA_ANALYST_LLM_MODEL` | `gemini-2.5-flash` | Model name passed to provider |
+| `llm_model` | `DATA_ANALYST_LLM_MODEL` | `gemini-3.1-flash-lite` | Model name passed to provider |
 | `max_iterations` | `DATA_ANALYST_MAX_ITERATIONS` | `6` | ReAct loop iteration cap |
 | `log_level` | `DATA_ANALYST_LOG_LEVEL` | `INFO` | structlog level |
 | `upload_dir` | `DATA_ANALYST_UPLOAD_DIR` | `uploads` | Directory for saved CSV files |
+| `cache_limit_mb` | `DATA_ANALYST_CACHE_LIMIT_MB` | `1024` | Max size of the C27 dataframe cache, in MB |
 
 Settings are loaded once at startup (`get_settings()` caches the instance).
 

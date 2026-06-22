@@ -25,15 +25,20 @@ REST. All routes return `{"data": ..., "error": null}` on success or raise HTTP 
 
 **Request:** `multipart/form-data` with field `file` (CSV file).
 
+**Query parameters:**
+- `force` (boolean, default `false`) — when `true`, bypasses duplicate detection and registers the upload even if a dataset with the same content hash or filename already exists.
+
 **Response:**
 ```json
 {
   "data": {
     "dataset_id": "uuid",
     "filename": "sales.csv",
+    "format": "csv",
     "row_count": 1000,
     "col_count": 8,
-    "columns": ["date", "region", "revenue", "units"]
+    "columns": ["date", "region", "revenue", "units"],
+    "auto_notes_status": null
   },
   "error": null
 }
@@ -45,7 +50,10 @@ REST. All routes return `{"data": ..., "error": null}` on success or raise HTTP 
 | 400 | File extension not in `.csv`, `.tsv`, `.txt`, `.json`, `.xlsx`, `.xls` |
 | 400 | File cannot be parsed by pandas |
 | 400 | File is empty (0 rows) |
+| 409 | `duplicate_dataset` — a dataset with the same content hash or filename already exists (unless `force=true`) |
 | 500 | Filesystem write failure |
+
+The 409 `duplicate_dataset` detail object additionally carries `match_type` (`"content"`, `"filename"`, or `"both"`), `existing_dataset_id`, `existing_filename`, and `existing_created_at`.
 
 ### `GET /datasets`
 
@@ -115,6 +123,67 @@ REST. All routes return `{"data": ..., "error": null}` on success or raise HTTP 
 | Status | Condition |
 | ------ | --------- |
 | 404 | dataset_id not found |
+
+---
+
+### `GET /datasets/{dataset_id}/preview`
+
+**Purpose:** Return the first N rows of a dataset as formatted value objects. Used by the dataset preview panel.
+
+**Query parameters:**
+- `rows` (integer, default `10`) — number of rows to return, clamped to the range 1–50.
+
+**Response:**
+```json
+{
+  "data": {
+    "columns": ["date", "region", "revenue", "units"],
+    "rows": [
+      {"date": "2026-01-01", "region": "North", "revenue": 1200.5, "units": 30}
+    ]
+  },
+  "error": null
+}
+```
+
+Rows are read from the Parquet file if present, otherwise from the CSV (`nrows=N`). Values are formatted per cell: floats are rounded to 4 decimals, whole-number floats are coerced to `int`, non-finite/`NaN` values become `null`, booleans stay boolean, integers stay integer, and any other type is stringified.
+
+**Error cases:**
+
+| Status | Condition |
+| ------ | --------- |
+| 404 | `dataset_not_found` — dataset_id not found |
+| 404 | `file_not_found` — dataset file missing on disk |
+| 500 | `preview_error` — preview generation raised an exception |
+
+---
+
+### `GET /datasets/{dataset_id}/sessions`
+
+**Purpose:** Return all sessions scoped to a single dataset (sessions whose `dataset_id` matches, or whose `dataset_ids_json` contains the id), ordered by most recently updated.
+
+**Response:** Same item shape as `GET /sessions`:
+```json
+{
+  "data": [
+    {
+      "session_id": "uuid",
+      "name": "Q2 Revenue Analysis",
+      "created_at": "...",
+      "updated_at": "...",
+      "turn_count": 4,
+      "first_question": "What is the total revenue?"
+    }
+  ],
+  "error": null
+}
+```
+
+**Error cases:**
+
+| Status | Condition |
+| ------ | --------- |
+| 404 | `dataset_not_found` — dataset_id not found |
 
 ---
 
@@ -383,13 +452,52 @@ The `run_id` references a thin `QueryRunRow(status="clarification")`. The user a
 
 ---
 
+### `GET /runs/current` *(C22)*
+
+**Purpose:** Return the most-recently-created query run for progress polling. Used by the frontend progress poller to track the active run's status and iteration count.
+
+**Query parameters:** none.
+
+**Response — active run:**
+```json
+{
+  "data": {
+    "run_id": "uuid",
+    "status": "running",
+    "iteration_count": 3,
+    "max_iterations": 12
+  },
+  "error": null
+}
+```
+
+**Response — no runs exist:**
+```json
+{
+  "data": {
+    "run_id": null,
+    "status": "idle",
+    "iteration_count": 0,
+    "max_iterations": 12
+  },
+  "error": null
+}
+```
+
+`max_iterations` is read from `Settings.max_iterations`.
+
+**Error cases:** none; always returns 200.
+
+---
+
 ### `POST /upload` — extended fields *(C12, C16, C30)*
 
 In addition to `file`, accepts:
 - `context` (form field, string, optional) — typed dataset notes, max 4 000 chars
 - `notes_file` (file, optional) — `.txt` or `.md` file whose content is used as (or appended to) `context`
+- `force` (query param, boolean, default `false`) — bypass duplicate detection (see the base `POST /upload` section)
 
-Response gains a `context: string` field containing the stored notes.
+Response gains `context: string` (the stored notes), `format: string` (the detected file format), and `auto_notes_status` (`"pending"` | `"done"` | `"failed"` | `null`).
 
 ---
 

@@ -8,28 +8,38 @@
 ## Overview
 
 Surfaces real-time token budget awareness in the UI:
-- **Sidebar estimate:** static component breakdown computed at rest from current state (datasets, memory, history length).
-- **Steps inspector actuals:** per-component token breakdown from the last planning call, stored after each run.
+- **Sidebar context bar:** shows the *last actual prompt total* (the `total_prompt` from the most recent turn's stored breakdown) against the active model's context limit. Before any turn has run for the current selection it falls back to a crude estimate. It does **not** compute a per-component breakdown.
+- **Steps inspector actuals:** per-component token breakdown for a given turn, rendered behind a "Token breakdown" toggle, using the stored actuals in `prompt_breakdown`.
 
 ---
 
-## Sidebar — Estimated Token Usage
+## Sidebar — Context Window Bar
 
-### Components measured
+The sidebar bar (`#ctx-bar-wrap`, JS `_updateCtxBar`) displays a single used/total figure, not a component breakdown:
+
+- **Used:** `_lastActualPromptTokens` — the `total_prompt` recorded by the most recent turn that arrived. When no actual is available yet (no turn has run for the current dataset selection), it falls back to a crude estimate of `500 + (number of checked datasets) × 200` tokens, prefixed with `~` to mark it as approximate.
+- **Limit:** the active model's context window, read from the single `context_limit` value returned by `GET /stats/daily` (stored in `window._ctxLimit`).
+
+The bar is hidden when no datasets are checked. Fill colour turns to a warning state at ≥70% and a danger state at ≥90% of the limit.
+
+The **per-component** token estimates (system overhead, dataset schemas, history, memory, dataset notes, action history) are computed server-side in `_build_prompt`, stored in `prompt_breakdown`, and surfaced only in the per-turn steps inspector (see below) — never as an at-rest sidebar tooltip.
+
+### Per-component estimation (server-side, for the breakdown)
 
 | Component | Source | Token estimate |
 |-----------|--------|----------------|
-| System / prompt overhead | Fixed template length | hard-coded constant (~800 tokens) |
-| Dataset schemas | Column names + dtypes for all checked datasets | `len(schema_text) / 4` |
+| System / prompt overhead | **Residual:** total prompt tokens minus all other measured sections | `_tok(prompt) − (schemas + notes + memory + history + action_history)`, floored at 0 |
+| Dataset schemas | Column names + dtypes for all checked datasets (plus derived-dataset manifest) | `len(schema_text) / 4` |
 | Conversation history | Last N turns in the active session | `len(history_text) / 4` |
-| Memory | Current global memory content | `len(memory_text) / 4` |
+| Memory | Current global memory / facts content | `len(memory_text) / 4` |
 | Dataset context notes | `context` field for all checked datasets | `len(notes_text) / 4` |
+| Action history (this turn) | Prior actions + results accumulated this turn | `len(history_text) / 4` |
 
-Estimation uses the universal approximation of **4 characters per token** — accurate enough for budget awareness; not a true tokeniser.
+Estimation uses the universal approximation of **4 characters per token** — accurate enough for budget awareness; not a true tokeniser. `system_overhead` is **not** a hard-coded constant: it is derived as a residual so the components always sum to the estimated prompt total.
 
 ### Model context limits
 
-A hard-coded mapping of known models to their context windows, stored in both the Python config and the JavaScript UI:
+A hard-coded mapping of known models to their context windows, defined in the Python config (`_CONTEXT_LIMITS` in `stats.py`) and exposed to the UI as a single resolved value via `GET /stats/daily`:
 
 | Model | Tokens |
 |-------|--------|
@@ -54,36 +64,25 @@ A hard-coded mapping of known models to their context windows, stored in both th
 | _(unknown Gemini)_ | 1,000,000 (catch-all) |
 | _(unknown)_ | 128,000 (fallback) |
 
-The active model name is read from `GET /stats/daily` (already returned). The JS widget looks up the limit against this table and shows `used / limit` tokens in the sidebar.
+The limit is resolved server-side by `get_context_limit(model)` against `_CONTEXT_LIMITS` and returned as the single `context_limit` value on `GET /stats/daily`. There is **no** separate model→limit table in the JavaScript; the UI simply reads `context_limit` into `window._ctxLimit` and renders `used / limit` in the sidebar bar.
 
 ### Update triggers
 
-The estimate re-computes whenever:
+The bar re-renders whenever `_updateCtxBar` is called, which includes:
 - A dataset is checked or unchecked for querying.
-- A new answer turn arrives.
-- The user edits and saves global memory.
-- The tab switches to Analyse.
+- A new answer turn arrives (updating `_lastActualPromptTokens` from the turn's `total_prompt`).
+- `GET /stats/daily` refreshes (which sets `window._ctxLimit`).
 
 ### UI placement
 
-A compact row below the session name / token counter widget in the sidebar:
+A compact row below the session name / token counter widget in the sidebar. When an actual prompt total is known it is shown exactly; before the first turn it shows a `~`-prefixed fallback estimate:
 
 ```
 Context window
 ▓▓▓▓▓▓▓░░░░░░░░░░░░░░░  14 200 / 1 000 000
 ```
 
-Clicking or hovering the bar opens a breakdown tooltip:
-
-```
-System overhead    ~  800
-Dataset schemas    ~  3 400
-History (4 turns)  ~  2 100
-Memory             ~    450
-Dataset notes      ~  7 450
-────────────────────────────
-Total              ~ 14 200 / 1 000 000
-```
+The bar shows only this single used/total figure — there is no sidebar breakdown tooltip. The per-component breakdown lives in the steps inspector (below).
 
 ---
 
@@ -110,11 +109,11 @@ Shape:
 
 ### How it is captured
 
-In `plan_action`, after building the prompt string but before calling the LLM:
-1. Measure the byte/char length of each sub-section of the prompt.
-2. Compute `section_tokens = len(section) // 4` for each section.
-3. After the LLM call returns `tokens_input`, record it as `total_prompt`.
-4. Serialize the breakdown dict to JSON and write to `QueryRunRow.prompt_breakdown` (updated alongside the existing `tokens_input` / `tokens_output` columns).
+In `_build_prompt` (called by `plan_action` each iteration), while assembling the prompt string:
+1. Compute `section_tokens = len(section) // 4` for the dataset schemas, dataset notes, memory, history, and action-history sub-sections.
+2. Compute `system_overhead` as a **residual** — `max(0, _tok(prompt) − schemas − notes − memory − history − action_history)` — so it captures the static template text plus anything not attributed to a named section. It is not a fixed constant.
+3. `plan_action` writes this breakdown via `_update_prompt_breakdown` on each iteration (overwriting), so the stored value reflects the **last** `plan_action` call. `total_prompt` is set from the actual `tokens_input` reported by the LLM API for that call (authoritative).
+4. The breakdown dict is serialized to JSON and written to `QueryRunRow.prompt_breakdown` alongside the existing `tokens_input` / `tokens_output` columns.
 
 ### UI — steps inspector panel
 

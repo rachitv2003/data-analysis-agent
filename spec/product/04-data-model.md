@@ -104,5 +104,5 @@ Single-row key-value store for app-wide configuration and persistent memory.
 
 - Datasets persist indefinitely (no TTL).
 - Deleting a dataset cascades to its sessions, runs, and CSV file on disk. Deleting a source dataset also recursively deletes all derived datasets whose `derived_from_dataset_ids` contains the deleted ID (and their derived children in turn).
-- `query_runs.status` transitions: `pending` → `running` → `completed` | `failed`.
+- `query_runs.status` transitions: `pending` → `running` → `completed` | `failed`. A separate non-terminal `clarification` state is also possible: during a C26 pre-flight clarification, `POST /ask` creates a thin `QueryRunRow` with `status="clarification"` (carrying the clarification prompt as its `answer`) and does not advance it — the user's clarified question produces a distinct answer run.
 - CSV files in `uploads/` are the source of truth for DataFrames; `DatasetRow.file_path` is the pointer.

@@ -124,5 +124,7 @@ force_finalize → END
 ## Stub Provider
 
 When `DATA_ANALYST_GEMINI_API_KEY` is not set (and no other provider is configured), the stub LLM branches on the prompt tag:
-- `<node:plan>` — First call: returns `df.describe().to_string()` (a real pandas expression). Second call: returns `FINAL ANSWER: [stub] The dataset has {N} rows and {M} columns based on df.describe().`. Never returns identical output on two consecutive calls (iteration distinguishes them).
-- `<node:finalize>` — Returns a canned best-effort summary: `Based on the work done, here is a partial summary: [stub] The analysis reached the iteration limit. The dataset was loaded and partial results were computed.`
+- `<node:finalize>` — Returns a canned best-effort summary: `**[stub mode — best-effort summary]**\n\nThe analysis loop ended before a definitive answer was reached. Set DATA_ANALYST_GEMINI_API_KEY in your .env for real analysis.`
+- `<node:select>` — Extracts the first dataset ID from the schema block (regex `\(id: ([^)]+)\)`) and returns it as a one-element JSON array; returns `[]` if none found.
+- `<node:plan>` — First call (iteration 0): returns `df.describe().to_string()` (a real pandas expression). Second call: returns a `FINAL ANSWER:` Markdown summary beginning `FINAL ANSWER: **[stub mode]** Here is a summary of your dataset:` (bullet list + a small Status/Iterations table). Iteration is counted from the number of `Result:`/`Error:` markers in the prompt, so consecutive calls never return identical output.
+- Fall-through (no recognised tag, e.g. `<node:clarify>`): when the `<node:plan>` tag is absent the stub returns `FINAL ANSWER: [stub] Unable to process — missing plan tag.`

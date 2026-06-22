@@ -56,13 +56,13 @@ The toolbar only shows when ≥ 2 completed turns exist. A single-turn session d
 
 ## State Persistence
 
-Turn collapsed state is stored in `sessionStorage` under the key `_turnCollapsed` (a JSON object mapping `run_id → true`). Only collapsed turns are stored — absence means expanded.
+Collapsed state is **not** persisted — it lives purely in the live DOM via `classList.toggle('collapsed')` on each `.turn` element. There is no `sessionStorage` (or any other) backing store.
 
 This means:
-- State survives tab switches and navigation between Analyse and Database tabs.
-- State is **reset** on page refresh (session storage is not persistent).
-- Switching sessions clears `_turnCollapsed` (since run IDs differ between sessions).
-- When a session is loaded via `loadSession(id)` → `GET /sessions/{id}`, each turn is rendered with its stored collapsed state applied immediately (no flicker).
+- State is **lost** whenever the thread is re-rendered: switching tabs (Analyse ↔ Database), refreshing the page, or reloading the session.
+- When a session is loaded via `resumeSession(sessionId)` → `GET /sessions/{id}`, the thread is cleared and every turn is re-appended in the default **expanded** state. No prior collapse state is restored.
+
+> **Future work:** persisting collapsed state (e.g. in `sessionStorage` keyed by `run_id`) so it survives tab switches and session reloads is not yet implemented. See *Out of Scope* below.
 
 ---
 
@@ -86,9 +86,9 @@ This means:
 └─────────────────────────────────────────────────────────────┘
 ```
 
-- Button: `type="button"`, `aria-label="Collapse turn"` / `"Expand turn"`, `aria-expanded="true"/"false"` on the turn element.
+- Button: `type="button"`. Its accessible state lives on the button itself — `aria-label` and `title` flip between `"Collapse turn"`/`"Collapse"` (expanded) and `"Expand turn"`/`"Expand"` (collapsed), and the glyph toggles between `▼` and `▶`. There is **no** `aria-expanded` attribute on the turn element.
 - The summary line uses muted text (`color: #9ca3af`, `font-size: 12px`).
-- Collapse/expand is animated with `max-height` transition (200 ms ease-out) to avoid jarring jumps.
+- Collapse/expand is an **instant** show/hide via CSS — `.turn.collapsed .turn-body { display: none; }`. There is no `max-height` (or any) transition animation.
 
 ### Toolbar placement
 
@@ -106,7 +106,7 @@ Rendered once by `_updateCollapseToolbar()` which is called after every turn app
 
 | File | Change |
 |------|--------|
-| `src/data_analyst/templates/index.html` | Add chevron toggle to `appendTurn`; add `_toggleTurn(runId)`, `_collapseAll()`, `_expandAll()`, `_updateCollapseToolbar()`, `_turnCollapsed` object; update `loadSession` to restore state; CSS for collapsed state + animation |
+| `src/data_analyst/templates/index.html` | Add chevron toggle (`.turn-collapse-btn`) in `appendTurn`; add `_toggleTurn(btn)`, `_collapseAll()`, `_expandAll()`, `_updateCollapseToolbar()`; thread toolbar (`#thread-toolbar` / `.btn-collapse-all`); CSS for the collapsed state (`.turn.collapsed .turn-body { display:none }`). No state-restore in `resumeSession`. |
 
 No backend changes. No new API routes. No DB changes.
 
@@ -114,7 +114,6 @@ No backend changes. No new API routes. No DB changes.
 
 ## Out of Scope
 
-- Persisting collapsed state across page refreshes (sessionStorage is sufficient).
+- Persisting collapsed state at all (across page refreshes, tab switches, or session reloads) — state is live-DOM only and is lost on any re-render. See *State Persistence* above.
 - Per-section collapsing within a turn (e.g. hiding only the Steps inspector — that already exists via the existing steps toggle).
 - Keyboard shortcut to collapse all.
-- Remembering collapsed state when the user navigates away and returns via browser history.
