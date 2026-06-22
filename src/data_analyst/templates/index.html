@@ -2424,14 +2424,17 @@
     try {
       let preview = _dbPreviewCache[id];
       if (!preview) {
-        const body = await fetch(`/datasets/${id}/preview`).then(r => r.json());
+        const resp = await fetch(`/datasets/${id}/preview`);
+        const body = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(body.detail?.message || `HTTP ${resp.status}`);
         preview = body.data;
-        if (!preview) throw new Error('no data');
+        if (!preview) throw new Error('empty response');
         _dbPreviewCache[id] = preview;
       }
       previewEl.innerHTML = _renderPreviewTable(preview);
     } catch(e) {
-      previewEl.innerHTML = '<span style="color:#b91c1c;font-size:12px;">Failed to load preview</span>';
+      console.error('Preview fetch failed:', e);
+      previewEl.innerHTML = `<span style="color:#b91c1c;font-size:12px;">Preview unavailable: ${esc(e.message)}</span>`;
     }
   }
 
