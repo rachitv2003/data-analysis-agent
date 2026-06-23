@@ -34,11 +34,34 @@ def _is_auth_error(exc: Exception) -> bool:
     )
 
 
+def _is_network_error(exc: Exception) -> bool:
+    """Transient connectivity failure (DNS / connection / timeout) reaching the API."""
+    msg = str(exc).lower()
+    return (
+        "getaddrinfo" in msg              # DNS lookup failed (Errno 11001 on Windows)
+        or "11001" in msg
+        or "name or service not known" in msg
+        or "temporary failure in name resolution" in msg
+        or "failed to establish" in msg
+        or "connection" in msg            # refused / reset / aborted / error
+        or "network is unreachable" in msg
+        or "timed out" in msg
+        or "timeout" in msg
+        or "max retries exceeded" in msg
+    )
+
+
 _AUTH_HELP = (
     "Gemini authentication failed — the API key is missing, expired, or the wrong type. "
     "Gemini API keys start with 'AIzaSy' (a value starting with 'AQ.' is a short-lived OAuth "
     "token, not an API key). Get a key at https://aistudio.google.com/apikey and set "
     "DATA_ANALYST_GEMINI_API_KEY in your .env, then restart the server."
+)
+
+_NETWORK_HELP = (
+    "Couldn't reach the Gemini API — a network or DNS lookup failed (getaddrinfo). "
+    "This usually means no internet connection, a VPN/proxy blocking the request, or a "
+    "brief network blip. Check your connection and try again."
 )
 
 
@@ -67,21 +90,24 @@ class GeminiProvider(LLMProvider):
                 if _is_auth_error(exc):
                     logger.error("gemini.auth_error", model=self._model)
                     raise RuntimeError(_AUTH_HELP) from exc
-                if not _is_rate_limit(exc):
+                is_rate_limit = _is_rate_limit(exc)
+                is_network = _is_network_error(exc)
+                if not is_rate_limit and not is_network:
                     raise
 
-                delay = _extract_retry_delay(exc) or (30 * attempt)
-                delay = min(delay, 120)  # cap at 2 min
-                logger.warning(
-                    "gemini.rate_limit",
-                    attempt=attempt,
-                    retry_in=delay,
-                    model=self._model,
-                )
+                if is_rate_limit:
+                    delay = _extract_retry_delay(exc) or (30 * attempt)
+                    delay = min(delay, 120)  # cap at 2 min
+                    logger.warning("gemini.rate_limit", attempt=attempt, retry_in=delay, model=self._model)
+                else:
+                    delay = min(4 * attempt, 15)  # network blips resolve fast — short backoff
+                    logger.warning("gemini.network_error", attempt=attempt, retry_in=delay, model=self._model)
                 if attempt < _MAX_RETRIES:
                     time.sleep(delay)
 
-        # All retries exhausted — raise a clean message
+        # All retries exhausted — raise a clean message matching the failure kind
+        if last_exc is not None and _is_network_error(last_exc) and not _is_rate_limit(last_exc):
+            raise RuntimeError(_NETWORK_HELP) from last_exc
         delay_hint = _extract_retry_delay(last_exc) if last_exc else None
         hint = f" Try again in ~{delay_hint}s." if delay_hint else ""
         raise RuntimeError(

@@ -117,6 +117,41 @@ class TestGeminiRateLimit:
         assert mock_client.models.generate_content.call_count == 1
         assert mock_sleep.call_count == 0
 
+    def test_retries_on_network_error_then_succeeds(self):
+        from data_analyst.llm.providers.gemini import GeminiProvider
+        mock_client = MagicMock()
+        net_exc = RuntimeError("[Errno 11001] getaddrinfo failed")  # DNS failure
+        good = MagicMock()
+        good.text = "ok"
+        good.usage_metadata.prompt_token_count = 1
+        good.usage_metadata.candidates_token_count = 1
+        mock_client.models.generate_content.side_effect = [net_exc, good]
+
+        with patch("data_analyst.llm.providers.gemini.genai") as mock_genai, \
+             patch("data_analyst.llm.providers.gemini.time.sleep"):
+            mock_genai.Client.return_value = mock_client
+            provider = GeminiProvider("key", "model")
+            result = provider.complete("prompt")
+
+        assert result.text == "ok"
+        assert mock_client.models.generate_content.call_count == 2
+
+    def test_network_error_exhausted_raises_clean_message(self):
+        from data_analyst.llm.providers.gemini import GeminiProvider, _MAX_RETRIES
+        mock_client = MagicMock()
+        mock_client.models.generate_content.side_effect = RuntimeError(
+            "[Errno 11001] getaddrinfo failed"
+        )
+
+        with patch("data_analyst.llm.providers.gemini.genai") as mock_genai, \
+             patch("data_analyst.llm.providers.gemini.time.sleep"):
+            mock_genai.Client.return_value = mock_client
+            provider = GeminiProvider("key", "model")
+            with pytest.raises(RuntimeError, match="Couldn't reach the Gemini API"):
+                provider.complete("prompt")
+
+        assert mock_client.models.generate_content.call_count == _MAX_RETRIES
+
 
 # ── OpenRouter provider ──────────────────────────────────────────────────────
 
@@ -222,4 +257,32 @@ class TestOpenRouterRateLimit:
                    return_value=mock_resp):
             provider = OpenRouterProvider("bad-key", "model")
             with pytest.raises(RuntimeError, match="authentication failed"):
+                provider.complete("prompt")
+
+    def test_retries_on_network_error_then_succeeds(self):
+        import httpx
+        from data_analyst.llm.providers.openrouter import OpenRouterProvider
+        good_resp = self._make_response(200, {
+            "choices": [{"message": {"content": "ok"}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+        })
+        net_exc = httpx.ConnectError("[Errno 11001] getaddrinfo failed")
+
+        with patch("data_analyst.llm.providers.openrouter.httpx.post",
+                   side_effect=[net_exc, good_resp]), \
+             patch("data_analyst.llm.providers.openrouter.time.sleep"):
+            provider = OpenRouterProvider("key", "model")
+            result = provider.complete("prompt")
+
+        assert result.text == "ok"
+
+    def test_network_error_exhausted_raises_clean_message(self):
+        import httpx
+        from data_analyst.llm.providers.openrouter import OpenRouterProvider
+        net_exc = httpx.ConnectError("[Errno 11001] getaddrinfo failed")
+
+        with patch("data_analyst.llm.providers.openrouter.httpx.post", side_effect=net_exc), \
+             patch("data_analyst.llm.providers.openrouter.time.sleep"):
+            provider = OpenRouterProvider("key", "model")
+            with pytest.raises(RuntimeError, match="Couldn't reach OpenRouter"):
                 provider.complete("prompt")

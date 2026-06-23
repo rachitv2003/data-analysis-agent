@@ -30,6 +30,7 @@ class OpenRouterProvider(LLMProvider):
         }
 
         last_exc: Exception | None = None
+        last_was_network = False
         for attempt in range(1, _MAX_RETRIES + 1):
             try:
                 resp = httpx.post(_API_URL, headers=headers, json=payload, timeout=120)
@@ -44,6 +45,7 @@ class OpenRouterProvider(LLMProvider):
                     if attempt < _MAX_RETRIES:
                         time.sleep(delay)
                     last_exc = RuntimeError(f"OpenRouter rate limit (429) on attempt {attempt}")
+                    last_was_network = False
                     continue
 
                 resp.raise_for_status()
@@ -67,9 +69,24 @@ class OpenRouterProvider(LLMProvider):
                 raise RuntimeError(
                     f"OpenRouter API error {exc.response.status_code}: {exc.response.text[:200]}"
                 ) from exc
+            except httpx.RequestError as exc:
+                # Transient connectivity failure (DNS/connect/timeout) — retry with backoff.
+                last_exc = exc
+                last_was_network = True
+                delay = min(4 * attempt, 15)
+                logger.warning("openrouter.network_error", attempt=attempt, retry_in=delay, model=self._model)
+                if attempt < _MAX_RETRIES:
+                    time.sleep(delay)
+                continue
             except (KeyError, IndexError) as exc:
                 raise RuntimeError(f"Unexpected OpenRouter response shape: {exc}") from exc
 
+        if last_was_network:
+            raise RuntimeError(
+                "Couldn't reach OpenRouter — a network or DNS lookup failed. This usually means "
+                "no internet connection, a VPN/proxy blocking the request, or a brief network blip. "
+                "Check your connection and try again."
+            ) from last_exc
         raise RuntimeError(
             f"OpenRouter rate limit exceeded after {_MAX_RETRIES} attempts for model {self._model}."
         ) from last_exc
