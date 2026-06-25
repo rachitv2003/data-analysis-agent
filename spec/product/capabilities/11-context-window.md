@@ -8,8 +8,7 @@
 ## Overview
 
 Surfaces real-time token budget awareness in the UI:
-- **Sidebar context bar:** shows the *most recent single prompt size* (`last_prompt` from the latest turn's stored breakdown; falls back to `total_prompt` on runs recorded before `last_prompt` was tracked) against the active model's context limit. Before any turn has run for the current selection it falls back to a crude estimate. The bar itself is a single used/total figure.
-- **Sidebar at-rest breakdown:** below the context bar, the last query's per-component breakdown stays visible at rest (`#tu-breakdown`, JS `_updateSidebarBreakdown`), reusing the same `_renderBreakdown(bd)` markup as the steps inspector. It is updated whenever a turn arrives and persists (it is not cleared by a subsequent running/clarification turn).
+- **Sidebar context bar:** shows the *most recent single prompt size* (`last_prompt` from the latest turn's stored breakdown; falls back to `total_prompt` on runs recorded before `last_prompt` was tracked) against the active model's context limit. Before any turn has run for the current selection it falls back to a crude estimate. It does **not** compute a per-component breakdown.
 - **Steps inspector actuals:** per-component token breakdown for a given turn, rendered behind a "Token breakdown" toggle, using the stored actuals in `prompt_breakdown`. The breakdown is **accumulated across every LLM call in the run**, so its `total_prompt` equals `run.tokens_input` — the same "tokens in" figure shown below the answer and in the Last query pane.
 
 ---
@@ -23,7 +22,7 @@ The sidebar bar (`#ctx-bar-wrap`, JS `_updateCtxBar`) displays a single used/tot
 
 The bar is hidden when no datasets are checked. Fill colour turns to a warning state at ≥70% and a danger state at ≥90% of the limit.
 
-The **per-component** token estimates (system overhead, dataset schemas, history, memory, dataset notes, action history) are computed server-side in `_build_prompt`, stored in `prompt_breakdown`, and surfaced both in the per-turn steps inspector (see below) and in the at-rest sidebar breakdown (`#tu-breakdown`) which mirrors the most recent turn's breakdown.
+The **per-component** token estimates (system overhead, dataset schemas, history, memory, dataset notes, action history) are computed server-side in `_build_prompt`, stored in `prompt_breakdown`, and surfaced only in the per-turn steps inspector (see below) — never as an at-rest sidebar tooltip.
 
 ### Per-component estimation (server-side, for the breakdown)
 
@@ -83,7 +82,7 @@ Context window
 ▓▓▓▓▓▓▓░░░░░░░░░░░░░░░  14 200 / 1 000 000
 ```
 
-The bar shows only this single used/total figure. The per-component breakdown is rendered separately, both in the at-rest sidebar block (`#tu-breakdown`) directly below this bar and in the per-turn steps inspector (below).
+The bar shows only this single used/total figure — there is no sidebar breakdown tooltip. The per-component breakdown lives in the steps inspector (below).
 
 ---
 

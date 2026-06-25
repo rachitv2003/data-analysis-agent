@@ -162,8 +162,6 @@
         </div>
         <div class="cw-track"><div id="cw-fill" class="cw-fill" style="width:0%;"></div></div>
       </div>
-      <!-- C29: at-rest token component breakdown for the last query -->
-      <div class="tu-breakdown" id="tu-breakdown" style="display:none;"></div>
     </div>
 
   </aside><!-- /.sidebar -->
@@ -818,19 +816,6 @@
     return `<div class="bd-wrap"><div class="bd-title">Prompt breakdown</div>${rows}${total}</div>`;
   }
 
-  // C29: keep the last query's component breakdown visible in the sidebar at rest,
-  // not only inside a turn's expandable steps inspector.
-  function _updateSidebarBreakdown(bd) {
-    const wrap = document.getElementById('tu-breakdown');
-    if (!wrap) return;
-    const html = _renderBreakdown(bd);
-    // No breakdown for this turn (e.g. running/clarification) — keep the last
-    // query's breakdown visible rather than clearing it.
-    if (!html) return;
-    wrap.innerHTML = html;
-    wrap.style.display = 'block';
-  }
-
   function _updateCtxBar() {
     const wrap = document.getElementById('ctx-bar-wrap');
     if (!wrap) return;
@@ -1271,7 +1256,6 @@
       _lastActualPromptTokens = breakdown.last_prompt || breakdown.total_prompt;
       _updateCtxBar();
     }
-    _updateSidebarBreakdown(breakdown);
     let stepsFooter = '';
     if (steps != null) {
       const bdHtml = _renderBreakdown(breakdown);
