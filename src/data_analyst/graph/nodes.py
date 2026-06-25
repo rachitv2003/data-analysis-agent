@@ -2,6 +2,7 @@ import json
 import re
 import structlog
 import pandas as pd
+from datetime import date
 from pathlib import Path
 
 from data_analyst.graph.state import AgentState
@@ -318,9 +319,18 @@ def _build_prompt(state: AgentState) -> tuple[str, dict]:
         if derived_lines else ""
     )
 
+    # Current date — lets the LLM resolve unqualified dates ("June 23rd", "last
+    # month") against today instead of guessing a year. Counted in system_overhead.
+    today_line = (
+        f"Today's date is {date.today().isoformat()}. When the question refers to a "
+        f"date, month, or relative period without a year, interpret it relative to "
+        f"today's date.\n"
+    )
+
     prompt = (
         f"<node:plan>\n"
         f"You are a data analysis assistant.\n"
+        f"{today_line}"
         f"{df_description}\n\n"
         f"{derived_block}"
         f"{context_block}"

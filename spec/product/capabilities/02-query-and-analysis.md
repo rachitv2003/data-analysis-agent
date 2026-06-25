@@ -72,6 +72,8 @@ Implemented as a LangGraph `StateGraph` in `src/data_analyst/graph/`. Each turn 
 
 **`plan_action`** — builds the full prompt (`_build_prompt`) with schema, context, conversation history, and action history; calls the LLM; stores the response as `llm_response`; increments `iteration_count`; accumulates token counts. When `iteration_count >= max_iterations - 2`, appends a wrap-up instruction urging the LLM to produce `FINAL ANSWER` soon.
 
+The prompt also opens with the **current date** (`Today's date is YYYY-MM-DD …`, from `date.today()`) and an instruction to interpret unqualified dates/months/relative periods (e.g. "June 23rd", "last month") relative to today. Without this the LLM guesses a year for unqualified dates and can filter against the wrong one — returning zero rows on data from a different year. The date line is attributed to the `system_overhead` bucket in the C29 token breakdown.
+
 **`execute_action`** — strips optional markdown fences from `llm_response`, evaluates it via `_exec_code` (preamble via `exec` + final expression via `eval`). Captures result: if a Plotly `BaseFigure` is returned, serialises it to JSON and appends to `state["charts"]`; otherwise converts to string via `_result_to_str`. Appends `{action, result, is_error}` to `action_history`. Writes `iteration_count` to DB mid-run so the progress endpoint reflects live state.
 
 **`finalize`** — strips `FINAL ANSWER:` prefix, appends captured Plotly chart divs to the answer markdown, persists answer + action_history + token counts to `QueryRunRow`, pops DataFrame from cache.
