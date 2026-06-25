@@ -133,9 +133,12 @@ An expandable row at the top of the steps inspector (C23) labelled **"Prompt bre
    Conversation history     4 178
    Steps (this run)         3 480
    Selector & suggestions      20
+   ────────────────────────────
+   Total (= tokens in)     31 370
+   Tokens out                 640
 ```
 
-The displayed components are accumulated across the run, and the `Total (= tokens in)` row equals the "tokens in" figure shown below the answer. If `prompt_breakdown` is NULL for a run (old runs before this capability), the row is hidden.
+The displayed components decompose the **prompt (input)** and are accumulated across the run; the `Total (= tokens in)` row equals the "tokens in" figure shown below the answer. Output has no per-component structure, so it is shown as a plain `Tokens out` total beside the input total (the run's `tokens_output`, passed to `_renderBreakdown` from `appendTurn`), not as a component. If `prompt_breakdown` is NULL for a run (old runs before this capability), the row is hidden.
 
 ---
 

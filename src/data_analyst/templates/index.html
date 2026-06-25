@@ -799,7 +799,7 @@
   var _ctxLimit = 0; // var (not let) so base.html's tuRefreshDaily can write to window._ctxLimit
   var _lastActualPromptTokens = 0;
 
-  function _renderBreakdown(bd) {
+  function _renderBreakdown(bd, outTokens) {
     if (!bd) return '';
     const keys = [
       ['system_overhead','System overhead'],['dataset_schemas','Dataset schemas'],
@@ -813,7 +813,12 @@
     const total = bd.total_prompt
       ? `<div class="bd-row bd-total"><span class="bd-key">Total (= tokens in)</span><span class="bd-val">${bd.total_prompt.toLocaleString()} tok</span></div>`
       : '';
-    return `<div class="bd-wrap"><div class="bd-title">Prompt breakdown</div>${rows}${total}</div>`;
+    // The components decompose the prompt (input); output has no component
+    // structure, so it is shown as a plain total beside the input total.
+    const out = (outTokens != null && outTokens > 0)
+      ? `<div class="bd-row"><span class="bd-key">Tokens out</span><span class="bd-val">${outTokens.toLocaleString()} tok</span></div>`
+      : '';
+    return `<div class="bd-wrap"><div class="bd-title">Prompt breakdown</div>${rows}${total}${out}</div>`;
   }
 
   function _updateCtxBar() {
@@ -1258,7 +1263,7 @@
     }
     let stepsFooter = '';
     if (steps != null) {
-      const bdHtml = _renderBreakdown(breakdown);
+      const bdHtml = _renderBreakdown(breakdown, to);
       const panelId = 'sp-' + (++_stepSeq);
       const bdPanelId = 'bd-' + _stepSeq;
       if (steps.length) {
