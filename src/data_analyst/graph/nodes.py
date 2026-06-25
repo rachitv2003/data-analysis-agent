@@ -473,15 +473,38 @@ _WRAPUP_INSTRUCTION = (
 )
 
 
-def _update_prompt_breakdown(run_id: str, breakdown: dict) -> None:
-    """C29: write prompt_breakdown to DB mid-run (overwrites on each iteration)."""
+def _update_prompt_breakdown(run_id: str, delta: dict, last_prompt: int | None = None) -> None:
+    """C29: accumulate prompt_breakdown across every LLM call in a run.
+
+    Each plan_action call re-sends the full prompt, and the selector / suggestion
+    / force-finalize calls each consume further input tokens, so a run's true
+    input cost is the SUM across all calls. We merge-sum each component (and
+    ``total_prompt``) into the stored breakdown so ``total_prompt`` reconciles
+    with ``run.tokens_input`` — the headline "tokens in" shown in the UI.
+
+    ``last_prompt`` (when given) is stored as an overwrite, not a sum: it is the
+    size of the most recent single plan_action prompt, used by the sidebar
+    context-window bar to show how full one call's context is — a different
+    quantity from the cumulative run total.
+    """
     try:
         from data_analyst.db.session import create_db_session
         from data_analyst.db.models import QueryRunRow
         with create_db_session() as db:
             run = db.get(QueryRunRow, run_id)
-            if run:
-                run.prompt_breakdown = json.dumps(breakdown)
+            if not run:
+                return
+            merged: dict = {}
+            if run.prompt_breakdown:
+                try:
+                    merged = json.loads(run.prompt_breakdown)
+                except Exception:
+                    merged = {}
+            for key, value in delta.items():
+                merged[key] = int((merged.get(key, 0) or 0) + (value or 0))
+            if last_prompt is not None:
+                merged["last_prompt"] = int(last_prompt)
+            run.prompt_breakdown = json.dumps(merged)
     except Exception:
         pass
 
@@ -501,7 +524,7 @@ def plan_action(state: AgentState) -> AgentState:
         resp = llm.complete(prompt)
         breakdown["total_prompt"] = resp.tokens_input
         logger.info("plan_action.response", run_id=run_id, iteration=iteration_count, preview=resp.text[:80])
-        _update_prompt_breakdown(run_id, breakdown)
+        _update_prompt_breakdown(run_id, breakdown, last_prompt=resp.tokens_input)
         return {
             **state,
             "llm_response": resp.text,
@@ -896,6 +919,9 @@ def force_finalize(state: AgentState) -> AgentState:
         answer_md = resp.text.strip()
         tokens_in = state.get("tokens_input", 0) + resp.tokens_input
         tokens_out = state.get("tokens_output", 0) + resp.tokens_output
+        # C29: fold this synthesis call's input tokens into the breakdown so its
+        # total_prompt stays reconciled with run.tokens_input on best-effort runs.
+        _update_prompt_breakdown(run_id, {"auxiliary": resp.tokens_input, "total_prompt": resp.tokens_input})
         logger.warning("force_finalize.done", run_id=run_id, reason=reason)
     except Exception as exc:
         logger.error("force_finalize.llm_error", run_id=run_id, error=str(exc))

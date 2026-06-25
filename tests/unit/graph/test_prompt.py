@@ -6,18 +6,7 @@ import pytest
 
 from data_analyst.graph import nodes
 
-
-@pytest.fixture
-def _tmp_db(tmp_path, monkeypatch):
-    """Point the DB at a throwaway file so _build_prompt's memory/derived lookups
-    don't touch the repo's default sqlite file."""
-    monkeypatch.setenv("DATA_ANALYST_DATABASE_URL", f"sqlite:///{tmp_path / 't.db'}")
-    import data_analyst.config.settings as settings_module
-    from data_analyst.db import session as session_module
-    monkeypatch.setattr(settings_module, "_settings", None)
-    monkeypatch.setattr(session_module, "_engine", None)
-    monkeypatch.setattr(session_module, "_SessionLocal", None)
-    yield
+# _tmp_db fixture is provided by conftest.py in this directory.
 
 
 @pytest.fixture

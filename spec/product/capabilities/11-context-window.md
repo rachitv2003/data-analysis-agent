@@ -8,8 +8,8 @@
 ## Overview
 
 Surfaces real-time token budget awareness in the UI:
-- **Sidebar context bar:** shows the *last actual prompt total* (the `total_prompt` from the most recent turn's stored breakdown) against the active model's context limit. Before any turn has run for the current selection it falls back to a crude estimate. It does **not** compute a per-component breakdown.
-- **Steps inspector actuals:** per-component token breakdown for a given turn, rendered behind a "Token breakdown" toggle, using the stored actuals in `prompt_breakdown`.
+- **Sidebar context bar:** shows the *most recent single prompt size* (`last_prompt` from the latest turn's stored breakdown; falls back to `total_prompt` on runs recorded before `last_prompt` was tracked) against the active model's context limit. Before any turn has run for the current selection it falls back to a crude estimate. It does **not** compute a per-component breakdown.
+- **Steps inspector actuals:** per-component token breakdown for a given turn, rendered behind a "Token breakdown" toggle, using the stored actuals in `prompt_breakdown`. The breakdown is **accumulated across every LLM call in the run**, so its `total_prompt` equals `run.tokens_input` — the same "tokens in" figure shown below the answer and in the Last query pane.
 
 ---
 
@@ -17,7 +17,7 @@ Surfaces real-time token budget awareness in the UI:
 
 The sidebar bar (`#ctx-bar-wrap`, JS `_updateCtxBar`) displays a single used/total figure, not a component breakdown:
 
-- **Used:** `_lastActualPromptTokens` — the `total_prompt` recorded by the most recent turn that arrived. When no actual is available yet (no turn has run for the current dataset selection), it falls back to a crude estimate of `500 + (number of checked datasets) × 200` tokens, prefixed with `~` to mark it as approximate.
+- **Used:** `_lastActualPromptTokens` — the `last_prompt` recorded by the most recent turn that arrived (the size of a single plan_action prompt, i.e. how full one call's context is — falls back to `total_prompt` for runs recorded before `last_prompt` was tracked). When no actual is available yet (no turn has run for the current dataset selection), it falls back to a crude estimate of `500 + (number of checked datasets) × 200` tokens, prefixed with `~` to mark it as approximate.
 - **Limit:** the active model's context window, read from the single `context_limit` value returned by `GET /stats/daily` (stored in `window._ctxLimit`).
 
 The bar is hidden when no datasets are checked. Fill colour turns to a warning state at ≥70% and a danger state at ≥90% of the limit.
@@ -90,46 +90,52 @@ The bar shows only this single used/total figure — there is no sidebar breakdo
 
 ### Storage
 
-A new column `prompt_breakdown: TEXT (nullable JSON)` on `query_runs`. It stores the per-component token counts recorded during the **last** `plan_action` call in the run (the most representative planning call, or the final one if the run completes in one iteration).
+A column `prompt_breakdown: TEXT (nullable JSON)` on `query_runs`. It **accumulates** the per-component token counts across every LLM call in the run — each `plan_action` call (merge-summed), plus an `auxiliary` bucket for the non-plan_action calls (dataset selector, follow-up suggestions, force-finalize synthesis). Because each `plan_action` call re-sends the whole prompt and each auxiliary call adds its own input tokens, the cumulative `total_prompt` equals `run.tokens_input`.
 
 Shape:
 ```json
 {
-  "system_overhead": 812,
-  "dataset_schemas": 3201,
-  "history": 2089,
-  "memory": 441,
-  "dataset_notes": 7392,
-  "action_history": 1740,
-  "total_prompt": 15675
+  "system_overhead": 1624,
+  "dataset_schemas": 6402,
+  "history": 4178,
+  "memory": 882,
+  "dataset_notes": 14784,
+  "action_history": 3480,
+  "auxiliary": 20,
+  "total_prompt": 31370,
+  "last_prompt": 15675
 }
 ```
 
-`total_prompt` is the actual `tokens_input` value reported by the LLM API for that call (authoritative).
+- `total_prompt` is the **cumulative** actual `tokens_input` across all calls in the run — it reconciles with `run.tokens_input` (the headline "tokens in").
+- `last_prompt` is the actual `tokens_input` of the **most recent single `plan_action` call** — the size of one prompt, used by the sidebar context-window bar (a different quantity from the cumulative total).
+- `auxiliary` is the summed input tokens of the selector + suggestion + force-finalize calls.
 
 ### How it is captured
 
 In `_build_prompt` (called by `plan_action` each iteration), while assembling the prompt string:
 1. Compute `section_tokens = len(section) // 4` for the dataset schemas, dataset notes, memory, history, and action-history sub-sections.
 2. Compute `system_overhead` as a **residual** — `max(0, _tok(prompt) − schemas − notes − memory − history − action_history)` — so it captures the static template text plus anything not attributed to a named section. It is not a fixed constant.
-3. `plan_action` writes this breakdown via `_update_prompt_breakdown` on each iteration (overwriting), so the stored value reflects the **last** `plan_action` call. `total_prompt` is set from the actual `tokens_input` reported by the LLM API for that call (authoritative).
-4. The breakdown dict is serialized to JSON and written to `QueryRunRow.prompt_breakdown` alongside the existing `tokens_input` / `tokens_output` columns.
+3. `plan_action` writes this breakdown via `_update_prompt_breakdown` on each iteration. The helper **merge-sums** the delta into the stored breakdown (so components and `total_prompt` accumulate across iterations) and overwrites `last_prompt` with this call's `tokens_input`. `total_prompt` for each call is the actual `tokens_input` reported by the LLM API (authoritative).
+4. Calls outside `plan_action` fold their input tokens into the breakdown too: `force_finalize` adds its synthesis call (in `nodes.py`), and the `/ask` handler adds the dataset-selector and follow-up-suggestion calls — each as an `auxiliary` component plus the same delta on `total_prompt`. After these, `total_prompt == run.tokens_input`.
+5. The breakdown dict is serialized to JSON and written to `QueryRunRow.prompt_breakdown` alongside the existing `tokens_input` / `tokens_output` columns.
 
 ### UI — steps inspector panel
 
 An expandable row at the top of the steps inspector (C23) labelled **"Prompt breakdown"**, visible after the run completes:
 
 ```
-▼ Prompt breakdown                          15 675 tokens
-   System overhead          812
-   Dataset schemas         3 201
-   Conversation history    2 089
-   Memory                    441
-   Dataset notes           7 392
-   Action history          1 740
+▼ Prompt breakdown                Total (= tokens in)  31 370 tok
+   System overhead          1 624
+   Dataset schemas          6 402
+   Dataset notes           14 784
+   Project notes              882
+   Conversation history     4 178
+   Steps (this run)         3 480
+   Selector & suggestions      20
 ```
 
-If `prompt_breakdown` is NULL for a run (old runs before this capability), the row is hidden.
+The displayed components are accumulated across the run, and the `Total (= tokens in)` row equals the "tokens in" figure shown below the answer. If `prompt_breakdown` is NULL for a run (old runs before this capability), the row is hidden.
 
 ---
 
@@ -139,7 +145,7 @@ If `prompt_breakdown` is NULL for a run (old runs before this capability), the r
 
 | Column | Type | Nullable | Default | Description |
 |--------|------|----------|---------|-------------|
-| `prompt_breakdown` | TEXT | yes | NULL | JSON breakdown of prompt token counts per section for the last plan_action call in this run |
+| `prompt_breakdown` | TEXT | yes | NULL | JSON breakdown of prompt token counts per section, accumulated across all LLM calls in the run; `total_prompt` reconciles with `tokens_input`, `last_prompt` holds the most recent single-call size |
 
 ---
 
@@ -175,6 +181,5 @@ Allows the sidebar widget to look up the limit for the active model without a se
 
 ## Out of Scope
 
-- True per-model tokenisation (tiktoken, sentencepiece): too heavy; approximation is sufficient for budget display.
-- Per-call token breakdown (only the last planning call is stored, not every intermediate call).
-- Token counting for the force-finalize synthesis call (not reflected in the breakdown).
+- True per-model tokenisation (tiktoken, sentencepiece): too heavy; approximation is sufficient for budget display. The per-component figures remain 4-chars-per-token **estimates**; only `total_prompt` / `last_prompt` (and the `auxiliary` bucket) are authoritative LLM-reported counts, so the components sum to approximately — not exactly — `total_prompt`.
+- A separate per-call (per-iteration) breakdown: calls are summed into one cumulative breakdown, not stored individually.

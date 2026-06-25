@@ -191,6 +191,21 @@ def ask_question(
         session.add(run)
         session.commit()
 
+    # C29: fold selector + suggestion input tokens (counted outside plan_action)
+    # into the run's prompt_breakdown so its total_prompt equals run.tokens_input —
+    # the same "tokens in" figure shown below the answer and in the Last query pane.
+    aux_in = (sel_ti or 0) + (sug_ti or 0)
+    if aux_in and run.prompt_breakdown:
+        try:
+            _bd = _json.loads(run.prompt_breakdown)
+            _bd["auxiliary"] = int((_bd.get("auxiliary", 0) or 0) + aux_in)
+            _bd["total_prompt"] = int((_bd.get("total_prompt", 0) or 0) + aux_in)
+            run.prompt_breakdown = _json.dumps(_bd)
+            session.add(run)
+            session.commit()
+        except Exception:
+            pass
+
     return ok({
         "type": "answer",
         "run_id": run.id,

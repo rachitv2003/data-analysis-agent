@@ -804,13 +804,14 @@
     const keys = [
       ['system_overhead','System overhead'],['dataset_schemas','Dataset schemas'],
       ['dataset_notes','Dataset notes'],['memory','Project notes'],
-      ['action_history','Steps (this run)'],
+      ['history','Conversation history'],['action_history','Steps (this run)'],
+      ['auxiliary','Selector & suggestions'],
     ];
     const rows = keys.filter(([k])=>bd[k]).map(([k,label])=>
       `<div class="bd-row"><span class="bd-key">${label}</span><span class="bd-val">${bd[k].toLocaleString()} tok</span></div>`
     ).join('');
     const total = bd.total_prompt
-      ? `<div class="bd-row bd-total"><span class="bd-key">Total (actual)</span><span class="bd-val">${bd.total_prompt.toLocaleString()} tok</span></div>`
+      ? `<div class="bd-row bd-total"><span class="bd-key">Total (= tokens in)</span><span class="bd-val">${bd.total_prompt.toLocaleString()} tok</span></div>`
       : '';
     return `<div class="bd-wrap"><div class="bd-title">Prompt breakdown</div>${rows}${total}</div>`;
   }
@@ -1247,8 +1248,11 @@
       dsFooter = `<details class="datasets-used-footer"><summary>Datasets used (${datasetsUsed.length})</summary><span>${names}</span></details>`;
     }
     const badge = isBestEffort?`<div class="best-effort-badge">&#9888; Best effort</div>`:'';
-    if (breakdown && breakdown.total_prompt) {
-      _lastActualPromptTokens = breakdown.total_prompt;
+    // Context bar shows a single call's prompt size (context fullness), which is
+    // last_prompt — not total_prompt (the cumulative whole-run input). Fall back
+    // to total_prompt for runs recorded before last_prompt was tracked.
+    if (breakdown && (breakdown.last_prompt || breakdown.total_prompt)) {
+      _lastActualPromptTokens = breakdown.last_prompt || breakdown.total_prompt;
       _updateCtxBar();
     }
     let stepsFooter = '';

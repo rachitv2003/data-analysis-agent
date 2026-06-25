@@ -1111,6 +1111,21 @@ def test_prompt_breakdown_in_ask_response(client):
             assert key in bd, f"prompt_breakdown missing key: {key}"
 
 
+def test_prompt_breakdown_total_reconciles_with_tokens_in(client):
+    """C29: prompt_breakdown.total_prompt must equal the run's tokens_input — the
+    same "tokens in" figure shown below the answer and in the Last query pane.
+    The stub bills 10 in per call over 2 plan_action calls = 20."""
+    dataset_id = _upload(client)
+    resp = client.post("/ask", json={"dataset_id": dataset_id, "question": "Describe the data."})
+    assert resp.status_code == 200, resp.text
+    result = resp.json()["data"]
+    bd = result["prompt_breakdown"]
+    assert bd is not None
+    assert bd["total_prompt"] == result["tokens_input"]  # reconciled, not last-call only
+    # last_prompt tracks a single call (context-window bar) and is <= the run total.
+    assert bd["last_prompt"] <= bd["total_prompt"]
+
+
 def test_prompt_breakdown_in_session_turns(client):
     """C29: GET /sessions/{id} turns include prompt_breakdown field."""
     dataset_id = _upload(client)
