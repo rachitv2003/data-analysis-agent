@@ -141,7 +141,7 @@ See `spec/product/04-data-model.md` — four new nullable columns added to `data
 
 ## UI
 
-See `spec/product/06-ui.md` — derived dataset badge, session filter, staleness indicator, re-derive button, lineage modal.
+See `spec/product/06-ui.md` — derived dataset badge, session filter, staleness indicator, re-derive button. Dataset relationships are visualised by the Database-tab ER diagram (`renderERDiagram`), not a separate lineage modal.
 
 ---
 
@@ -152,4 +152,4 @@ See `spec/product/06-ui.md` — derived dataset badge, session filter, staleness
 | `src/data_analyst/graph/nodes.py` | `_make_eval_ns` injects `save_dataset` closure; `_build_prompt` adds derived manifest section |
 | `src/data_analyst/api/datasets.py` | `GET /datasets` returns `origin`, `derived_from_dataset_ids`, `derivation_description`, `stale`; `POST /{id}/re-derive`; `DELETE /{id}` cascade extension |
 | `src/data_analyst/db/models.py` | Four new columns on `DatasetRow` |
-| `src/data_analyst/templates/index.html` | Derived badge, session filter, staleness indicator, re-derive button, lineage modal |
+| `src/data_analyst/templates/index.html` | Derived badge, session filter, staleness indicator, re-derive button (relationships shown via the Database-tab ER diagram) |
