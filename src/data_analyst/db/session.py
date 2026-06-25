@@ -84,6 +84,8 @@ def init_db() -> None:
         run_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(query_runs)"))}
         _run_migrations = [
             ("prompt_breakdown", "TEXT"),     # C29
+            ("dataset_ids_json", "TEXT"),     # C14 multi-dataset (alembic 961cff3c246b)
+            ("selector_reasoning", "TEXT"),   # C19 selector (alembic 3ee8b16c70eb)
         ]
         for col, definition in _run_migrations:
             if col not in run_cols:
