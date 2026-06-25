@@ -119,7 +119,9 @@ Nodes:
   Single-turn (no session_id) uses a run-scoped _dataframes[run_id] dict instead. Fatal
   load/lookup error -> handle_error.
 - plan_action: build prompt from question + action_history + conversation_history +
-  dataset_context + persistent memory (+ column schema), inject `<node:plan>` tag, call LLM;
+  dataset_context + persistent memory (+ column schema), prepend the CURRENT DATE
+  ("Today's date is <YYYY-MM-DD>", so unqualified dates like "June 23rd" resolve to the
+  right year instead of a guess), inject `<node:plan>` tag, call LLM;
   write llm_response, increment iteration_count, add token counts. When
   iteration_count >= max_iterations-2, append a wrap-up instruction telling the model to
   produce a FINAL ANSWER now from its best findings (no extra LLM call).
@@ -238,9 +240,14 @@ C24 NL data cleaning (preview + apply) C25 autonomous derived-dataset persistenc
     lineage tracking, staleness detection
 C26 pre-flight clarification check      C27 session-scoped DataFrame cache (LRU ~1GB) + Parquet
     pre-conversion on upload
-C29 live context-window display (sidebar token-budget estimate at rest + per-component
-    prompt_breakdown after each run: system_overhead, dataset_schemas, history, memory,
-    dataset_notes, action_history, total_prompt)
+C29 live context-window display: sidebar context-budget BAR at rest (most recent single
+    prompt size vs model limit) + per-turn prompt_breakdown in the steps inspector (NOT a
+    separate sidebar breakdown). The breakdown ACCUMULATES across every LLM call in the run
+    — each plan_action call plus an `auxiliary` bucket for the selector / suggestion /
+    force-finalize calls — so `total_prompt` == run.tokens_input (the headline "tokens in");
+    `last_prompt` holds the most recent single-call size (used by the bar); the panel also
+    shows a "Tokens out" total. Keys: system_overhead, dataset_schemas, dataset_notes,
+    memory, history, action_history, auxiliary, total_prompt, last_prompt.
 C30 on-demand dataset notes generation  C31 semantic context compression (fact extraction)
 C32 collapsible conversation turns (client-side, sessionStorage)
 
