@@ -56,13 +56,14 @@ The toolbar only shows when ≥ 2 completed turns exist. A single-turn session d
 
 ## State Persistence
 
-Collapsed state is **not** persisted — it lives purely in the live DOM via `classList.toggle('collapsed')` on each `.turn` element. There is no `sessionStorage` (or any other) backing store.
+Collapsed state is persisted in **`sessionStorage`**, keyed by `run_id` (globally unique), so it survives tab switches, page refreshes, and session reloads within the browser tab.
 
-This means:
-- State is **lost** whenever the thread is re-rendered: switching tabs (Analyse ↔ Database), refreshing the page, or reloading the session.
-- When a session is loaded via `resumeSession(sessionId)` → `GET /sessions/{id}`, the thread is cleared and every turn is re-appended in the default **expanded** state. No prior collapse state is restored.
+- A single `sessionStorage` entry `collapsedTurns` holds a JSON array of the `run_id`s that are currently collapsed (`_loadCollapsedSet` / `_saveCollapsedSet`).
+- `_toggleTurn`, `_collapseAll`, and `_expandAll` update that set after mutating the DOM (`_persistTurnCollapsed`).
+- Each turn element carries its identity as `div.dataset.runId` (set from the `run_id` passed into `appendTurn`). On (re-)render, `appendTurn` re-applies the collapsed class + chevron glyph if the run's id is in the stored set.
+- When a session is loaded via `resumeSession(sessionId)` → `GET /sessions/{id}`, each turn is re-appended with its `run_id`, so previously collapsed turns come back collapsed. Turns whose `run_id` is absent from the set render expanded (the default).
 
-> **Future work:** persisting collapsed state (e.g. in `sessionStorage` keyed by `run_id`) so it survives tab switches and session reloads is not yet implemented. See *Out of Scope* below.
+`sessionStorage` (not `localStorage`) is intentional: collapse state is a transient view preference scoped to the tab session, and it is cleared when the tab closes.
 
 ---
 
@@ -106,14 +107,14 @@ Rendered once by `_updateCollapseToolbar()` which is called after every turn app
 
 | File | Change |
 |------|--------|
-| `src/data_analyst/templates/index.html` | Add chevron toggle (`.turn-collapse-btn`) in `appendTurn`; add `_toggleTurn(btn)`, `_collapseAll()`, `_expandAll()`, `_updateCollapseToolbar()`; thread toolbar (`#thread-toolbar` / `.btn-collapse-all`); CSS for the collapsed state (`.turn.collapsed .turn-body { display:none }`). No state-restore in `resumeSession`. |
+| `src/data_analyst/templates/index.html` | Add chevron toggle (`.turn-collapse-btn`) in `appendTurn`; add `_toggleTurn(btn)`, `_collapseAll()`, `_expandAll()`, `_updateCollapseToolbar()`; thread toolbar (`#thread-toolbar` / `.btn-collapse-all`); CSS for the collapsed state (`.turn.collapsed .turn-body { display:none }`). `sessionStorage` persistence keyed by `run_id` (`_loadCollapsedSet`/`_saveCollapsedSet`/`_persistTurnCollapsed`); `appendTurn` takes a `runId` arg, stores it on `div.dataset.runId`, and restores collapsed state on render. |
 
-No backend changes. No new API routes. No DB changes.
+No backend changes. No new API routes. No DB changes. (`appendTurn` consumes the existing `run_id` already returned by `POST /ask` and `GET /sessions/{id}`.)
 
 ---
 
 ## Out of Scope
 
-- Persisting collapsed state at all (across page refreshes, tab switches, or session reloads) — state is live-DOM only and is lost on any re-render. See *State Persistence* above.
+- Cross-device / cross-browser persistence of collapse state — it lives in `sessionStorage`, scoped to the browser tab, and is cleared when the tab closes (see *State Persistence* above).
 - Per-section collapsing within a turn (e.g. hiding only the Steps inspector — that already exists via the existing steps toggle).
 - Keyboard shortcut to collapse all.

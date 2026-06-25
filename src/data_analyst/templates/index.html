@@ -1201,7 +1201,7 @@
           _pendingQuestion = t.question;
           appendClarification(t.answer_markdown || t.answer_html || '');
         } else {
-          appendTurn(t.question,t.answer_html||esc(t.answer_markdown||'(no answer)'),t.iteration_count,t.tokens_input,t.tokens_output,t.status,null,!!t.is_best_effort,t.steps||[],new Date(t.created_at),null,null,t.prompt_breakdown);
+          appendTurn(t.question,t.answer_html||esc(t.answer_markdown||'(no answer)'),t.iteration_count,t.tokens_input,t.tokens_output,t.status,null,!!t.is_best_effort,t.steps||[],new Date(t.created_at),null,null,t.prompt_breakdown,t.run_id);
         }
       }
     } catch {}
@@ -1247,9 +1247,10 @@
     }).catch(()=>{});
   }
 
-  function appendTurn(q,html,iters,ti,to,status,datasetsUsed,isBestEffort,steps,firedAt,elapsedMs,suggestedQuestions,breakdown) {
+  function appendTurn(q,html,iters,ti,to,status,datasetsUsed,isBestEffort,steps,firedAt,elapsedMs,suggestedQuestions,breakdown,runId) {
     const div = document.createElement('div');
     div.className = 'turn'+(status==='failed'?' failed':'');
+    if (runId) div.dataset.runId = runId;
     const timeStr = firedAt ? firedAt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '';
     const elapsedStr = elapsedMs!=null ? (elapsedMs>=1000?(elapsedMs/1000).toFixed(1)+'s':elapsedMs+'ms') : '';
     const metaParts = [];
@@ -1297,6 +1298,12 @@
     }
     div.innerHTML = `<div class="turn-header"><div class="turn-q">Q: ${esc(q)}</div>${badge}<button type="button" class="turn-collapse-btn" onclick="_toggleTurn(this)" aria-label="Collapse turn" title="Collapse">&#9660;</button></div><div class="turn-body"><div class="answer-body">${html}</div><div class="turn-meta">${meta}</div>${dsFooter}${stepsFooter}</div><div class="turn-hint">&#9654;&nbsp;[answer truncated &mdash; click to expand]</div>`;
     div.querySelector('.turn-hint').addEventListener('click', () => _toggleTurn(div.querySelector('.turn-collapse-btn')));
+    // C32: restore persisted collapse state for this run on (re-)render.
+    if (runId && _loadCollapsedSet().has(runId)) {
+      div.classList.add('collapsed');
+      const cb = div.querySelector('.turn-collapse-btn');
+      if (cb) { cb.textContent='▶'; cb.setAttribute('aria-label','Expand turn'); cb.title='Expand'; }
+    }
     if (suggestedQuestions && suggestedQuestions.length) {
       const chipsDiv = document.createElement('div');
       chipsDiv.className = 'followup-chips';
@@ -1322,28 +1329,52 @@
     _updateCollapseToolbar();
   }
 
+  // C32: persist per-turn collapse state in sessionStorage, keyed by run_id
+  // (globally unique), so it survives tab switches and session reloads.
+  const _COLLAPSE_KEY = 'collapsedTurns';
+  function _loadCollapsedSet() {
+    try { return new Set(JSON.parse(sessionStorage.getItem(_COLLAPSE_KEY) || '[]')); }
+    catch { return new Set(); }
+  }
+  function _saveCollapsedSet(set) {
+    try { sessionStorage.setItem(_COLLAPSE_KEY, JSON.stringify([...set])); } catch {}
+  }
+  function _persistTurnCollapsed(runId, collapsed) {
+    if (!runId) return;
+    const set = _loadCollapsedSet();
+    if (collapsed) set.add(runId); else set.delete(runId);
+    _saveCollapsedSet(set);
+  }
+
   function _toggleTurn(btn) {
     const turn = btn.closest('.turn'); if(!turn) return;
     const collapsed = turn.classList.toggle('collapsed');
     btn.textContent = collapsed ? '▶' : '▼';
     btn.setAttribute('aria-label', collapsed ? 'Expand turn' : 'Collapse turn');
     btn.title = collapsed ? 'Expand' : 'Collapse';
+    _persistTurnCollapsed(turn.dataset.runId, collapsed);
     _updateCollapseToolbar();
   }
   function _collapseAll() {
+    const set = _loadCollapsedSet();
     document.querySelectorAll('#thread .turn:not(.clarification-turn)').forEach(turn => {
       turn.classList.add('collapsed');
       const btn = turn.querySelector('.turn-collapse-btn');
       if(btn){ btn.textContent='▶'; btn.setAttribute('aria-label','Expand turn'); btn.title='Expand'; }
+      if(turn.dataset.runId) set.add(turn.dataset.runId);
     });
+    _saveCollapsedSet(set);
     _updateCollapseToolbar();
   }
   function _expandAll() {
+    const set = _loadCollapsedSet();
     document.querySelectorAll('#thread .turn:not(.clarification-turn)').forEach(turn => {
       turn.classList.remove('collapsed');
       const btn = turn.querySelector('.turn-collapse-btn');
       if(btn){ btn.textContent='▼'; btn.setAttribute('aria-label','Collapse turn'); btn.title='Collapse'; }
+      if(turn.dataset.runId) set.delete(turn.dataset.runId);
     });
+    _saveCollapsedSet(set);
     _updateCollapseToolbar();
   }
   function _updateCollapseToolbar() {
@@ -1424,7 +1455,7 @@
         } else {
           const dsUsed = r.datasets_used||[];
           if(dsUsed.length>1) document.getElementById('querying-label').textContent=`Querying ${dsUsed.length} datasets`;
-          appendTurn(q,r.answer_html||esc(r.answer_markdown||'(no answer)'),r.iteration_count,r.tokens_input,r.tokens_output,r.status,dsUsed,!!r.is_best_effort,r.steps||[],firedAt,Date.now()-firedAt.getTime(),r.suggested_questions||[],r.prompt_breakdown);
+          appendTurn(q,r.answer_html||esc(r.answer_markdown||'(no answer)'),r.iteration_count,r.tokens_input,r.tokens_output,r.status,dsUsed,!!r.is_best_effort,r.steps||[],firedAt,Date.now()-firedAt.getTime(),r.suggested_questions||[],r.prompt_breakdown,r.run_id);
           if(typeof tuAddRun==='function') tuAddRun(r.tokens_input||0, r.tokens_output||0);
           // Include derived dataset IDs created this run so "This session" filter shows them
           const allSessionIds = [...(r.dataset_ids||dsUsed.map(d=>d.id)||[]), ...(r.derived_dataset_ids||[])];
