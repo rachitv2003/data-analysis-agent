@@ -297,3 +297,63 @@ def test_ask_no_datasets_uploaded(api_client):
     r = api_client.post("/ask", json={"question": "hi", "skip_clarification": True})
     assert r.status_code == 400
     assert r.json()["detail"]["code"] == "no_datasets"
+
+
+# --- bulk delete ---------------------------------------------------------
+
+
+def test_bulk_delete_sessions_returns_deleted_count(api_client):
+    """Create 3 sessions, bulk-delete 2, assert deleted=2 and the 3rd still exists."""
+    up = _upload_csv(api_client)
+    dataset_id = up.json()["data"]["dataset_id"]
+
+    sid1 = _ask(api_client, dataset_id, question="q1").json()["data"]["session_id"]
+    sid2 = _ask(api_client, dataset_id, question="q2").json()["data"]["session_id"]
+    sid3 = _ask(api_client, dataset_id, question="q3").json()["data"]["session_id"]
+
+    r = api_client.request("DELETE", "/sessions", json={"session_ids": [sid1, sid2]})
+    assert r.status_code == 200, r.text
+    data = r.json()["data"]
+    assert data["deleted"] == 2
+
+    # sid3 must still exist
+    assert api_client.get(f"/sessions/{sid3}").status_code == 200
+    # sid1 and sid2 must be gone
+    assert api_client.get(f"/sessions/{sid1}").status_code == 404
+    assert api_client.get(f"/sessions/{sid2}").status_code == 404
+
+
+def test_bulk_delete_sessions_empty_list_returns_400(api_client):
+    """Empty session_ids list must return 400."""
+    r = api_client.request("DELETE", "/sessions", json={"session_ids": []})
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"]["code"] == "empty_list"
+
+
+def test_bulk_delete_skips_running_sessions(api_client):
+    """A session with a running query run must be skipped (not deleted)."""
+    up = _upload_csv(api_client)
+    dataset_id = up.json()["data"]["dataset_id"]
+
+    # Create a session with a completed turn so it's a valid session
+    sid = _ask(api_client, dataset_id, question="setup").json()["data"]["session_id"]
+
+    # Inject a running QueryRunRow for this session directly
+    with create_db_session() as s:
+        s.add(
+            QueryRunRow(
+                dataset_id=dataset_id,
+                session_id=sid,
+                question="running q",
+                status="running",
+                dataset_ids_json=[dataset_id],
+            )
+        )
+
+    # Bulk-delete with that session id included
+    r = api_client.request("DELETE", "/sessions", json={"session_ids": [sid]})
+    assert r.status_code == 200, r.text
+    # The session was skipped because it has a running run
+    assert r.json()["data"]["deleted"] == 0
+    # The session still exists
+    assert api_client.get(f"/sessions/{sid}").status_code == 200

@@ -105,6 +105,15 @@ async function del<T>(path: string): Promise<T> {
   return unwrap<T>(res)
 }
 
+async function delJson<T>(path: string, payload: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  return unwrap<T>(res)
+}
+
 // ---------------------------------------------------------------------------
 // Response types (subset of spec/api.md needed in Phase 2)
 // ---------------------------------------------------------------------------
@@ -465,6 +474,15 @@ export const api = {
   deleteSession: (id: string) => del<unknown>(`/sessions/${encodeURIComponent(id)}`),
 
   deleteAllSessions: () => del<unknown>('/sessions'),
+
+  /**
+   * DELETE /sessions (bulk) — delete a specific set of sessions.
+   * Body: { session_ids: string[] }. 400 if the list is empty.
+   * Sessions with an active run are silently skipped.
+   * Returns { deleted: number } — the count actually removed.
+   */
+  bulkDeleteSessions: (ids: string[]): Promise<{ deleted: number }> =>
+    delJson<{ deleted: number }>('/sessions', { session_ids: ids }),
 
   datasetSessions: (datasetId: string) =>
     getJson<Session[]>(`/datasets/${encodeURIComponent(datasetId)}/sessions`),

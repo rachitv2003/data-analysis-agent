@@ -16,6 +16,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 from markdown_it import MarkdownIt
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -23,6 +24,12 @@ from api._common import ok, api_error
 from db.models import ConversationSessionRow, DatasetRow, QueryRunRow
 from db.session import get_session
 from domain.session import SessionRenameRequest
+
+
+class BulkDeleteBody(BaseModel):
+    """Body for `DELETE /sessions` bulk endpoint."""
+
+    session_ids: list[str]
 
 router = APIRouter()
 
@@ -162,8 +169,49 @@ def delete_session(session_id: str, session: Session = Depends(get_session)) -> 
 
 
 @router.delete("/sessions")
-def delete_all_sessions(session: Session = Depends(get_session)) -> dict:
-    """Delete every session. Always 200."""
+def delete_sessions(
+    body: BulkDeleteBody | None = None,
+    session: Session = Depends(get_session),
+) -> dict:
+    """Bulk delete or delete-all sessions.
+
+    - **With body** `{"session_ids": [...]}`: bulk-delete the listed sessions.
+      Returns 400 `empty_list` when the list is empty. Skips ids that are not
+      found and skips sessions that have a currently-running query run. Returns
+      `{"deleted": N}` where N is the count actually deleted.
+    - **No body** (backward-compat "clear all"): deletes every session and
+      returns `{"deleted_count": N}`.
+    """
+    if body is not None:
+        # --- bulk delete path ---
+        if not body.session_ids:
+            raise api_error("empty_list", "session_ids must not be empty", 400)
+
+        deleted = 0
+        for sid in body.session_ids:
+            row = session.get(ConversationSessionRow, sid)
+            if row is None:
+                continue  # skip missing
+
+            # Skip if there is any running query run for this session
+            running = (
+                session.execute(
+                    select(QueryRunRow)
+                    .where(QueryRunRow.session_id == sid)
+                    .where(QueryRunRow.status == "running")
+                )
+                .scalars()
+                .first()
+            )
+            if running is not None:
+                continue  # skip in-flight sessions
+
+            session.delete(row)
+            deleted += 1
+
+        return ok({"deleted": deleted})
+
+    # --- delete-all path (no body) ---
     rows = session.execute(select(ConversationSessionRow)).scalars().all()
     for row in rows:
         session.delete(row)

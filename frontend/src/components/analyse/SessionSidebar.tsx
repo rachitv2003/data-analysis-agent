@@ -15,6 +15,10 @@ import { api, type Session } from '@/lib/api'
  *  - **Rename** — inline edit → PATCH /sessions/{id}/name → refresh.
  *  - **Delete** — per-session → DELETE /sessions/{id} → refresh (the parent
  *    clears the conversation if the active session was deleted).
+ *  - **Checkbox** — per-row checkbox to select sessions for bulk delete.
+ *  - **Select all / Deselect all** — header toggle (visible when sessions exist).
+ *  - **Delete selected (N)** — bulk-delete via DELETE /sessions with body
+ *    {session_ids:[...]}; visible when ≥1 checkbox is ticked.
  *  - **Clear all** — DELETE /sessions behind a confirm → refresh.
  *  - **Project notes** — opens the global-memory modal.
  *
@@ -50,6 +54,10 @@ export function SessionSidebar({
   const [confirmClearAll, setConfirmClearAll] = useState(false)
   const [clearingAll, setClearingAll] = useState(false)
 
+  // Bulk-selection state
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
@@ -66,6 +74,11 @@ export function SessionSidebar({
   useEffect(() => {
     void load()
   }, [load, refreshToken])
+
+  // Clear selection whenever the session list changes (e.g. after a delete/refresh)
+  useEffect(() => {
+    setSelected(new Set())
+  }, [sessions])
 
   const startRename = useCallback((s: Session) => {
     setRenamingId(s.id)
@@ -124,6 +137,59 @@ export function SessionSidebar({
     }
   }, [onAllDeleted])
 
+  // Toggle one checkbox
+  const toggleSelect = useCallback((id: string) => {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }, [])
+
+  // Select all / deselect all
+  const allSelected = sessions.length > 0 && sessions.every(s => selected.has(s.id))
+  const toggleSelectAll = useCallback(() => {
+    if (allSelected) {
+      setSelected(new Set())
+    } else {
+      setSelected(new Set(sessions.map(s => s.id)))
+    }
+  }, [allSelected, sessions])
+
+  // Bulk delete selected sessions
+  const doDeleteSelected = useCallback(async () => {
+    const ids = [...selected]
+    if (ids.length === 0) return
+    setBulkDeleting(true)
+    try {
+      const result = await api.bulkDeleteSessions(ids)
+      // Remove deleted ids from local list (those skipped by server stay)
+      // Re-fetch to get the accurate post-delete list
+      const remaining = await api.listSessions()
+      setSessions(Array.isArray(remaining) ? remaining : [])
+      setSelected(new Set())
+      // Notify parent for each id that was actually in the deleted set.
+      // We don't know exactly which were skipped, so notify for the ones no
+      // longer present in the refreshed list.
+      const remainingIds = new Set((Array.isArray(remaining) ? remaining : []).map(s => s.id))
+      for (const id of ids) {
+        if (!remainingIds.has(id)) {
+          onSessionDeleted(id)
+        }
+      }
+      // If the result deleted nothing (all skipped), still update the list.
+      void result // suppress unused-var warning
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete selected sessions.')
+    } finally {
+      setBulkDeleting(false)
+    }
+  }, [selected, onSessionDeleted])
+
   return (
     <section
       aria-labelledby="sessions-heading"
@@ -142,6 +208,7 @@ export function SessionSidebar({
         </button>
       </div>
 
+      {/* Action bar: +New, Select all/Deselect all, Delete selected, Clear all */}
       <div className="mb-3 flex flex-wrap gap-2">
         <button
           type="button"
@@ -150,6 +217,30 @@ export function SessionSidebar({
         >
           + New
         </button>
+
+        {/* Select all / Deselect all — only visible when sessions exist */}
+        {sessions.length > 0 && (
+          <button
+            type="button"
+            onClick={toggleSelectAll}
+            className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+          >
+            {allSelected ? 'Deselect all' : 'Select all'}
+          </button>
+        )}
+
+        {/* Delete selected — visible when ≥1 checkbox is ticked */}
+        {selected.size > 0 && (
+          <button
+            type="button"
+            onClick={() => void doDeleteSelected()}
+            disabled={bulkDeleting}
+            className="rounded-md border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 disabled:opacity-60"
+          >
+            {bulkDeleting ? 'Deleting…' : `Delete selected (${selected.size})`}
+          </button>
+        )}
+
         {sessions.length > 0 &&
           (confirmClearAll ? (
             <span className="inline-flex items-center gap-1">
@@ -208,6 +299,7 @@ export function SessionSidebar({
           {sessions.map(s => {
             const active = activeSessionId === s.id
             const label = s.name?.trim() || s.first_question?.trim() || 'Untitled session'
+            const isSelected = selected.has(s.id)
             return (
               <li
                 key={s.id}
@@ -246,21 +338,33 @@ export function SessionSidebar({
                   </div>
                 ) : (
                   <div>
-                    <button
-                      type="button"
-                      onClick={() => onResume(s.id)}
-                      className="block w-full text-left"
-                    >
-                      <span className="block truncate text-sm font-medium text-gray-800">
-                        {label}
-                      </span>
-                      <span className="text-[11px] text-gray-500">
-                        {s.turn_count} turn{s.turn_count === 1 ? '' : 's'}
-                        {active ? ' · active' : ''}
-                      </span>
-                    </button>
+                    {/* Row: checkbox + session button */}
+                    <div className="flex items-start gap-2">
+                      {/* Checkbox — stops propagation so row-click (resume) is not triggered */}
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        aria-label={`Select session ${label}`}
+                        onChange={() => toggleSelect(s.id)}
+                        onClick={e => e.stopPropagation()}
+                        className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 cursor-pointer rounded border-gray-300 accent-blue-600"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => onResume(s.id)}
+                        className="block min-w-0 flex-1 text-left"
+                      >
+                        <span className="block truncate text-sm font-medium text-gray-800">
+                          {label}
+                        </span>
+                        <span className="text-[11px] text-gray-500">
+                          {s.turn_count} turn{s.turn_count === 1 ? '' : 's'}
+                          {active ? ' · active' : ''}
+                        </span>
+                      </button>
+                    </div>
 
-                    <div className="mt-1.5 flex items-center gap-2">
+                    <div className="mt-1.5 flex items-center gap-2 pl-5">
                       <button
                         type="button"
                         onClick={() => startRename(s)}
