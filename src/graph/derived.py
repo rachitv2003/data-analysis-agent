@@ -122,6 +122,14 @@ def register_derived_dataset(
         row.parquet_path = str(parquet_path)
         row.content_hash = content_hash
 
+    # Evict any stale cache entry for this derived dataset id (e.g. on re-derive via
+    # save_dataset). Deferred import avoids the nodes->sandbox->derived->nodes cycle.
+    try:
+        from graph.nodes import invalidate_dataset_cache  # noqa: PLC0415
+        invalidate_dataset_cache(dataset_id)
+    except Exception as exc:  # noqa: BLE001 — cache eviction is best-effort
+        logger.warning("derived_cache_evict_failed", dataset_id=dataset_id, error=str(exc))
+
     logger.info(
         "derived_dataset_registered",
         dataset_id=dataset_id,

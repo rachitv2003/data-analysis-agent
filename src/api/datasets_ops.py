@@ -30,6 +30,7 @@ from api._common import ok, api_error
 from db.models import DatasetRow
 from db.session import get_session
 from graph.describe import trigger_describe_async
+from graph.nodes import invalidate_dataset_cache
 from graph.sandbox import build_namespace
 from llm.client import LLMClient
 from observability.events import get_logger
@@ -294,6 +295,8 @@ def clean_apply(
         row.content_hash = hashlib.sha256(csv_path.read_bytes()).hexdigest()
     row.updated_at = _now()
 
+    # Evict any cached DataFrame so subsequent session turns see the cleaned data.
+    invalidate_dataset_cache(dataset_id)
     logger.info(
         "clean_apply_ok", dataset_id=dataset_id,
         rows=row.row_count, cols=row.col_count,

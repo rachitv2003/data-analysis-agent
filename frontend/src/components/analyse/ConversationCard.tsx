@@ -14,6 +14,7 @@ import type { LastQueryTokens } from '@/components/analyse/AnalyseTab'
 import { Markdown } from '@/components/analyse/Markdown'
 import { ChartRender } from '@/components/analyse/ChartRender'
 import { StepsInspector } from '@/components/analyse/StepsInspector'
+import { PromptBreakdown } from '@/components/analyse/PromptBreakdown'
 import { ProgressBar } from '@/components/analyse/ProgressBar'
 import { SuggestionChips } from '@/components/analyse/SuggestionChips'
 import { ClarificationTurn } from '@/components/analyse/ClarificationTurn'
@@ -599,6 +600,19 @@ function AnswerView({
       </div>
 
       <StepsInspector steps={steps} />
+
+      {answer.prompt_breakdown && Object.keys(answer.prompt_breakdown).length > 0 && (
+        <PromptBreakdown
+          breakdown={
+            Object.fromEntries(
+              Object.entries(answer.prompt_breakdown).map(([k, v]) => [
+                k,
+                typeof v === 'number' ? v : Number(v) || 0,
+              ]),
+            )
+          }
+        />
+      )}
     </div>
   )
 }

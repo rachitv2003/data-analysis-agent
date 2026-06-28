@@ -34,6 +34,7 @@ from graph.derived import (
     derivation_description,
     is_stale,
 )
+from graph.nodes import invalidate_dataset_cache
 from graph.sandbox import build_namespace
 from observability.events import get_logger
 
@@ -287,6 +288,8 @@ def re_derive_dataset(dataset_id: str, session: Session = Depends(get_session)) 
     row.created_at = now
     row.updated_at = now
 
+    # Evict the stale cached DataFrame so subsequent session turns load fresh data.
+    invalidate_dataset_cache(dataset_id)
     item = _list_item(row, session)
     item["stale"] = False
     logger.info("dataset_re_derived", dataset_id=dataset_id, rows=row.row_count)

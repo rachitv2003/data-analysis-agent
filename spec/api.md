@@ -48,11 +48,15 @@ Delete all + cascade.
 ### `PATCH /datasets/{id}/context`
 Body `{context}` (≤4000). **400** `context_too_long` / **404** missing.
 
+> Sending `{"context": ""}` or `{"context": null}` clears the field to `null` in the DB; callers reading back the dataset will receive `context: null`, not `""`.
+
 ### `POST /datasets/{id}/describe`
 C30 trigger: set `auto_notes_status=pending`, generate notes async. **404** missing.
 
 ### `POST /datasets/{id}/re-derive`
 C25 re-run `derivation_code` vs current parents; clears `stale`. **400** `not_derived` / **404** `parent_not_found` / **400** `re_derive_error`.
+
+> On success, both `created_at` and `updated_at` on the derived dataset are reset to the current time. This is the mechanism that clears the staleness condition: a dataset is considered stale when `parent.updated_at > derived.created_at`, so resetting `created_at` after a successful re-derive makes the derived dataset current again.
 
 ### `POST /datasets/{id}/clean`
 C24 NL cleaning PREVIEW: LLM generates pandas code, run on a copy, return `{code, before/after row+col counts, previews}`. **422** on clean exec error. **404** missing.
@@ -93,6 +97,8 @@ Delete one / all sessions. **Does NOT cascade to `query_runs`** — run history 
 
 ### `GET /runs/current`
 Most recent run `{run_id, status, iteration_count, max_iterations}` (status `idle` when none). Used for live progress polling (~1/s). Always 200.
+
+> **Active runs routes:** only `GET /runs/current` and `GET /runs/{run_id}` are active. The boilerplate `POST /runs` route from the skeleton was removed — analysis runs are created exclusively via `POST /ask`.
 
 ### `GET /stats/daily`
 `{date, model, tokens_input, tokens_output, query_count, context_limit}` aggregated over today's completed runs (server-local day); `context_limit` from a hard-coded model table (unknown → 128000). Always 200.

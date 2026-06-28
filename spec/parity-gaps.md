@@ -18,8 +18,8 @@ This branch is fully pushed to its upstream (`fork/feature/data-analysis-agent-v
 
 ## Tier 1 — Correctness & overclaims (cheap, highest trust-value)
 
-- [ ] **C31 — Semantic compression is dead code.** `extract_facts` stores `context_facts` but they are **never injected**; the prompt always uses raw `row.context`, so compression yields zero prompt-size benefit. Wire the facts into the prompt (with raw-notes fallback + lazy self-heal, matching A).
-  - Files: `src/graph/nodes.py` (`_build_prompt` / `_schema_block`), `src/graph/compress.py`
+- [x] **C31 — Semantic compression wired (2026-06-29).** `setup` now injects compressed `context_facts` into the dataset context (prefer-facts), with raw-notes fallback + lazy fire-and-forget self-heal when notes exist but facts don't — matching A. Tests in `tests/unit/test_graph_stub.py` (prefer-facts / fallback+self-heal / pure-decision). Offline gate green (197 passed). *Real-Gemini gate (`extract_facts` quality) still to run.*
+  - Files: `src/graph/nodes.py` (`_dataset_notes_for_prompt`, `_facts_as_notes`, `_trigger_facts_self_heal`, `setup` call site)
 
 - [ ] **C27 — Session DataFrame cache can serve stale frames.** Count-based LRU only; missing `_invalidate_dataset` on clean / re-derive / delete (and A's byte-bounded eviction via `memory_usage` / `cache_limit_mb`). A cleaned or re-derived dataset can return cached pre-change rows within a session. Add invalidation (and ideally the byte bound).
   - Files: `src/graph/nodes.py` (cache block), call sites in `src/api/datasets_ops.py`, `src/graph/derived.py`

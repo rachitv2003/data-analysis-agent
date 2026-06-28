@@ -13,6 +13,7 @@ for a run live in the module-level `_dataframes` registry, keyed by `run_id`
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,7 @@ import pandas as pd
 
 from db.models import DatasetRow, QueryRunRow
 from db.session import create_db_session
+from graph.compress import extract_facts  # C31: distil notes -> compact facts
 from graph.memory import get_memory_block  # owned by slice-3c; 3b only imports it
 from graph.sandbox import build_namespace, eval_expression, make_save_dataset
 from graph.state import AgentState
@@ -99,6 +101,48 @@ def _schema_block(df: pd.DataFrame, name: str, notes: str | None = None) -> str:
     if notes:
         lines.append(f"Notes: {notes.strip()}")
     return "\n".join(lines)
+
+
+def _facts_as_notes(facts: list[str]) -> str:
+    """Render C31 compressed facts as a compact notes string for the prompt."""
+    return "; ".join(f.strip() for f in facts if f and str(f).strip())
+
+
+def _trigger_facts_self_heal(dataset_id: str) -> None:
+    """Fire-and-forget C31 extraction for a dataset that has notes but no compressed
+    facts yet, so future plan prompts use the smaller facts (raw notes are used this
+    turn). Never blocks planning and never raises; `extract_facts` is in-flight-locked
+    so repeated triggers don't double-run.
+    """
+
+    def _run() -> None:
+        try:
+            extract_facts(dataset_id)
+        except Exception as exc:  # noqa: BLE001 — self-heal is best-effort
+            logger.warning("facts_self_heal_failed", dataset_id=dataset_id, error=str(exc))
+
+    try:
+        threading.Thread(
+            target=_run, name=f"c31-heal-{dataset_id[:8]}", daemon=True
+        ).start()
+    except Exception as exc:  # noqa: BLE001 — never let self-heal crash planning
+        logger.warning("facts_self_heal_spawn_failed", dataset_id=dataset_id, error=str(exc))
+
+
+def _dataset_notes_for_prompt(
+    dataset_id: str, context: str | None, facts: list[str] | None
+) -> str:
+    """C31: prefer the compressed facts (smaller prompt) over the raw notes, falling
+    back to the raw notes — and lazily self-healing — when a dataset has notes but no
+    facts yet. This is what makes C31 actually shrink the plan prompt.
+    """
+    clean_facts = [f for f in (facts or []) if f and str(f).strip()]
+    if clean_facts:
+        return _facts_as_notes(clean_facts)
+    raw = (context or "").strip()
+    if raw:
+        _trigger_facts_self_heal(dataset_id)
+    return raw
 
 
 def _safe_memory_block() -> str:
@@ -193,7 +237,13 @@ def setup(state: AgentState) -> AgentState:
                 frames.append(frame)
                 filenames.append(row.filename or f"{dataset_id}.csv")
                 schema_parts.append(
-                    _schema_block(frame, row.filename or dataset_id, row.context)
+                    _schema_block(
+                        frame,
+                        row.filename or dataset_id,
+                        _dataset_notes_for_prompt(
+                            dataset_id, row.context, row.context_facts
+                        ),
+                    )
                 )
     except Exception as exc:  # noqa: BLE001 — fatal load error
         logger.warning("setup_load_failed", run_id=run_id, error=str(exc))
@@ -378,6 +428,40 @@ def release_derived_created(run_id: str) -> None:
 
 def _release_dataframe(run_id: str) -> None:
     _dataframes.pop(run_id, None)
+
+
+def invalidate_dataset_cache(dataset_id: str) -> None:
+    """Evict `dataset_id` from every session entry in `_session_cache` (C27/D2).
+
+    Called after a dataset is mutated (clean/apply or re-derive) so subsequent
+    multi-turn turns see the fresh on-disk data rather than the stale cached
+    DataFrame. Empty session entries are removed to keep the cache compact.
+    """
+    stale_sessions = [
+        sid for sid, entry in _session_cache.items()
+        if dataset_id in entry.get("frames", {})
+    ]
+    for sid in stale_sessions:
+        entry = _session_cache.get(sid)
+        if entry is None:
+            continue
+        frames: dict = entry.get("frames", {})
+        frames.pop(dataset_id, None)
+        order: list = entry.get("order", [])
+        try:
+            order.remove(dataset_id)
+        except ValueError:
+            pass
+        # If the session now has no cached frames, drop the session entry entirely.
+        if not frames:
+            _session_cache.pop(sid, None)
+            logger.info("session_cache_evict_empty", session_id=sid)
+        else:
+            logger.info(
+                "session_cache_invalidated",
+                session_id=sid,
+                dataset_id=dataset_id,
+            )
 
 
 def finalize(state: AgentState) -> AgentState:

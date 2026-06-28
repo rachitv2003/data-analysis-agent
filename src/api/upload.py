@@ -54,9 +54,48 @@ def _parse_dataframe(raw: bytes, ext: str) -> pd.DataFrame:
     if ext in (".tsv", ".txt"):
         return pd.read_csv(buf, sep="\t")
     if ext == ".json":
-        return pd.read_json(buf)
-    if ext in (".xlsx", ".xls"):
-        return pd.read_excel(buf)
+        # Handle the three JSON shapes the spec requires (D9):
+        #   1. records-list: [{col: val, ...}, ...]  — default orient
+        #   2. column-keyed / dict-of-lists: {col: [val, ...], ...}
+        #   3. split-oriented: {"columns": [...], "data": [...]}
+        #
+        # pandas auto-detects shape 2 correctly with the default orient.
+        # Shape 3 is silently misparsed by the default orient (the keys
+        # "columns" and "data" become literal column names), so we peek at
+        # the raw JSON to detect it before calling read_json. (D9)
+        import json as _json  # noqa: PLC0415
+
+        try:
+            _peek = _json.loads(raw)
+        except Exception:
+            _peek = None
+
+        if (
+            isinstance(_peek, dict)
+            and "columns" in _peek
+            and "data" in _peek
+        ):
+            # Looks like split orientation — parse explicitly so we get the
+            # right column names rather than a "columns"/"data" column frame.
+            return pd.read_json(io.BytesIO(raw), orient="split")
+
+        # For records-list and column-keyed (dict-of-lists), the default
+        # orient works correctly; fall back to orient="columns" on ValueError.
+        first_exc: Exception | None = None
+        for orient in (None, "columns"):
+            try:
+                kwargs: dict = {} if orient is None else {"orient": orient}
+                return pd.read_json(io.BytesIO(raw), **kwargs)
+            except ValueError as exc:
+                if first_exc is None:
+                    first_exc = exc
+        raise first_exc  # type: ignore[misc]
+    if ext == ".xlsx":
+        return pd.read_excel(io.BytesIO(raw))
+    if ext == ".xls":
+        # xlrd must be used explicitly for legacy .xls (BIFF) files; pandas
+        # cannot auto-detect the engine from a BytesIO stream. (D13)
+        return pd.read_excel(io.BytesIO(raw), engine="xlrd")
     raise ValueError(f"Unsupported extension: {ext}")
 
 

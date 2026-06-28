@@ -299,12 +299,22 @@ def _stringify(result: Any) -> str:
     try:
         if isinstance(result, (pd.DataFrame, pd.Series)):
             n = len(result)
+            suffix = ""
             # Cap rows before calling to_string() — huge frames would OOM before truncation.
-            if isinstance(result, pd.DataFrame) and n > 100:
-                text = result.head(100).to_string()
-                text += f"\n... [{n - 100} more rows not shown]"
+            if isinstance(result, pd.DataFrame):
+                original_ncols = len(result.columns)
+                # Cap rows.
+                if n > 100:
+                    result = result.head(100)
+                    suffix += f"\n... [{n - 100} more rows not shown]"
+                # Cap columns (C8: up to ~20 cols per spec).
+                if original_ncols > 20:
+                    result = result.iloc[:, :20]
+                    suffix += f"\n[showing 20 of {original_ncols} columns]"
+                text = result.to_string()
             else:
                 text = result.to_string()
+            text += suffix
             if len(text) > 6000:
                 text = text[:6000] + "\n... [truncated]"
             return text

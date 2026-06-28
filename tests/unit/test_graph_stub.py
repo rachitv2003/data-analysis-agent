@@ -322,3 +322,158 @@ def test_save_dataset_stub_returns_string_without_writing():
     msg = save_dataset(df, "derived_thing", "a desc")
     assert isinstance(msg, str)
     assert "derived_thing" in msg
+
+
+# --------------------------------------------------------------------------- #
+# C31 — compressed facts are injected into the plan prompt (not the raw notes)
+# --------------------------------------------------------------------------- #
+
+
+def _set_context(dataset_id: str, *, context=None, facts=None) -> None:
+    """Set a dataset's raw `context` and/or compressed `context_facts`."""
+    with create_db_session() as session:
+        row = session.get(DatasetRow, dataset_id)
+        if context is not None:
+            row.context = context
+        if facts is not None:
+            row.context_facts = facts
+
+
+def test_setup_injects_compressed_facts_not_raw_notes(uploads_dir, monkeypatch):
+    """C31: when a dataset has compressed facts, setup must inject the FACTS into
+    the dataset context — not the longer raw notes. This is the wiring that was
+    previously dead (facts extracted + stored but never used)."""
+    # Self-heal must NOT fire when facts already exist; record any call to prove it.
+    calls: list[str] = []
+    monkeypatch.setattr(nodes_module, "_trigger_facts_self_heal", lambda did: calls.append(did))
+
+    dataset_id = _make_dataset(uploads_dir)
+    raw = "This is a long-winded paragraph of raw notes that should be compressed away."
+    _set_context(dataset_id, context=raw, facts=["fiscal year starts in April", "revenue in USD"])
+
+    result = nodes_module.setup({"run_id": "r-facts", "dataset_ids": [dataset_id]})
+    ctx = result["dataset_context"]
+
+    assert "fiscal year starts in April; revenue in USD" in ctx  # facts injected
+    assert raw not in ctx  # raw notes NOT injected
+    assert calls == []  # no self-heal needed when facts exist
+
+
+def test_setup_falls_back_to_raw_notes_and_self_heals(uploads_dir, monkeypatch):
+    """C31: with notes but no compressed facts yet, setup uses the raw notes this
+    turn AND fires a lazy self-heal so future turns get the smaller facts."""
+    calls: list[str] = []
+    monkeypatch.setattr(nodes_module, "_trigger_facts_self_heal", lambda did: calls.append(did))
+
+    dataset_id = _make_dataset(uploads_dir)
+    raw = "Revenue is always in USD; fiscal year starts in April."
+    _set_context(dataset_id, context=raw, facts=[])
+
+    result = nodes_module.setup({"run_id": "r-fallback", "dataset_ids": [dataset_id]})
+    ctx = result["dataset_context"]
+
+    assert raw in ctx  # raw notes used as fallback
+    assert calls == [dataset_id]  # self-heal triggered exactly once for this dataset
+
+
+def test_dataset_notes_for_prompt_prefers_facts(monkeypatch):
+    """Pure-function check of the prefer-facts/fallback decision."""
+    monkeypatch.setattr(nodes_module, "_trigger_facts_self_heal", lambda did: None)
+
+    # Facts win over raw context.
+    assert nodes_module._dataset_notes_for_prompt("d1", "raw notes", ["a", "b"]) == "a; b"
+    # No facts -> raw context.
+    assert nodes_module._dataset_notes_for_prompt("d1", "raw notes", []) == "raw notes"
+    # Nothing -> empty string.
+    assert nodes_module._dataset_notes_for_prompt("d1", None, None) == ""
+    # Blank/whitespace facts are ignored (treated as no facts).
+    assert nodes_module._dataset_notes_for_prompt("d1", "raw", ["", "  "]) == "raw"
+
+
+# --------------------------------------------------------------------------- #
+# D2 — invalidate_dataset_cache removes dataset from ALL session entries (C27)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture(autouse=False)
+def _clear_session_cache():
+    """Ensure the session cache is empty before and after each D2 test."""
+    nodes_module._session_cache.clear()
+    yield
+    nodes_module._session_cache.clear()
+
+
+def test_invalidate_dataset_cache_removes_from_all_sessions(_clear_session_cache):
+    """After invalidate_dataset_cache(dataset_id), that id is absent in every session."""
+    dataset_id = "ds-to-evict"
+    other_id = "ds-keep"
+    df = pd.DataFrame({"x": [1, 2]})
+
+    # Populate two session entries that both reference the evicted dataset_id.
+    nodes_module._session_cache["sess-A"] = {
+        "frames": {dataset_id: df, other_id: df},
+        "order": [dataset_id, other_id],
+    }
+    nodes_module._session_cache["sess-B"] = {
+        "frames": {dataset_id: df},
+        "order": [dataset_id],
+    }
+    nodes_module._session_cache["sess-C"] = {
+        "frames": {other_id: df},
+        "order": [other_id],
+    }
+
+    nodes_module.invalidate_dataset_cache(dataset_id)
+
+    # The evicted dataset must not appear in any session's frames.
+    for sid, entry in nodes_module._session_cache.items():
+        assert dataset_id not in entry.get("frames", {}), (
+            f"dataset_id still present in session {sid!r}"
+        )
+
+    # sess-A retains other_id; sess-B was emptied so it is dropped entirely.
+    assert "sess-A" in nodes_module._session_cache
+    assert other_id in nodes_module._session_cache["sess-A"]["frames"]
+    assert "sess-B" not in nodes_module._session_cache
+    assert "sess-C" in nodes_module._session_cache  # untouched
+
+
+def test_invalidate_dataset_cache_noop_when_not_cached(_clear_session_cache):
+    """Calling invalidate_dataset_cache for an unknown dataset_id is a no-op."""
+    # Should not raise even when the cache is empty.
+    nodes_module.invalidate_dataset_cache("totally-unknown-ds-id")
+    assert nodes_module._session_cache == {}
+
+
+def test_invalidate_dataset_cache_order_list_updated(_clear_session_cache):
+    """The `order` list is kept consistent with `frames` after eviction."""
+    dataset_id = "ds-ordered"
+    other_id = "ds-other"
+    df = pd.DataFrame({"y": [9]})
+
+    nodes_module._session_cache["sess-X"] = {
+        "frames": {dataset_id: df, other_id: df},
+        "order": [dataset_id, other_id],
+    }
+
+    nodes_module.invalidate_dataset_cache(dataset_id)
+
+    entry = nodes_module._session_cache.get("sess-X")
+    assert entry is not None
+    assert dataset_id not in entry["order"]
+    assert other_id in entry["order"]
+
+
+def test_invalidate_dataset_cache_empty_session_removed(_clear_session_cache):
+    """When eviction empties a session's frames dict, that session entry is dropped."""
+    dataset_id = "ds-only"
+    df = pd.DataFrame({"z": [7]})
+
+    nodes_module._session_cache["sess-only"] = {
+        "frames": {dataset_id: df},
+        "order": [dataset_id],
+    }
+
+    nodes_module.invalidate_dataset_cache(dataset_id)
+
+    assert "sess-only" not in nodes_module._session_cache

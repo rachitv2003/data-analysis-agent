@@ -75,7 +75,7 @@ Today these users either learn pandas/SQL, wait on an analyst, or fight with spr
   ```
   All three from the repo root. `pytest tests/unit/` must pass with **no env vars and no network**; `alembic upgrade head` must succeed against the configured SQLite DB; `alembic current` must show a revision (proving the 4 tables exist). The DB driver is the production one (SQLite via `AGENT_DATABASE_URL`).
 
-- **How the user tests it (handoff seed):** From the repo root run the three gate commands above and confirm: unit tests green, `alembic upgrade head` says "Running upgrade 0001 -> 0002", and `alembic current` prints `0002 (head)`. This is a **backend-only phase verified via tests + migrations — there is intentionally no clickable analysis page yet**, say so explicitly. Optionally run `python agent.py --run` and open `http://localhost:8001/app/`: the two-tab shell is visible but **every control is a labelled NON-FUNCTIONAL stub** ("Upload — coming in a later phase", etc.). Those stubs are the planned vision, not bugs.
+- **How the user tests it (handoff seed):** From the repo root run the three gate commands above and confirm: unit tests green, `alembic upgrade head` says "Running upgrade 0001 -> 0002", and `alembic current` prints `7dddb81481b7 (head)`. This is a **backend-only phase verified via tests + migrations — there is intentionally no clickable analysis page yet**, say so explicitly. Optionally run `python agent.py --run` and open `http://localhost:8001/app/`: the two-tab shell is visible but **every control is a labelled NON-FUNCTIONAL stub** ("Upload — coming in a later phase", etc.). Those stubs are the planned vision, not bugs.
 
 ### Phase 2 — ReAct loop + REST routes + real Analyse tab (single-dataset Q&A)
 

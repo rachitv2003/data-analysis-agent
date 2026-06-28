@@ -357,6 +357,94 @@ def test_upload_xlsx_parses_correctly(api_client):
     assert data["col_count"] == 2
 
 
+def _make_xls_bytes(col_names, rows_data):
+    """Build a minimal BIFF2 XLS file in memory — no xlwt dependency needed.
+
+    Constructs a valid BIFF2 stream (the simplest Excel binary format) that xlrd
+    2.x and pandas `read_excel(engine='xlrd')` can parse.
+    """
+    import struct
+
+    def record(rec_type, data=b""):
+        return struct.pack("<HH", rec_type, len(data)) + data
+
+    buf = bytearray()
+    # BOF BIFF2
+    buf += record(0x0009, struct.pack("<HH", 0x0002, 0x0010))
+    # DIMENSION: first row, last row, first col, last col
+    n_rows = len(rows_data) + 1  # +1 for header row
+    n_cols = len(col_names)
+    buf += record(0x0000, struct.pack("<HHHH", 0, n_rows - 1, 0, n_cols - 1))
+    # Header row (row 0) — LABEL records
+    for c, name in enumerate(col_names):
+        s = name.encode("latin-1", errors="replace")
+        buf += record(0x0004, struct.pack("<HHBBBb", 0, c, 0, 0, 0, len(s)) + s)
+    # Data rows
+    for r, row in enumerate(rows_data, 1):
+        for c, val in enumerate(row):
+            if isinstance(val, str):
+                s = val.encode("latin-1", errors="replace")
+                buf += record(0x0004, struct.pack("<HHBBBb", r, c, 0, 0, 0, len(s)) + s)
+            else:
+                buf += record(0x0003, struct.pack("<HHBBBd", r, c, 0, 0, 0, float(val)))
+    # EOF
+    buf += record(0x000A)
+    return bytes(buf)
+
+
+def test_upload_xls_parses_correctly(api_client):
+    """D13/C1/C11: XLS (legacy BIFF2) files are parsed correctly via xlrd engine."""
+    xls_bytes = _make_xls_bytes(
+        ["col_a", "col_b", "col_c"],
+        [[1, "alpha", 10.5], [2, "beta", 20.0], [3, "gamma", 30.0]],
+    )
+    files = {
+        "file": (
+            "data.xls",
+            io.BytesIO(xls_bytes),
+            "application/vnd.ms-excel",
+        )
+    }
+    r = api_client.post("/upload", files=files)
+    assert r.status_code == 200, r.text
+    data = r.json()["data"]
+    assert data["filename"] == "data.xls"
+    assert data["format"] == "excel"
+    assert data["row_count"] >= 1
+
+
+def test_upload_json_column_keyed_parses_correctly(api_client):
+    """D9: column-keyed JSON (dict-of-lists) is parsed correctly."""
+    import json as _json
+
+    json_body = _json.dumps({"col_a": [1, 2, 3], "col_b": ["x", "y", "z"]})
+    files = {
+        "file": ("data_cols.json", io.BytesIO(json_body.encode()), "application/json")
+    }
+    r = api_client.post("/upload?force=true", files=files)
+    assert r.status_code == 200, r.text
+    data = r.json()["data"]
+    assert data["row_count"] == 3
+    assert data["col_count"] == 2
+
+
+def test_upload_json_split_oriented_parses_correctly(api_client):
+    """D9: split-oriented JSON is parsed correctly."""
+    import json as _json
+
+    json_body = _json.dumps(
+        {"columns": ["col_a", "col_b"], "data": [[1, "x"], [2, "y"]]}
+    )
+    files = {
+        "file": ("data_split.json", io.BytesIO(json_body.encode()), "application/json")
+    }
+    r = api_client.post("/upload?force=true", files=files)
+    assert r.status_code == 200, r.text
+    data = r.json()["data"]
+    assert data["row_count"] == 2
+    assert sorted(data["columns"]) == ["col_a", "col_b"]
+
+
 # --- C27: Parquet-preference / fallback tests ----------------------------
 
 
