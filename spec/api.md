@@ -19,6 +19,8 @@ The single-origin Next.js UI (static mount). Server starts API-only if `frontend
 ### `POST /upload`
 Multipart `file`; form `context?`, `notes_file?`; query `force=false`. Parses (pandas), computes sha256, duplicate-checks (C10), saves CSV + Parquet, creates a `datasets` row, triggers async C30 notes. Accepts `.csv/.tsv/.txt/.json/.xlsx/.xls`. Returns `{dataset_id, filename, format, row_count, col_count, columns, context, auto_notes_status}`.
 
+> **Notes truncation:** when `notes_file` is supplied its decoded text is **silently truncated to 4000 characters** before being stored as `context` — no error is returned for oversized notes files. This differs from `PATCH /datasets/{id}/context`, which rejects values exceeding 4000 chars with `400 context_too_long`. The plain `context` form field is stored as-is (no server-side truncation at upload).
+
 | Status | Condition |
 |--------|-----------|
 | 409 | `duplicate_dataset` (with `match_type` + `existing_*`); resolvable with `force=true` |
@@ -64,11 +66,13 @@ Pre-flight C26 (unless `skip_clarification`) → may return `{type:"clarificatio
 ```json
 {"type":"answer","run_id":"...","session_id":"...","dataset_ids":[...],
  "derived_dataset_ids":[...],"datasets_used":[...],"selector_reasoning":"...",
- "answer_markdown":"...","answer_html":"...","iteration_count":3,
- "tokens_input":1234,"tokens_output":567,"status":"completed",
+ "answer_markdown":"...","answer_html":"...","charts":[...],
+ "iteration_count":3,"tokens_input":1234,"tokens_output":567,"status":"completed",
  "is_best_effort":false,"steps":[...],"suggested_questions":[...],
  "prompt_breakdown":{...}}
 ```
+
+> **`charts` field:** a list of Plotly figure JSON strings (`list[str]`). Each element is the serialised output of `plotly.graph_objects.Figure.to_json()` — a self-contained Plotly spec that can be passed directly to `Plotly.react()` / `JSON.parse()`. The list is empty (`[]`) when the agent produced no charts during the run. Charts are also persisted to `query_runs.charts_json` and surfaced via `GET /sessions/{id}` on each turn.
 
 | Status | Condition |
 |--------|-----------|
@@ -95,6 +99,47 @@ Most recent run `{run_id, status, iteration_count, max_iterations}` (status `idl
 
 ### `GET /memory` and `PATCH /memory`
 Read / replace the global persistent memory text; PATCH triggers C31 compression. Memory is injected into every `plan_action` prompt as authoritative. Always 200 on read; PATCH **400** if body invalid.
+
+### `GET /settings`
+Returns the current runtime settings as key/value pairs. Always 200.
+
+```json
+{
+  "data": {
+    "llm_model": "gemini/gemini-2.0-flash",
+    "max_iterations": "10",
+    "price_input_per_million": "0.10",
+    "price_output_per_million": "0.40"
+  },
+  "error": null
+}
+```
+
+All four values are stored as strings in the `settings` table (or `null` if that key has never been set, in which case the server falls back to the env/default for that setting).
+
+| Field | Type (stored) | Meaning |
+|-------|---------------|---------|
+| `llm_model` | string or null | LLM model override; `null` → use env/default |
+| `max_iterations` | string or null | Max ReAct iterations override; `null` → use env/default |
+| `price_input_per_million` | string or null | USD per 1 M input tokens for cost display; `null` → shown as N/A |
+| `price_output_per_million` | string or null | USD per 1 M output tokens for cost display; `null` → shown as N/A |
+
+### `PATCH /settings`
+
+Updates one or more settings fields. Only fields present in the request body are written; omitted fields are left unchanged. Returns the full settings object (same shape as `GET /settings`) after applying the updates. Always 200.
+
+**Request body** (all fields optional):
+
+```json
+{
+  "llm_model": "gemini/gemini-2.0-flash-lite",
+  "max_iterations": "5",
+  "price_input_per_million": "0.075",
+  "price_output_per_million": "0.30"
+}
+```
+
+**Response:** same envelope as `GET /settings`, reflecting the post-update state.
 
 ## Authentication
 

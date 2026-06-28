@@ -206,6 +206,8 @@ The stub provider (offline fallback) branches **only on the injected node tag**,
 | `<node:plan>` missing | `FINAL ANSWER: [stub] Unable to process` |
 | `<node:clarify>` | "proceed" (no clarification in stub mode) |
 | `<node:suggest>` | `[]` |
+| `<node:describe>` | no branch — falls through to `_PLAN_FALLBACK`; returns `"FINAL ANSWER: [stub] Unable to process"`. `generate_dataset_notes` still sets `auto_notes_status="done"` but stores placeholder text. Real notes require a live Gemini key. |
+| `<node:compress>` | no branch — falls through to `_PLAN_FALLBACK`; returns non-JSON. `_parse_facts` in both `graph.compress` and `graph.memory` catches the parse failure and returns `[]` gracefully. Used by C31 `extract_facts` (dataset-scoped) and `compress_memory` (global memory). |
 
 ---
 

@@ -53,6 +53,7 @@ One analysis run (one question → one answer), with its full step history.
 | tokens_input | Integer | yes | Accumulated prompt tokens (C7) |
 | tokens_output | Integer | yes | Accumulated completion tokens (C7) |
 | prompt_breakdown | JSON | no | C29 per-component token estimate |
+| charts_json | JSON | no | Persisted chart array from the run; reloaded as `charts[]` in `GET /sessions/{id}` turns so charts survive server restarts |
 | dataset_ids_json | JSON | no | All datasets loaded for this run (C14) |
 | selector_reasoning | Text | no | C19 selector rationale |
 | created_at | TIMESTAMP(tz) | yes | `_now` default |
