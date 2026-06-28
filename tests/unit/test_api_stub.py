@@ -71,6 +71,21 @@ def test_duplicate_upload_returns_409(api_client):
     assert detail["existing_dataset_id"] == first.json()["data"]["dataset_id"]
 
 
+def test_duplicate_filename_different_content_returns_409_name(api_client):
+    """D1 regression: same filename, different bytes → 409 with match_type=='name'."""
+    first = _upload_csv(api_client, name="data.csv", body="col\n1\n2\n")
+    assert first.status_code == 200, first.text
+    first_id = first.json()["data"]["dataset_id"]
+
+    # Different bytes, same filename.
+    dup = _upload_csv(api_client, name="data.csv", body="col\n3\n4\n5\n")
+    assert dup.status_code == 409, dup.text
+    detail = dup.json()["detail"]
+    assert detail["code"] == "duplicate_dataset"
+    assert detail["match_type"] == "name"
+    assert detail["existing_dataset_id"] == first_id
+
+
 def test_duplicate_upload_force_overrides(api_client):
     first = _upload_csv(api_client)
     assert first.status_code == 200

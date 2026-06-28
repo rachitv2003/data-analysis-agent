@@ -101,12 +101,13 @@ async def upload(
     if df.shape[0] == 0 or df.shape[1] == 0:
         raise api_error("empty_file", "Uploaded file has no data rows/columns.", 400)
 
-    # Duplicate check (C10): same content hash AND same filename -> 409 unless force.
+    # Duplicate check (C10): detect by content hash first, then by filename.
     if not force:
-        existing = session.execute(
+        # --- Pass 1: content-hash match (same bytes) ---
+        hash_matches = session.execute(
             select(DatasetRow).where(DatasetRow.content_hash == content_hash)
         ).scalars().all()
-        for row in existing:
+        for row in hash_matches:
             same_name = row.filename == filename
             match_type = "content_and_name" if same_name else "content"
             # Duplicate carries extra resolution fields beyond {code,message};
@@ -119,6 +120,25 @@ async def upload(
                     "match_type": match_type,
                     "existing_dataset_id": row.id,
                     "existing_filename": row.filename,
+                },
+            )
+
+        # --- Pass 2: filename match with different content (name-only duplicate) ---
+        name_match = session.execute(
+            select(DatasetRow).where(
+                DatasetRow.filename == filename,
+                DatasetRow.content_hash != content_hash,
+            )
+        ).scalars().first()
+        if name_match is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "duplicate_dataset",
+                    "message": "A file with this name was already uploaded. Re-upload with force=true to keep both.",
+                    "match_type": "name",
+                    "existing_dataset_id": name_match.id,
+                    "existing_filename": name_match.filename,
                 },
             )
 

@@ -1,1 +1,14 @@
 @import "tailwindcss";
+
+/* Visually-hidden live region for screen-reader announcements (#aria-live).
+   Equivalent to Tailwind's sr-only but defined here so the element in
+   layout.tsx does not need inline styles. */
+.sr-only-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
