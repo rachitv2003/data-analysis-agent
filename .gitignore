@@ -24,3 +24,7 @@ uploads/
 # Next.js incremental type-check cache
 frontend/tsconfig.tsbuildinfo
 *.tsbuildinfo
+
+# Editor / local tooling config (machine-specific — never commit)
+.vscode/
+.idea/
