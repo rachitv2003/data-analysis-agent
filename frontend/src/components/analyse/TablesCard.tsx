@@ -231,7 +231,7 @@ export function TablesCard({
               onClick={onClearSelection}
               className="rounded border border-gray-300 bg-white px-2 py-0.5 font-medium text-gray-600 hover:bg-gray-50"
             >
-              Clear (let agent pick)
+              Clear
             </button>
           )}
           {selectedDatasetIds.length > 0 &&
