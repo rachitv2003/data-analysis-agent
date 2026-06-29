@@ -102,7 +102,10 @@ Delete one / all sessions. **Does NOT cascade to `query_runs`** — run history 
 ### `GET /runs/current`
 Most recent run `{run_id, status, iteration_count, max_iterations}` (status `idle` when none). Used for live progress polling (~1/s). Always 200.
 
-> **Active runs routes:** only `GET /runs/current` and `GET /runs/{run_id}` are active. The boilerplate `POST /runs` route from the skeleton was removed — analysis runs are created exclusively via `POST /ask`.
+### `POST /runs/{run_id}/cancel`
+Cooperatively cancel an in-flight run — the UI **Stop** button. Flags the run so the ReAct graph wraps up at its next routing edge with NO further model calls (`force_finalize` short-circuits its synthesis call; suggestions are skipped). Returns `{run_id, cancelling: true}`. Idempotent / best-effort: a finished or unknown `run_id` is a harmless no-op (the flag clears when the run ends). Served on a different threadpool thread than the running request. Always 200.
+
+> **Active runs routes:** `GET /runs/current`, `GET /runs/{run_id}`, and `POST /runs/{run_id}/cancel` are active. The boilerplate `POST /runs` route from the skeleton was removed — analysis runs are created exclusively via `POST /ask`.
 
 ### `GET /stats/daily`
 `{date, model, tokens_input, tokens_output, query_count, context_limit, last_prompt_tokens}` aggregated over today's completed runs (server-local day); `context_limit` from a hard-coded model table (unknown → 128000). Always 200.

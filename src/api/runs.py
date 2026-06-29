@@ -15,6 +15,7 @@ from api._common import ok, api_error
 from config.settings import get_settings
 from db.session import get_session
 from db.models import QueryRunRow
+from graph.cancellation import request_cancel
 
 router = APIRouter()
 
@@ -44,6 +45,19 @@ def current_run(session: Session = Depends(get_session)) -> dict:
             "max_iterations": max_iterations,
         }
     )
+
+
+@router.post("/runs/{run_id}/cancel")
+def cancel_run(run_id: str) -> dict:
+    """Cooperatively cancel an in-flight run (the UI **Stop** button).
+
+    Flags the run so the ReAct graph wraps up at its next routing edge without
+    further model calls. Idempotent and best-effort: a finished / unknown run_id
+    is a harmless no-op (the flag is cleared when the run ends). Served on a
+    different threadpool thread than the one executing the run.
+    """
+    request_cancel(run_id)
+    return ok({"run_id": run_id, "cancelling": True})
 
 
 @router.get("/runs/{run_id}")

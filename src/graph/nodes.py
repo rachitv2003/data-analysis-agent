@@ -22,6 +22,7 @@ import pandas as pd
 
 from db.models import DatasetRow, QueryRunRow
 from db.session import create_db_session
+from graph.cancellation import is_cancelled  # cooperative Stop
 from graph.compress import extract_facts  # C31: distil notes -> compact facts
 from graph.memory import get_memory_block  # owned by slice-3c; 3b only imports it
 from graph.sandbox import build_namespace, eval_expression, make_save_dataset
@@ -312,6 +313,12 @@ def _assemble_plan_prompt(state: AgentState, wrap_up: bool) -> str:
 
 def plan_action(state: AgentState) -> AgentState:
     """Ask the LLM for the next pandas action or a FINAL ANSWER."""
+    # User pressed Stop: skip the planning LLM call; after_plan routes to
+    # force_finalize (which also short-circuits) so the run wraps up with no
+    # further model calls.
+    if is_cancelled(state.get("run_id", "")):
+        return {**state, "llm_response": ""}
+
     iteration = state.get("iteration_count", 0)
     max_iterations = state.get("max_iterations", 6)
     wrap_up = iteration >= max_iterations - 2
@@ -538,6 +545,18 @@ def force_finalize(state: AgentState) -> AgentState:
     """
     run_id = state.get("run_id", "")
     action_history = state.get("action_history") or []
+
+    # User pressed Stop: wrap up WITHOUT a synthesis LLM call — that's the whole
+    # point of stopping. Return a short marker; the run persists as completed.
+    if is_cancelled(run_id):
+        _release_dataframe(run_id)
+        logger.info("force_finalize_cancelled", run_id=run_id)
+        return {
+            **state,
+            "answer": "_Run stopped by the user before it finished._",
+            "status": "completed",
+            "error_message": "cancelled",
+        }
 
     # Classify why we are wrapping up (informational, not a failure). Consecutive
     # errors take precedence over max-iter when both could apply.

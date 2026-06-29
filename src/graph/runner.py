@@ -24,6 +24,7 @@ from config.settings import get_settings
 from db.models import DatasetRow, QueryRunRow
 from db.session import create_db_session
 from graph.agent import agentic_ai
+from graph.cancellation import discard as discard_cancel
 from graph.nodes import _safe_memory_block, get_derived_created, release_derived_created
 from graph.preflight import check_clarification, select_datasets
 from graph.state import AgentState
@@ -284,8 +285,10 @@ def run_agent(
     # ------------------------------------------------------------------ #
     # Follow-up suggestions (graph-adjacent; add its tokens to the total).
     # ------------------------------------------------------------------ #
+    # A user-stopped run skips suggestions — stopping must not trigger MORE LLM
+    # calls (that's the whole point).
     suggested_questions: list[str] = []
-    if status == "completed" and answer:
+    if status == "completed" and answer and error_message != "cancelled":
         suggested_questions, s_in, s_out = generate_suggestions(question, answer)
         tokens_input += s_in
         tokens_output += s_out
@@ -317,6 +320,9 @@ def run_agent(
             row.selector_reasoning = selector_reasoning
             row.prompt_breakdown = prompt_breakdown
             row.charts_json = charts or []
+
+    # Clear any Stop flag now the run has ended (success, error, or cancelled).
+    discard_cancel(run_id)
 
     logger.info(
         "run_done",

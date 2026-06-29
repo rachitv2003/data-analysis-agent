@@ -133,9 +133,11 @@ This replaces the skeleton's 4-field `AgentState`. `TypedDict, total=False` per 
 
 ### `force_finalize`
 
-**Reads:** `action_history`, `question`, `run_id`. **Writes:** `answer`, `status=completed`. **LLM:** yes — ONE synthesis call with `finalize.md` + injected `<node:finalize>` tag.
+**Reads:** `action_history`, `question`, `run_id`. **Writes:** `answer`, `status=completed`. **LLM:** yes — ONE synthesis call with `finalize.md` + injected `<node:finalize>` tag (EXCEPT on user cancellation, see below).
 
 **Behaviour:** Fires on max-iter OR 3 consecutive errors. One synthesis LLM call; `status` is ALWAYS `completed`; set `error_message = "max_iterations"` or `"consecutive_errors"` on the run (informational, not a failure). Falls back to a static best-effort message if the call fails.
+
+**Cooperative cancellation (Stop button):** A `POST /runs/{run_id}/cancel` flags the run in a thread-safe registry (`graph.cancellation`). `plan_action` (skips its LLM call), `after_plan`, and `after_execute` check `is_cancelled(run_id)` and route to `force_finalize`, which — when cancelled — SHORT-CIRCUITS its synthesis call and returns a fixed `_Run stopped by the user before it finished._` answer with `error_message="cancelled"`; the runner also skips follow-up suggestions. Net effect: pressing Stop makes the loop wrap up within ~one step and issues NO further model calls. The runner `discard`s the flag when the run ends. Cancellation is cooperative, so it takes effect once the run is underway (the UI gets the `run_id` from the progress poll); an early Stop still aborts the client request immediately.
 
 ### `handle_error`
 

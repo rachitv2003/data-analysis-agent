@@ -6,6 +6,7 @@ returns the name of the next node; the graph maps those names to targets in
 """
 from __future__ import annotations
 
+from graph.cancellation import is_cancelled
 from graph.state import AgentState
 
 # 3 consecutive execution errors force a wrap-up (kept in sync with nodes.py).
@@ -21,9 +22,12 @@ def after_setup(state: AgentState) -> str:
 
 
 def after_plan(state: AgentState) -> str:
-    """plan_action -> handle_error / finalize / execute_action."""
+    """plan_action -> handle_error / force_finalize (cancelled) / finalize / execute_action."""
     if state.get("error"):
         return "handle_error"
+    # User pressed Stop: wrap up now instead of running the planned action.
+    if is_cancelled(state.get("run_id", "")):
+        return "force_finalize"
     llm_response = (state.get("llm_response") or "").lower()
     if _FINAL_MARKER in llm_response:
         return "finalize"
@@ -48,6 +52,10 @@ def after_execute(state: AgentState) -> str:
     """
     if state.get("error"):
         return "handle_error"
+
+    # User pressed Stop mid-run: wrap up now instead of looping for more actions.
+    if is_cancelled(state.get("run_id", "")):
+        return "force_finalize"
 
     action_history = state.get("action_history") or []
     iteration = state.get("iteration_count", 0)

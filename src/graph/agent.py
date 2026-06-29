@@ -33,6 +33,7 @@ def _build_graph():
         {
             "execute_action": "execute_action",
             "finalize": "finalize",
+            "force_finalize": "force_finalize",  # user pressed Stop
             "handle_error": "handle_error",
         },
     )

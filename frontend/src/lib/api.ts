@@ -82,11 +82,12 @@ async function getJson<T>(path: string): Promise<T> {
   return unwrap<T>(res)
 }
 
-async function postJson<T>(path: string, payload: unknown): Promise<T> {
+async function postJson<T>(path: string, payload: unknown, signal?: AbortSignal): Promise<T> {
   const res = await fetch(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify(payload),
+    signal,
   })
   return unwrap<T>(res)
 }
@@ -267,6 +268,8 @@ export interface AskArgs {
   sessionId?: string | null
   /** Skip the C26 clarification pre-flight (used on clarification re-submit). */
   skipClarification?: boolean
+  /** Abort signal so the UI can cancel the request (the Stop button). */
+  signal?: AbortSignal
 }
 
 export interface CurrentRun {
@@ -463,10 +466,17 @@ export const api = {
       body.dataset_id = args.datasetId
     }
     if (args.sessionId) body.session_id = args.sessionId
-    return postJson<AskResponse>('/ask', body)
+    return postJson<AskResponse>('/ask', body, args.signal)
   },
 
   currentRun: () => getJson<CurrentRun>('/runs/current'),
+
+  /** Cooperatively cancel an in-flight run (the Stop button). Best-effort. */
+  cancelRun: (runId: string) =>
+    postJson<{ run_id: string; cancelling: boolean }>(
+      `/runs/${encodeURIComponent(runId)}/cancel`,
+      {},
+    ),
 
   dailyStats: () => getJson<DailyStats>('/stats/daily'),
 

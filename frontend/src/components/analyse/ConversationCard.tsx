@@ -187,6 +187,10 @@ export function ConversationCard({
     saveCollapseOverrides(expandedOverride)
   }, [expandedOverride])
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Stop support: the in-flight request's AbortController, and the live run id
+  // (captured from the progress poll) so Stop can also cancel the run server-side.
+  const abortRef = useRef<AbortController | null>(null)
+  const runIdRef = useRef<string | null>(null)
 
   const canAsk = question.trim().length > 0 && !running
 
@@ -229,6 +233,9 @@ export function ConversationCard({
   const runAsk = useCallback(
     async (q: string, skipClarification: boolean) => {
       const turnId = nextTurnId()
+      const controller = new AbortController()
+      abortRef.current = controller
+      runIdRef.current = null
       setTurns(prev => [...prev, { id: turnId, question: q, status: 'pending' }])
       setRunning(true)
       setProgressLabel(skipClarification ? 'Thinking…' : 'Checking…')
@@ -237,6 +244,8 @@ export function ConversationCard({
         api
           .currentRun()
           .then(run => {
+            // Remember the live run id so Stop can cancel it server-side.
+            if (run && run.run_id && run.status === 'running') runIdRef.current = run.run_id
             if (run && run.status === 'running') {
               setProgressLabel('Thinking…')
               setProgress({ iteration: run.iteration_count, max: run.max_iterations })
@@ -253,6 +262,7 @@ export function ConversationCard({
           datasetIds: selectedDatasetIds.length > 0 ? selectedDatasetIds : undefined,
           sessionId,
           skipClarification,
+          signal: controller.signal,
         })
 
         if (res.session_id) onSessionStarted(res.session_id)
@@ -276,17 +286,34 @@ export function ConversationCard({
           onAnswered({ input: res.tokens_input ?? 0, output: res.tokens_output ?? 0 })
         }
       } catch (err) {
+        // Stop button → the fetch was aborted. Show a calm "Stopped." rather than
+        // a scary error; the run is wrapped up server-side via the cancel call.
+        const aborted = err instanceof DOMException && err.name === 'AbortError'
         updateTurn(turnId, {
           status: 'error',
-          error: err instanceof Error ? err.message : 'The question failed to run.',
+          error: aborted
+            ? 'Stopped.'
+            : err instanceof Error
+              ? err.message
+              : 'The question failed to run.',
         })
       } finally {
+        abortRef.current = null
+        runIdRef.current = null
         stopPolling()
         setRunning(false)
       }
     },
     [selectedDatasetIds, sessionId, onSessionStarted, onAnswered, updateTurn, stopPolling],
   )
+
+  // Stop the in-flight ask: cancel the run server-side (best-effort, so the agent
+  // loop wraps up without more LLM calls) and abort the client request.
+  const stop = useCallback(() => {
+    const runId = runIdRef.current
+    if (runId) void api.cancelRun(runId).catch(() => {})
+    abortRef.current?.abort()
+  }, [])
 
   const submit = useCallback(() => {
     const q = question.trim()
@@ -489,16 +516,29 @@ export function ConversationCard({
               ? ' · the agent will pick datasets'
               : ` · ${selectedDatasetIds.length} dataset${selectedDatasetIds.length === 1 ? '' : 's'} selected`}
           </span>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={!canAsk}
-            title={question.trim().length === 0 ? 'Type a question first' : undefined}
-            className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
-          >
-            {running && <Spinner />}
-            {running ? 'Asking…' : 'Ask'}
-          </button>
+          <div className="flex items-center gap-2">
+            {running && (
+              <button
+                type="button"
+                onClick={stop}
+                aria-label="Stop the running query"
+                className="inline-flex items-center gap-1.5 rounded-md border border-red-300 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100"
+              >
+                <span aria-hidden="true" className="inline-block h-2.5 w-2.5 rounded-[2px] bg-red-600" />
+                Stop
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={submit}
+              disabled={!canAsk}
+              title={question.trim().length === 0 ? 'Type a question first' : undefined}
+              className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
+            >
+              {running && <Spinner />}
+              {running ? 'Asking…' : 'Ask'}
+            </button>
+          </div>
         </div>
       </div>
     </section>
