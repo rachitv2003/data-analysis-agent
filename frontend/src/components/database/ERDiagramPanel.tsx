@@ -588,27 +588,6 @@ export function ERDiagramPanel({
       .filter((e): e is { link: ErLink; geom: EdgeGeometry } => e !== null)
   }, [links, cards, cardById])
 
-  // Which side each PK/FK badge sits on, so a badge lands next to the card edge
-  // where its connector actually attaches (instead of always on the right, which
-  // looks "disassociated" when the related table is to the left). datasetId →
-  // column → side. First edge for a column wins.
-  const badgeSideById = useMemo(() => {
-    const map = new Map<string, Map<string, 'left' | 'right'>>()
-    const set = (id: string, col: string, side: 'left' | 'right') => {
-      let m = map.get(id)
-      if (!m) {
-        m = new Map()
-        map.set(id, m)
-      }
-      if (!m.has(col)) m.set(col, side)
-    }
-    for (const { link, geom } of routedEdges) {
-      set(link.fromId, link.column, geom.pkSide)
-      set(link.toId, link.column, geom.fkSide)
-    }
-    return map
-  }, [routedEdges])
-
   // The set of dataset ids related to the hovered card (for dim/highlight).
   const relatedIds = useMemo(() => {
     if (!hoverId) return null
@@ -716,7 +695,6 @@ export function ERDiagramPanel({
                     key={card.ds.id}
                     card={card}
                     keys={keysById.get(card.ds.id)}
-                    badgeSides={badgeSideById.get(card.ds.id)}
                     selected={selectedId === card.ds.id}
                     dimmed={dimmed}
                     onSelect={() => onSelect(card.ds.id)}
@@ -860,8 +838,6 @@ interface EdgeGeometry {
   crow: { apex: Pt; t1: Pt; t2: Pt } // crow's-foot lines at the FK ("many") end
   tick: { x: number; y1: number; y2: number } // single tick at the PK ("one") end
   label: { x: number; y: number; text: string }
-  pkSide: 'left' | 'right' // card edge the connector uses on the PK (`a`) card
-  fkSide: 'left' | 'right' // card edge the connector uses on the FK (`b`) card
 }
 
 /**
@@ -917,8 +893,6 @@ function routeEdge(
     crow,
     tick,
     label: { x: midX, y: (ay + by) / 2, text: link.column },
-    pkSide: aSide === 1 ? 'right' : 'left',
-    fkSide: bSide === 1 ? 'right' : 'left',
   }
 }
 
@@ -1023,7 +997,6 @@ function normColName(name: string): string {
 function TableCard({
   card,
   keys,
-  badgeSides,
   selected,
   dimmed,
   onSelect,
@@ -1032,7 +1005,6 @@ function TableCard({
 }: {
   card: CardLayout
   keys?: { pk: Set<string>; fk: Set<string> }
-  badgeSides?: Map<string, 'left' | 'right'>
   selected: boolean
   dimmed: boolean
   onSelect: () => void
@@ -1102,43 +1074,39 @@ function TableCard({
         </>
       )}
 
-      {/* Columns. A PK/FK badge sits on the side its connector attaches to (so it
-          reads as connected to the arrow); the column name shifts to make room. */}
+      {/* Columns. The PK/FK badge sits just after the dtype dot — a consistent
+          position (like dbdiagram and other ER tools). Relationship lines attach
+          at the column's ROW on the card edge, so the row is the connection point
+          and the badge simply labels the column's key role. A single column can
+          be referenced from both sides (e.g. a PK used by several tables), which
+          is exactly why the badge is NOT tied to a connector side. */}
       {shown.map((c, i) => {
         const y = HEADER_H + i * ROW_H
         const nc = normColName(c.name)
         const isPk = keys?.pk.has(nc) ?? false
         const isFk = !isPk && (keys?.fk.has(nc) ?? false)
         const badge = isPk ? 'PK' : isFk ? 'FK' : null
-        const onLeft = badge !== null && (badgeSides?.get(nc) ?? 'right') === 'left'
-        const nameX = onLeft ? 46 : 24
-        const nameTrunc = onLeft ? 12 : badge ? 15 : 22
-        const badgeX = onLeft ? 20 : card.w - 26
-        const badgeTextX = onLeft ? 30 : card.w - 16
         return (
           <g key={c.name} style={{ pointerEvents: 'none' }}>
             {i % 2 === 1 && (
               <rect x={1} y={y} width={card.w - 2} height={ROW_H} fill="#f8fafc" />
             )}
             <circle cx={12} cy={y + ROW_H / 2} r={3.5} fill={dtypeColor(c.dtype)} />
-            <text x={nameX} y={y + ROW_H / 2 + 4} fontSize={11} fill="#334155">
-              {truncate(c.name, nameTrunc)}
-            </text>
             {badge && (
               <>
                 <rect
-                  x={badgeX}
+                  x={20}
                   y={y + (ROW_H - 12) / 2}
-                  width={20}
+                  width={18}
                   height={12}
                   rx={3}
                   fill={isPk ? '#fde68a' : '#bfdbfe'}
                 />
                 <text
-                  x={badgeTextX}
+                  x={29}
                   y={y + ROW_H / 2 + 3}
                   textAnchor="middle"
-                  fontSize={7.5}
+                  fontSize={7}
                   fontWeight={700}
                   fill={isPk ? '#92400e' : '#1e40af'}
                 >
@@ -1146,6 +1114,9 @@ function TableCard({
                 </text>
               </>
             )}
+            <text x={badge ? 44 : 24} y={y + ROW_H / 2 + 4} fontSize={11} fill="#334155">
+              {truncate(c.name, badge ? 18 : 22)}
+            </text>
           </g>
         )
       })}
