@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
 import { SessionSidebar } from '@/components/analyse/SessionSidebar'
 import { TokenWidget } from '@/components/analyse/TokenWidget'
@@ -41,12 +41,15 @@ export interface LastQueryTokens {
 export function AnalyseTab({
   provider,
   model,
+  active = true,
   onOpenMemory,
   onSettingsSaved,
 }: {
   provider?: string
   /** Active model id (passed to the conversation for session export). */
   model?: string
+  /** Whether the Analyse tab is the visible one (it stays mounted when hidden). */
+  active?: boolean
   onOpenMemory: () => void
   /** Notify the shell after a settings save so the header re-fetches /health. */
   onSettingsSaved?: () => void
@@ -63,6 +66,22 @@ export function AnalyseTab({
 
   const refreshDatasets = useCallback(() => setDatasetsVersion(v => v + 1), [])
   const refreshSessions = useCallback(() => setSessionsVersion(v => v + 1), [])
+
+  // The tab stays mounted when hidden, so its state (active session,
+  // conversation) survives a switch to the Database tab. When the user RETURNS,
+  // refresh the dataset + session lists (they may have changed in the Database
+  // tab) — but never the active session id or the conversation thread. Skip the
+  // initial mount, which already fetches.
+  const didMount = useRef(false)
+  useEffect(() => {
+    if (!active) return
+    if (!didMount.current) {
+      didMount.current = true
+      return
+    }
+    refreshDatasets()
+    refreshSessions()
+  }, [active, refreshDatasets, refreshSessions])
 
   const toggleSelect = useCallback((id: string) => {
     setSelectedDatasetIds(prev =>

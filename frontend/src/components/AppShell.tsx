@@ -115,20 +115,22 @@ export function AppShell() {
 
       {/* Active tab */}
       <main className="mx-auto max-w-[1600px] px-4 py-6">
+        {/* Analyse stays MOUNTED across tab switches (only hidden) so the active
+            session + conversation survive a trip to the Database tab — clicking
+            Database must not reset it. Database re-mounts on show for its fetch. */}
         <div
           role="tabpanel"
           id="panel-analyse"
           aria-labelledby="tab-analyse"
           hidden={tab !== 'analyse'}
         >
-          {tab === 'analyse' && (
-            <AnalyseTab
-              provider={provider}
-              model={model}
-              onOpenMemory={() => setMemoryOpen(true)}
-              onSettingsSaved={refreshHealth}
-            />
-          )}
+          <AnalyseTab
+            provider={provider}
+            model={model}
+            active={tab === 'analyse'}
+            onOpenMemory={() => setMemoryOpen(true)}
+            onSettingsSaved={refreshHealth}
+          />
         </div>
         <div
           role="tabpanel"
