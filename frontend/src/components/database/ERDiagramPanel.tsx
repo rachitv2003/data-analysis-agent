@@ -115,25 +115,28 @@ function norm(col: string): string {
   return col.trim().toLowerCase()
 }
 
-/** Choose the canonical PK table for a shared column by filename heuristics. */
+/** Choose the canonical PK ("one") table for a shared join column. */
 function pickPkTable(
   column: string,
   candidates: { id: string; filename: string }[],
 ): string {
   if (candidates.length === 0) return ''
-  // A column like `customer_id` points at the table whose stem matches the
-  // column's entity (`customer` / `customers`). Prefer the shortest matching
-  // filename (the dimension table), else the shortest filename overall.
-  const entity = column.replace(/_id$/, '')
+  // The entity the column points at, e.g. `customer_id` -> `customer`.
+  const clean = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
+  const entity = clean(column.replace(/_id$/, ''))
   const singular = entity.replace(/s$/, '')
-  const stem = (fn: string) =>
-    fn.replace(/\.[^.]+$/, '').toLowerCase().replace(/[^a-z0-9]/g, '')
+  const plural = `${singular}s`
+  const stem = (fn: string) => clean(fn.replace(/\.[^.]+$/, ''))
 
-  const matches = candidates.filter(c => {
-    const s = stem(c.filename)
-    return s === entity || s === `${entity}s` || s === singular || s === `${singular}s`
-  })
-  const pool = matches.length > 0 ? matches : candidates
+  // The canonical table is the one whose NAME contains the entity — and crucially
+  // we match by CONTAINMENT, not equality, so the common `olist_<entity>_dataset`
+  // wrapping no longer defeats the match (the old exact check fell through to
+  // "shortest filename", which wrongly made `orders` the PK for `customer_id`).
+  // Prefer the plural/dimension table (`customers`, `orders`, `sellers`...), then
+  // the singular, then the shortest filename as a last resort.
+  const byPlural = candidates.filter(c => stem(c.filename).includes(plural))
+  const bySingular = candidates.filter(c => stem(c.filename).includes(singular))
+  const pool = byPlural.length ? byPlural : bySingular.length ? bySingular : candidates
   return [...pool].sort((a, b) => a.filename.length - b.filename.length)[0].id
 }
 
