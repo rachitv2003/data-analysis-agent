@@ -581,12 +581,21 @@ export function ERDiagramPanel({
   // list, so this is the expensive part; keep it out of the hover path. Hover
   // state (highlight/dim/label) is applied cheaply at render time below.
   const routedEdges = useMemo(() => {
+    // Horizontal centre of the whole diagram — stacked-card connectors loop out
+    // toward the nearer side of this, keeping their channels in the margin.
+    let minX = Infinity
+    let maxX = -Infinity
+    for (const c of cards) {
+      if (c.x < minX) minX = c.x
+      if (c.x + c.w > maxX) maxX = c.x + c.w
+    }
+    const canvasCenterX = cards.length ? (minX + maxX) / 2 : 0
     return links
       .map(l => {
         const a = cardById.get(l.fromId)
         const b = cardById.get(l.toId)
         if (!a || !b) return null
-        return { link: l, geom: routeEdge(a, b, l, cards) }
+        return { link: l, geom: routeEdge(a, b, l, cards, canvasCenterX) }
       })
       .filter((e): e is { link: ErLink; geom: EdgeGeometry } => e !== null)
   }, [links, cards, cardById])
@@ -854,44 +863,59 @@ function routeEdge(
   b: CardLayout,
   link: ErLink,
   cards: CardLayout[],
+  canvasCenterX: number,
 ): EdgeGeometry {
   const ay = colRowY(a, link.column)
   const by = colRowY(b, link.column)
-  // Pick the card edge (left/right) for each endpoint that MINIMISES the
-  // horizontal gap between the two anchors. For side-by-side cards this gives
-  // facing sides (a's right ↔ b's left); for vertically stacked cards (similar
-  // x) it gives the SAME near side — a short C-route — instead of wrapping the
-  // long way around with the crow's-foot pointing into empty space.
-  const aEdges: Array<{ s: 1 | -1; x: number }> = [
-    { s: -1, x: a.x },
-    { s: 1, x: a.x + a.w },
-  ]
-  const bEdges: Array<{ s: 1 | -1; x: number }> = [
-    { s: -1, x: b.x },
-    { s: 1, x: b.x + b.w },
-  ]
-  let aSide: 1 | -1 = 1
-  let bSide: 1 | -1 = -1
-  let ax = a.x + a.w
-  let bx = b.x
-  let bestGap = Infinity
-  for (const ae of aEdges) {
-    for (const be of bEdges) {
-      const gap = Math.abs(ae.x - be.x)
-      if (gap < bestGap) {
-        bestGap = gap
-        aSide = ae.s
-        bSide = be.s
-        ax = ae.x
-        bx = be.x
-      }
+  const aL = a.x
+  const aR = a.x + a.w
+  const bL = b.x
+  const bR = b.x + b.w
+  const aCx = a.x + a.w / 2
+  const bCx = b.x + b.w / 2
+
+  // Two regimes for a clean, predictable connector:
+  //  • Side-by-side cards (x-ranges DON'T overlap) → connect on the FACING edges
+  //    so each stub points at the other card and the vertical channel sits in
+  //    the gap between them.
+  //  • Vertically-stacked cards (x-ranges overlap) → connect BOTH on the OUTWARD
+  //    side (toward the nearer canvas edge) and run the channel in the open
+  //    margin, so the connector loops cleanly in empty space instead of cutting
+  //    back across the cards or wrapping the long way around.
+  const overlap = !(aR < bL - 6 || bR < aL - 6)
+  let aSide: 1 | -1
+  let bSide: 1 | -1
+  let ax: number
+  let bx: number
+  if (!overlap) {
+    if (bCx >= aCx) {
+      aSide = 1
+      ax = aR
+      bSide = -1
+      bx = bL
+    } else {
+      aSide = -1
+      ax = aL
+      bSide = 1
+      bx = bR
     }
+  } else {
+    const outwardLeft = (aCx + bCx) / 2 <= canvasCenterX
+    aSide = outwardLeft ? -1 : 1
+    bSide = aSide
+    ax = outwardLeft ? aL : aR
+    bx = outwardLeft ? bL : bR
   }
 
-  // Stub out of each card, meet on a dodged vertical channel midway between.
+  // Stub straight out from each card, then bend to a shared vertical channel.
   const m1x = ax + aSide * STUB
   const m2x = bx + bSide * STUB
-  let midX = (m1x + m2x) / 2
+  let midX = overlap
+    ? // Outside both cards, in the margin on the chosen side.
+      aSide === -1
+      ? Math.min(aL, bL) - STUB - 14
+      : Math.max(aR, bR) + STUB + 14
+    : (m1x + m2x) / 2 // in the gap between side-by-side cards
   midX = dodgeX(midX, Math.min(ay, by), Math.max(ay, by), [a.ds.id, b.ds.id], cards)
 
   const pts: Pt[] = [
