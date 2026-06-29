@@ -41,9 +41,12 @@ export interface LastQueryTokens {
 export function AnalyseTab({
   provider,
   onOpenMemory,
+  onSettingsSaved,
 }: {
   provider?: string
   onOpenMemory: () => void
+  /** Notify the shell after a settings save so the header re-fetches /health. */
+  onSettingsSaved?: () => void
 }) {
   const [selectedDatasetIds, setSelectedDatasetIds] = useState<string[]>([])
   const [sessionId, setSessionId] = useState<string | null>(null)
@@ -128,7 +131,10 @@ export function AnalyseTab({
       <SettingsPanel
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
-        onSaved={() => setSettingsVersion(v => v + 1)}
+        onSaved={() => {
+          setSettingsVersion(v => v + 1)
+          onSettingsSaved?.()
+        }}
       />
 
       {/* Sidebar — Settings sits at the bottom-left, below sessions + usage.

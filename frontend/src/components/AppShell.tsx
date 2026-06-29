@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { StubBanner } from '@/components/StubBanner'
 import { AnalyseTab } from '@/components/analyse/AnalyseTab'
 import { DatabaseTab } from '@/components/database/DatabaseTab'
@@ -31,24 +31,25 @@ export function AppShell() {
   // Global-memory ("Project notes") modal — REAL in Phase 3.
   const [memoryOpen, setMemoryOpen] = useState(false)
 
-  useEffect(() => {
-    let cancelled = false
+  // Fetch /health (provider + active model). Called on mount and again after a
+  // settings save, so the header badge reflects a model change without a reload.
+  const refreshHealth = useCallback(() => {
     api
       .health()
       .then(h => {
-        if (cancelled) return
         setProvider(h.provider)
         setModel(h.model || undefined)
       })
       .catch(() => {
         // Health failed (e.g. server not reachable yet) — leave provider
         // unresolved so we neither flash a stub banner nor claim "live".
-        if (!cancelled) setProvider(undefined)
+        setProvider(undefined)
       })
-    return () => {
-      cancelled = true
-    }
   }, [])
+
+  useEffect(() => {
+    refreshHealth()
+  }, [refreshHealth])
 
   const isLive = provider === 'gemini' || provider === 'openrouter' || provider === 'anthropic'
 
@@ -121,7 +122,11 @@ export function AppShell() {
           hidden={tab !== 'analyse'}
         >
           {tab === 'analyse' && (
-            <AnalyseTab provider={provider} onOpenMemory={() => setMemoryOpen(true)} />
+            <AnalyseTab
+              provider={provider}
+              onOpenMemory={() => setMemoryOpen(true)}
+              onSettingsSaved={refreshHealth}
+            />
           )}
         </div>
         <div

@@ -28,18 +28,25 @@ def _make_provider():
     s = get_settings()
     provider = _resolve_provider_name()
 
+    # The model the user picked in Settings (persisted in the DB) takes
+    # precedence over the env default. Read fresh each time so a saved change
+    # takes effect on the next call (clients are constructed per-call). Blank ->
+    # the provider falls back to its own DEFAULT_MODEL.
+    from config.db_overrides import get_runtime_model
+    model = get_runtime_model() or s.llm_model
+
     if provider == "anthropic":
         from llm.providers.anthropic import AnthropicProvider
-        return provider, AnthropicProvider(api_key=s.anthropic_api_key, model=s.llm_model)
+        return provider, AnthropicProvider(api_key=s.anthropic_api_key, model=model)
     if provider == "gemini":
         from llm.providers.gemini import GeminiProvider
-        return provider, GeminiProvider(api_key=s.gemini_api_key, model=s.llm_model)
+        return provider, GeminiProvider(api_key=s.gemini_api_key, model=model)
     if provider == "openrouter":
         from llm.providers.openrouter import OpenRouterProvider
-        return provider, OpenRouterProvider(api_key=s.openrouter_api_key, model=s.llm_model)
+        return provider, OpenRouterProvider(api_key=s.openrouter_api_key, model=model)
     if provider == "stub":
         from llm.providers.stub import StubProvider
-        return provider, StubProvider(api_key=s.gemini_api_key, model=s.llm_model)
+        return provider, StubProvider(api_key=s.gemini_api_key, model=model)
 
     raise RuntimeError(
         f"Unknown LLM provider: {provider!r}. "

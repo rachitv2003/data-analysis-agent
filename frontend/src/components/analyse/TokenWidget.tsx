@@ -112,10 +112,11 @@ export function TokenWidget({
     }
   }, [])
 
-  // Load on mount and refresh whenever a new answer updates lastTokens.
+  // Load on mount, on a new answer (lastTokens), AND when settings are saved
+  // (settingsVersion) — so the model badge + context bar reflect a model change.
   useEffect(() => {
     void loadStats()
-  }, [loadStats, lastTokens])
+  }, [loadStats, lastTokens, settingsVersion])
 
   // Dataset aggregate (Datasets / Rows): load on mount and re-fetch whenever the
   // dataset universe changes (upload/delete bump `datasetsVersion`). Best-effort:

@@ -19,7 +19,7 @@ from typing import Any
 
 import pandas as pd
 
-from config.db_overrides import get_runtime_max_iterations, get_runtime_model
+from config.db_overrides import get_runtime_max_iterations
 from config.settings import get_settings
 from db.models import DatasetRow, QueryRunRow
 from db.session import create_db_session
@@ -155,8 +155,8 @@ def run_agent(
     """
     settings = get_settings()
     cap = max_iterations if max_iterations is not None else settings.max_iterations
-    # Read DB overrides (user-configured via /settings API).
-    _db_model = get_runtime_model()  # reserved for future LLMClient wiring
+    # Read DB overrides (user-configured via /settings API). The model override
+    # is applied inside LLMClient (_make_provider); here we apply max-iterations.
     _db_max_iter = get_runtime_max_iterations()
     if _db_max_iter is not None:
         cap = _db_max_iter
