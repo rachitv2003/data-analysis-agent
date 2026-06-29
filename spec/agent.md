@@ -181,7 +181,7 @@ plan_action   (loop)
 | `execute_action` | else (ok / recoverable error) | `plan_action` |
 | `finalize` / `force_finalize` / `handle_error` | always | `END` |
 
-**Termination signal:** case-insensitive substring `FINAL ANSWER:` in `llm_response` (tolerate preamble before it). `MAX_ITERATIONS` = `settings.max_iterations` (env `AGENT_MAX_ITERATIONS`, default 6).
+**Termination signal:** case-insensitive substring `FINAL ANSWER:` in `llm_response` (tolerate preamble before it). `MAX_ITERATIONS` = `settings.max_iterations` (env `AGENT_MAX_ITERATIONS`, default **12** — enough for heavy multi-step pipelines like clustering; overridable per-instance via the `max_iterations` Settings/DB value, or per-run via the `/ask` arg).
 
 ---
 

@@ -163,12 +163,17 @@ export function SettingsPanel({
             <input
               type="number"
               min={1}
-              max={20}
+              max={25}
               value={form.max_iterations ?? ''}
               onChange={e => setForm(prev => ({ ...prev, max_iterations: e.target.value || null }))}
-              placeholder="Default (env)"
+              placeholder="Default (12)"
               className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
+            <p className="mt-1 text-[11px] text-gray-400">
+              Reasoning/code steps the agent may take per question (default 12). Raise
+              it for heavy multi-step tasks like clustering or multi-table joins;
+              lower it to cap cost. Blank = default.
+            </p>
           </div>
 
           {/* Pricing — auto-filled from model selection */}

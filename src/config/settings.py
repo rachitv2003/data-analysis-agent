@@ -22,8 +22,11 @@ class Settings(BaseSettings):
     gemini_api_key: str = Field(default="")
     openrouter_api_key: str = Field(default="")
 
-    # ReAct loop cap — max plan/execute iterations per run
-    max_iterations: int = Field(default=6)
+    # ReAct loop cap — max plan/execute iterations per run. 12 gives heavy
+    # multi-step tasks (e.g. merge -> aggregate -> encode -> scale -> fit a model
+    # -> summarise) room to finish in one turn; simple questions still stop early.
+    # Tunable per-instance via Settings (the `max_iterations` DB override).
+    max_iterations: int = Field(default=12)
 
 
 _settings: Settings | None = None
