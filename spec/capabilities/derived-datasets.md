@@ -23,6 +23,7 @@ Lets the agent autonomously materialize a new dataset via `save_dataset(df, name
 | SQLite | insert derived row with `derivation_code`, `derived_from_*` | step error |
 
 ## Business Rules
+- `save_dataset(df, name, desc)` is documented to the model in `src/prompts/plan_action.md` (call it to create/persist a derived table); the sandbox extracts the **df-producing first-argument expression** (not the wrapping `save_dataset(...)` call) as the stored `derivation_code`, and `eval_expression` runs the save call EXACTLY ONCE so a derived dataset is registered a single time.
 - `save_dataset` records `derivation_code`, `derived_from_dataset_ids`, `derived_from_run_id`, returns a confirmation string.
 - A derived dataset is **stale** when a parent changed after derivation; `/re-derive` re-runs the code vs current parents and clears stale (400 `not_derived` / 404 `parent_not_found` / 400 `re_derive_error`).
 - Deleting a parent recursively deletes derived children (see [dataset-deletion-cascade.md](dataset-deletion-cascade.md)).

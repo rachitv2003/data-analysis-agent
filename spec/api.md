@@ -11,7 +11,7 @@ REST over HTTP, served single-origin by FastAPI on port 8001. The built Next.js 
 ## Endpoints / Commands
 
 ### `GET /health`
-Returns `ok({status:"ok", provider:"<gemini|openrouter|stub|anthropic>"})`. The `provider` field drives the UI stub banner. Always 200.
+Returns `ok({status:"ok", provider:"<gemini|openrouter|stub|anthropic>", model:"<active-model-id>"})`. The `provider` field drives the UI stub banner; `model` is the model id the active provider will actually call (resolved via `LLMClient`) and drives the header "Live · &lt;model&gt;" badge. A provider-init failure falls back to `provider:"stub"` with `model:""`. Always 200.
 
 ### `GET /` and `/app`
 The single-origin Next.js UI (static mount). Server starts API-only if `frontend/out/` is absent.
@@ -73,8 +73,10 @@ Pre-flight C26 (unless `skip_clarification`) → may return `{type:"clarificatio
  "answer_markdown":"...","answer_html":"...","charts":[...],
  "iteration_count":3,"tokens_input":1234,"tokens_output":567,"status":"completed",
  "is_best_effort":false,"steps":[...],"suggested_questions":[...],
- "prompt_breakdown":{...}}
+ "prompt_breakdown":{...},"duration_ms":4210}
 ```
+
+> **`duration_ms`:** an integer — the wall-clock time of the whole agent run in milliseconds, measured in the `/ask` handler around `run_agent` (selector + iterations + finalize). The UI shows it as the answer's response time ("took Xs"). Present on the answer payload only (a `clarification` short-circuit carries no `duration_ms`).
 
 > **`charts` field:** a list of Plotly figure JSON strings (`list[str]`). Each element is the serialised output of `plotly.graph_objects.Figure.to_json()` — a self-contained Plotly spec that can be passed directly to `Plotly.react()` / `JSON.parse()`. The list is empty (`[]`) when the agent produced no charts during the run. Charts are also persisted to `query_runs.charts_json` and surfaced via `GET /sessions/{id}` on each turn.
 
@@ -87,7 +89,9 @@ Pre-flight C26 (unless `skip_clarification`) → may return `{type:"clarificatio
 All sessions, most-recently-updated first; each with `turn_count`, `first_question`. Always 200.
 
 ### `GET /sessions/{id}`
-Session + `turns[]` (each turn carries `prompt_breakdown`). **404** missing.
+Session + `turns[]`. **404** missing.
+
+> **Turn payload:** each turn (`_turn_payload`) carries `run_id`, `question`, `answer_markdown`, `answer_html`, `iteration_count`, `tokens_input`, `tokens_output`, `status`, `type` (`answer`|`clarification`), `clarification_question`, `steps`, `dataset_ids`, `suggested_questions`, `prompt_breakdown`, `charts`, plus **`created_at`** (ISO string — when the turn was asked) and **`duration_ms`** (integer ms, derived from `updated_at − created_at` ≈ the run's lifespan, so resumed history shows a response time too; `null` when either timestamp is missing).
 
 ### `PATCH /sessions/{id}/name`
 Rename. **404** missing.
@@ -101,7 +105,9 @@ Most recent run `{run_id, status, iteration_count, max_iterations}` (status `idl
 > **Active runs routes:** only `GET /runs/current` and `GET /runs/{run_id}` are active. The boilerplate `POST /runs` route from the skeleton was removed — analysis runs are created exclusively via `POST /ask`.
 
 ### `GET /stats/daily`
-`{date, model, tokens_input, tokens_output, query_count, context_limit}` aggregated over today's completed runs (server-local day); `context_limit` from a hard-coded model table (unknown → 128000). Always 200.
+`{date, model, tokens_input, tokens_output, query_count, context_limit, last_prompt_tokens}` aggregated over today's completed runs (server-local day); `context_limit` from a hard-coded model table (unknown → 128000). Always 200.
+
+> **`last_prompt_tokens`:** an integer — the MOST RECENT completed run's input (`tokens_input`) tokens, i.e. the last query's prompt size (not the cumulative daily total). This is the per-request value the C29 context-window bar plots against `context_limit`; `0` when there are no completed runs today.
 
 ### `GET /memory` and `PATCH /memory`
 Read / replace the global persistent memory text; PATCH triggers C31 compression. Memory is injected into every `plan_action` prompt as authoritative. Always 200 on read; PATCH **400** if body invalid.
@@ -112,14 +118,16 @@ Returns the current runtime settings as key/value pairs. Always 200.
 ```json
 {
   "data": {
-    "llm_model": "gemini/gemini-2.0-flash",
+    "llm_model": "gemini-3.1-flash-lite",
     "max_iterations": "10",
-    "price_input_per_million": "0.10",
-    "price_output_per_million": "0.40"
+    "price_input_per_million": "0.25",
+    "price_output_per_million": "1.50"
   },
   "error": null
 }
 ```
+
+> **Bare model IDs:** `llm_model` is stored and consumed as a BARE model id (e.g. `gemini-3.1-flash-lite`, `gemini-2.5-flash`) — no provider prefix. The same bare id is what the Settings dropdown writes, what the stats `_CONTEXT_LIMITS` table keys on, and what the provider passes to its SDK.
 
 All four values are stored as strings in the `settings` table (or `null` if that key has never been set, in which case the server falls back to the env/default for that setting).
 
@@ -138,10 +146,10 @@ Updates one or more settings fields. Only fields present in the request body are
 
 ```json
 {
-  "llm_model": "gemini/gemini-2.0-flash-lite",
+  "llm_model": "gemini-2.5-flash-lite",
   "max_iterations": "5",
-  "price_input_per_million": "0.075",
-  "price_output_per_million": "0.30"
+  "price_input_per_million": "0.10",
+  "price_output_per_million": "0.40"
 }
 ```
 

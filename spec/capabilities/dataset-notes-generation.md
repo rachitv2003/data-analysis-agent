@@ -22,6 +22,7 @@ Generates plain-language notes describing a dataset from a sample of its rows, o
 
 ## Business Rules
 - Sample 50 rows; ask for ≤300-word plain notes; write to `context`; track `auto_notes_status` (pending→done/failed).
+- The single LLM call is **retried up to 3× with backoff** (a transient rate-limit/timeout self-heals instead of a spurious `failed`) and is serialized across datasets by a **process-wide lock** so concurrent upload-time describes don't all hit the provider at once. Outcome is unchanged — one successful call's notes, never raises.
 - On success, trigger C31 fact extraction.
 
 ## Success Criteria

@@ -26,7 +26,12 @@
 | `force_finalize` (synthesis) | Gemini | same | One synthesis call; quality-over-cost but the same model is sufficient. |
 | `check_clarification` (C26), `select_datasets` (C19), `generate_suggestions`, `generate_dataset_notes` (C30), `extract_facts` (C31) | Gemini | same | Single-shot helpers outside the graph; same model via `LLMClient`. |
 
-All calls go through `LLMClient.call_model(prompt, *, system=None)` — **never the provider SDK directly**. Provider is auto-detected (Gemini key → gemini; else OpenRouter; else stub). Model override via `AGENT_LLM_MODEL`.
+All calls go through `LLMClient` — **never the provider SDK directly**. The client exposes two methods (both implemented by every provider, contract in `src/llm/providers/base.py`):
+
+- `complete(prompt, *, system=None) -> LLMResponse` — returns the text plus REAL provider-reported token usage (`tokens_input`/`tokens_output` from the provider's usage metadata; `0` when a provider reports none, so the caller falls back to a `chars/4` estimate). The per-iteration `plan_action` and `force_finalize` use `complete()` so the run's token totals are accurate.
+- `call_model(prompt, *, system=None) -> str` — the text-only convenience wrapper over `complete()`. The graph-adjacent single-shot helpers (`select_datasets`, `check_clarification`, `generate_suggestions`, `generate_dataset_notes`/describe, `extract_facts`/compress, clean) use `call_model`.
+
+`LLMResponse` is a `NamedTuple(text, tokens_input=0, tokens_output=0)`. Provider is auto-detected (Anthropic key → anthropic; else Gemini → gemini; else OpenRouter; else stub). Model override via `AGENT_LLM_MODEL`.
 
 **Fallback behaviour:** No key → stub provider auto-engages (yellow UI banner). A Gemini API/network error inside `execute_action`'s recoverable path or a `plan_action` transient error routes back to `plan_action` to retry the reasoning; a fatal load/setup error routes to `handle_error` (run `failed`, clear message). `force_finalize` falls back to a static best-effort message if its single LLM call fails. This is production resilience — tests call the real Gemini with keys from `.env`.
 
@@ -44,6 +49,8 @@ The agent does not use the LLM-native tool-calling API; its single "tool" is **e
 | `save_dataset(df, name, desc)` | Materialise a DataFrame as a registered DERIVED dataset | DataFrame, name, description | confirmation string | writes `uploads/{id}.csv` + `.parquet`; inserts a `datasets` row (origin=derived) with `derivation_code` + parents + producing run (C25) |
 
 **Sandbox namespace** (provided to `execute_action`): `df` (first DataFrame), `df1`/`df2`/… (per-dataset, ordered by `dataset_ids`), a `<filename_stem>` alias per dataset, and the libraries `pd, np, px, go, plt, sns, scipy, stats, sklearn, sm`, plus `save_dataset`. No filesystem/network builtins beyond these are exposed.
+
+**Eval semantics (`sandbox.eval_expression`):** the action is tried as a single `eval` first (the common case). On a `SyntaxError` (multi-statement actions) the block is `ast`-parsed: everything BEFORE the trailing expression is `exec`'d, and that trailing expression is `eval`'d **EXACTLY ONCE**. This is what makes a side-effecting tail like `save_dataset(df, …)` run a single time — the earlier "exec the whole block, then eval the last line" approach double-ran the tail and registered a derived dataset twice. `save_dataset(df, name, desc)` is documented to the model in `plan_action.md` (call it to create/persist a derived table); the sandbox extracts the df-producing first-argument expression (not the wrapping `save_dataset(...)` call) as the derived dataset's `derivation_code` for `/re-derive` (C25).
 
 **Tool selection strategy:** The LLM chooses the next pandas expression each iteration (free-form reasoning). The agent does not route between multiple tools — it either executes the expression or, on `FINAL ANSWER:`, finalizes.
 
@@ -111,7 +118,7 @@ This replaces the skeleton's 4-field `AgentState`. `TypedDict, total=False` per 
 
 **Reads:** `llm_response`, `action_history`, `iteration_count`, the loaded DataFrame(s). **Writes:** `action_history`, `charts`. **LLM:** no.
 
-**Behaviour:** Eval/exec the pandas expression from `llm_response` in the sandbox namespace; capture any Plotly figures as JSON into `charts`; convert the result to a string; append `{action, result, is_error}` to `action_history`; write `iteration_count` to the DB each step for live progress polling (`GET /runs/current`). On exception, mark `is_error=true` and route back to `plan_action` to self-correct (recoverable). 3 consecutive errors OR max-iter → `force_finalize`. A non-recoverable fatal error → `handle_error`.
+**Behaviour:** First run the planner reply through `_extract_code` — it strips a ```` ```python ```` / bare ```` ``` ```` fence (taking the LAST fenced block when several are present) and inline-code backticks (`` `expr` ``), falling back to the bare reply — so a model that wraps its action in a fence + reasoning prose still has its REAL code executed instead of `eval()` choking on the prose. Then eval/exec the extracted pandas expression in the sandbox namespace; capture charts as JSON into `charts` from three sources (the directly-returned figure, any `go.Figure` reachable in the namespace, and — as a FALLBACK — any OPEN matplotlib figures converted via `plotly.tools.mpl_to_plotly` so a model that used `.plot()`/`plt.*` instead of Plotly still yields a chart; the prompt still steers models to Plotly); convert the result to a string; append `{action, result, is_error}` to `action_history`; write `iteration_count` to the DB each step for live progress polling (`GET /runs/current`). On exception, mark `is_error=true` and route back to `plan_action` to self-correct (recoverable). 3 consecutive errors OR max-iter → `force_finalize`. A non-recoverable fatal error → `handle_error`.
 
 | System | Operation | On Failure |
 |--------|-----------|------------|
@@ -188,7 +195,7 @@ Runs in the `/ask` handler / runner, BEFORE the graph, and is SKIPPED when expli
 ## Graph-adjacent single LLM calls (not graph nodes)
 
 - `generate_suggestions(question, answer)` (`src/graph/suggestions.py`) → up to 3 short follow-up questions (JSON array; `[]` on failure); tokens added to the run total.
-- `generate_dataset_notes()` (`src/graph/describe.py`, C30) → sample 50 rows, ask for ≤300-word plain notes, write to `dataset.context`, track `auto_notes_status`, then trigger C31.
+- `generate_dataset_notes()` (`src/graph/describe.py`, C30) → sample 50 rows, ask for ≤300-word plain notes, write to `dataset.context`, track `auto_notes_status`, then trigger C31. The single LLM call is **retried up to 3× with backoff** (transient rate-limit/timeout self-heals instead of a spurious `failed`) and is serialized across datasets by a **process-wide lock** so concurrent upload-time describes (one daemon thread per uploaded file) don't all hit the provider at once; only the API call holds the lock (the backoff sleeps are outside it). Outcome is unchanged — still ONE successful call's notes, still never raises.
 - `extract_facts()` (`src/graph/compress.py`, C31) → one LLM call → JSON array of ≤20 facts; fills `dataset.context_facts` and `settings.global_memory_facts`; async fire-and-forget self-heal variants with an in-flight lock; failures return `[]`.
 
 ---

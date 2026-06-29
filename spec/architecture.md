@@ -68,7 +68,7 @@ This design **extends the existing skeleton in place** — the flat `src/` packa
 - **LLM provider + model:** Google Gemini via `google-genai`; default model `gemini-3.1-flash-lite` (**verified at Phase 2/3 gate**; recorded in README). Alternate provider: OpenRouter. Offline fallback: stub.
 - **Backend:** FastAPI + uvicorn, single-origin serving the built Next.js app on port 8001.
 - **Database + ORM:** SQLite + SQLAlchemy 2.0 (declarative `Mapped`), Alembic migrations. SQLite is the **production** DB for this single-user local app.
-- **Frontend:** Next.js 15 + React 19 (existing `frontend/`), static-exported to `frontend/out/` and mounted at `/app`.
+- **Frontend:** Next.js 15 + React 19 (existing `frontend/`), static-exported to `frontend/out/` and mounted at `/app`. Key client libs: `react-markdown` + `remark-gfm` (client-side answer rendering), `plotly.js-dist-min` (inline charts, dynamically imported), `jspdf` (chart → PDF export, dynamically imported).
 - **Dependency management:** uv + `pyproject.toml` (Python) · pnpm (frontend).
 
 | Key library | Version | Purpose |
@@ -113,9 +113,10 @@ This design **extends the existing skeleton in place** — the flat `src/` packa
 `LLMClient` is the single path to any provider (no node calls an SDK directly). The factory `_make_provider()` is extended:
 
 - `provider = settings.llm_provider`; if blank, auto-detect: `anthropic_api_key` → `anthropic`; else `gemini_api_key` → `gemini`; else `openrouter_api_key` → `openrouter`; else `stub`. Explicit `stub` always selects the stub. Anthropic is checked first when its key is set (it predates Gemini in the codebase and is retained as a first-class provider).
-- Each provider implements `call_model(prompt, *, system=None) -> str`. A `base.py` Protocol documents the contract. `LLMClient` also exposes the resolved `provider` name (so `/health` and the UI can show the stub banner) and token counts where the SDK reports them.
+- Each provider implements TWO methods (Protocol in `base.py`): `complete(prompt, *, system=None) -> LLMResponse` (text + REAL provider-reported `tokens_input`/`tokens_output`, `0` when the provider reports none) and `call_model(prompt, *, system=None) -> str` (the text-only wrapper over `complete`). The graph's `plan_action`/`force_finalize` use `complete()` for accurate token totals; the single-shot graph-adjacent helpers use `call_model`. `LLMResponse` is a `NamedTuple(text, tokens_input=0, tokens_output=0)`. `LLMClient` also exposes the resolved `provider` name and `model` (so `/health`, `/stats/daily`, and the UI can show the stub banner + active model).
 - **Stub provider** branches **only on injected node tags** in the prompt (never on prose): `<node:finalize>` → canned best-effort summary; `<node:select>` → first dataset id in the schema block as a 1-element JSON array; `<node:plan>` → 1st call returns `df.describe().to_string()`, later calls return a `FINAL ANSWER:` Markdown summary (iteration inferred from `Result:`/`Error:` markers so repeated calls differ); a `<node:plan>` tag missing → `FINAL ANSWER: [stub] Unable to process`. See `spec/agent.md` for the exact tags and node behavior.
 - **Model verification:** `gemini-3.1-flash-lite` was verified at the Phase 2/3 real-key gate — it resolves against the Gemini API and is the confirmed model in use. It is recorded in `README.md`. No fallback was needed.
+- **Model catalogue (bare IDs):** model ids are stored/consumed BARE (no provider prefix). The current selectable set (Settings dropdown + the `_CONTEXT_LIMITS` table in `stats.py`) is the Gemini family — `gemini-3.5-flash`, `gemini-3.1-pro-preview`, `gemini-3-pro-preview`, **`gemini-3.1-flash-lite` (default)**, `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-2.0-flash`, `gemini-2.0-flash-lite` — plus the Anthropic models (`claude-opus-4-8`, `claude-sonnet-4-6`, `claude-haiku-4-5-20251001`). The retired `gemini-1.5-*` models have been removed. An unknown model id falls back to a `128000` context limit.
 
 ## Single-Origin Serving
 
