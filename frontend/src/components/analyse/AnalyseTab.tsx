@@ -67,6 +67,8 @@ export function AnalyseTab({
     )
   }, [])
 
+  const selectAll = useCallback((ids: string[]) => setSelectedDatasetIds(ids), [])
+
   const clearSelection = useCallback(() => setSelectedDatasetIds([]), [])
 
   // When a dataset is deleted, drop it from the selection.
@@ -173,6 +175,7 @@ export function AnalyseTab({
             datasetsVersion={datasetsVersion}
             selectedDatasetIds={selectedDatasetIds}
             onToggleSelect={toggleSelect}
+            onSelectAll={selectAll}
             onClearSelection={clearSelection}
             onDeleted={handleDatasetDeleted}
           />
