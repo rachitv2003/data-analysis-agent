@@ -43,6 +43,27 @@ fig
 
 Do **NOT** call `.show()`, `plt.show()`, or `display()` — these do nothing in the sandbox.
 
+## Saving a new table (creating a derived dataset)
+
+When the user asks you to **create, build, save, derive, combine into, or persist a new table / dataset** (e.g. a merge/join, a filtered subset, or an aggregation they want to keep), you MUST call:
+
+`save_dataset(df, name, desc)`
+
+- `df` — the DataFrame to persist.
+- `name` — a short, descriptive `snake_case` name for the new table.
+- `desc` — one line describing what it is / how it was derived.
+
+This registers a **derived dataset** that then appears in the Tables list and the schema (ER) diagram, with lineage back to its source tables. It returns a confirmation string (the new id + size). Computing a merge/aggregation and only describing it does NOT create a table — you must call `save_dataset` to actually create one.
+
+Emit the producing expression and the save call together as ONE action:
+
+```
+combined = df.merge(df2, on='NOC', how='left')
+save_dataset(combined, 'athlete_events_with_regions', 'athlete_events left-joined to noc_regions on NOC')
+```
+
+Then on your next turn give a `FINAL ANSWER:` that states the new table was created (its name and row × column count). Only call `save_dataset` when the user actually wants to KEEP a new table — not for ordinary intermediate analysis steps.
+
 ## Example loop
 
 Question: "What is the average price?"

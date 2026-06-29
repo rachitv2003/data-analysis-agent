@@ -20,6 +20,7 @@ Chart capture is wired here (C4) and must never crash a run.
 """
 from __future__ import annotations
 
+import ast
 import re
 import traceback
 from typing import Any
@@ -357,13 +358,25 @@ def eval_expression(
         try:
             result = eval(expr, namespace)  # noqa: S307 — sandboxed, intentional
         except SyntaxError:
-            # Statement(s) rather than a single expression: exec, then surface the
-            # value of the last bare expression if the model left one on its own line.
-            exec(expr, namespace)  # noqa: S102 — sandboxed, intentional
-            last = expr.strip().splitlines()[-1].strip()
-            try:
-                result = eval(last, namespace)  # noqa: S307
-            except Exception:
+            # Statement(s) rather than a single expression. Parse the block and, if
+            # it ends in an expression, exec everything BEFORE that and eval the
+            # last expression EXACTLY ONCE. The old approach (exec the whole block,
+            # then eval the last *line*) ran a side-effecting tail twice — e.g.
+            # `df = ...` then `save_dataset(df, ...)` registered the derived dataset
+            # two times. ast.parse re-raises on genuinely invalid code (caught below).
+            tree = ast.parse(expr)
+            if tree.body and isinstance(tree.body[-1], ast.Expr):
+                *head, tail = tree.body
+                if head:
+                    exec(  # noqa: S102 — sandboxed, intentional
+                        compile(ast.Module(body=head, type_ignores=[]), "<string>", "exec"),
+                        namespace,
+                    )
+                result = eval(  # noqa: S307 — sandboxed, intentional
+                    compile(ast.Expression(tail.value), "<string>", "eval"), namespace
+                )
+            else:
+                exec(compile(tree, "<string>", "exec"), namespace)  # noqa: S102
                 result = "[executed statements; no return value]"
 
         direct_charts = _capture_charts(result)
