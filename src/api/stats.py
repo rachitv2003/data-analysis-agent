@@ -37,7 +37,14 @@ def _context_limit(model: str) -> int:
 @router.get("/stats/daily")
 def stats_daily(session: Session = Depends(get_session)) -> dict:
     settings = get_settings()
-    model = settings.llm_model or _DEFAULT_MODEL
+    # Authoritative model: ask the client what the provider will actually call,
+    # so the displayed model matches reality (never drifts from a duplicate
+    # default). Fall back to the setting/default if client init fails.
+    try:
+        from llm.client import LLMClient
+        model = LLMClient().model or settings.llm_model or _DEFAULT_MODEL
+    except Exception:
+        model = settings.llm_model or _DEFAULT_MODEL
 
     now = datetime.now()
     today = now.date()
@@ -62,6 +69,18 @@ def stats_daily(session: Session = Depends(get_session)) -> dict:
     tokens_output = sum(r.tokens_output or 0 for r in rows)
     query_count = len(rows)
 
+    # The most recent run's input tokens — i.e. the last query's prompt size.
+    # This (not the cumulative daily total) is what belongs against the
+    # per-request context window. Persisted so the bar shows on reload.
+    def _ts(r: QueryRunRow):
+        t = r.created_at
+        if t is None:
+            return datetime.min.replace(tzinfo=timezone.utc)
+        return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+    latest = max(rows, key=_ts) if rows else None
+    last_prompt_tokens = (latest.tokens_input or 0) if latest else 0
+
     return ok(
         {
             "date": now.date().isoformat(),
@@ -70,5 +89,6 @@ def stats_daily(session: Session = Depends(get_session)) -> dict:
             "tokens_output": tokens_output,
             "query_count": query_count,
             "context_limit": _context_limit(model),
+            "last_prompt_tokens": last_prompt_tokens,
         }
     )

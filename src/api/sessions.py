@@ -89,6 +89,9 @@ def _turn_payload(run: QueryRunRow) -> dict:
         "suggested_questions": getattr(run, "suggested_questions", None) or [],
         "prompt_breakdown": run.prompt_breakdown or {},
         "charts": run.charts_json or [],
+        # Per-turn timestamp so the UI can show "Asked at {time}" on hydrated
+        # history turns (live turns stamp their own arrival time client-side).
+        "created_at": run.created_at.isoformat() if run.created_at else None,
     }
 
 

@@ -59,6 +59,13 @@ class LLMClient:
         """
         return self._provider_name
 
+    @property
+    def model(self) -> str:
+        """The model id the active provider will ACTUALLY call — resolved from
+        settings, else the provider's own DEFAULT_MODEL. Single source of truth
+        for the UI so the displayed model can never drift from what runs."""
+        return getattr(self._provider, "_model", "") or ""
+
     def complete(self, prompt: str, *, system: str | None = None) -> LLMResponse:
         """Return the model's reply + REAL token usage (provider-reported)."""
         return self._provider.complete(prompt, system=system)
