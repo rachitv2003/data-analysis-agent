@@ -40,10 +40,13 @@ export interface LastQueryTokens {
  */
 export function AnalyseTab({
   provider,
+  model,
   onOpenMemory,
   onSettingsSaved,
 }: {
   provider?: string
+  /** Active model id (passed to the conversation for session export). */
+  model?: string
   onOpenMemory: () => void
   /** Notify the shell after a settings save so the header re-fetches /health. */
   onSettingsSaved?: () => void
@@ -185,6 +188,7 @@ export function AnalyseTab({
           handleRef={conversationRef}
           selectedDatasetIds={selectedDatasetIds}
           sessionId={sessionId}
+          model={model}
           onSessionStarted={handleSessionStarted}
           onAnswered={tokens => {
             setLastTokens(tokens)

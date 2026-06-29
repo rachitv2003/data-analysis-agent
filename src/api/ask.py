@@ -23,6 +23,7 @@ route never duplicates it.
 """
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 
 from markdown_it import MarkdownIt
@@ -186,6 +187,10 @@ def ask(req: AskRequest, session: Session = Depends(get_session)) -> dict:
     session.commit()
 
     # --- Run the agent (run-row creation lives in run_agent) --------------
+    # Wall-clock the run so the UI can show the answer's response time. This
+    # spans the whole agent loop (selector + iterations + finalize), which is
+    # the "how long did my answer take" the user cares about.
+    _t0 = time.monotonic()
     result = run_agent(
         question,
         resolved_ids,
@@ -195,6 +200,7 @@ def ask(req: AskRequest, session: Session = Depends(get_session)) -> dict:
         run_selector=run_selector,
         max_iterations=None,
     )
+    duration_ms = int((time.monotonic() - _t0) * 1000)
 
     # Bump the session's recency so the sidebar orders by last activity. The
     # row was committed/expired above; re-load it in this session to update.
@@ -240,5 +246,6 @@ def ask(req: AskRequest, session: Session = Depends(get_session)) -> dict:
             "steps": result.get("action_history") or [],
             "suggested_questions": result.get("suggested_questions") or [],
             "prompt_breakdown": result.get("prompt_breakdown") or {},
+            "duration_ms": duration_ms,
         }
     )

@@ -64,6 +64,8 @@ interface Turn {
    * (the "Asked at" prefix is then omitted gracefully).
    */
   answeredAt?: number
+  /** Response time in ms (server wall-clock live; row lifespan for history). */
+  durationMs?: number
 }
 
 let turnSeq = 0
@@ -145,6 +147,7 @@ function turnFromView(v: TurnView): Turn {
     status: 'answer',
     answer,
     answeredAt: Number.isNaN(createdMs) ? undefined : createdMs,
+    durationMs: typeof v.duration_ms === 'number' ? v.duration_ms : undefined,
   }
 }
 
@@ -154,6 +157,7 @@ export function ConversationCard({
   sessionId,
   onSessionStarted,
   onAnswered,
+  model,
 }: {
   handleRef?: Ref<ConversationHandle>
   /** Explicit dataset selection; empty → let the server's selector pick. */
@@ -161,8 +165,11 @@ export function ConversationCard({
   sessionId: string | null
   onSessionStarted: (id: string) => void
   onAnswered: (tokens: LastQueryTokens) => void
+  /** The active model id (for the session-export header). */
+  model?: string
 }) {
   const [question, setQuestion] = useState('')
+  const composerRef = useRef<HTMLTextAreaElement>(null)
   const [turns, setTurns] = useState<Turn[]>([])
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState<{ iteration: number; max: number } | null>(null)
@@ -258,8 +265,14 @@ export function ConversationCard({
           })
         } else {
           // Capture the moment the answer landed for the "Asked at" meta (the
-          // /ask payload carries no timestamp). Not read at module top-level.
-          updateTurn(turnId, { status: 'answer', answer: res, answeredAt: Date.now() })
+          // /ask payload carries no timestamp) plus the server-measured response
+          // time. Not read at module top-level.
+          updateTurn(turnId, {
+            status: 'answer',
+            answer: res,
+            answeredAt: Date.now(),
+            durationMs: typeof res.duration_ms === 'number' ? res.duration_ms : undefined,
+          })
           onAnswered({ input: res.tokens_input ?? 0, output: res.tokens_output ?? 0 })
         }
       } catch (err) {
@@ -282,8 +295,7 @@ export function ConversationCard({
     void runAsk(q, false)
   }, [question, running, runAsk])
 
-  // Submit a suggestion chip (or a clarification re-submit) without touching the
-  // composer text.
+  // Re-submit a clarification's original question without touching the composer.
   const submitQuestion = useCallback(
     (q: string, skipClarification = false) => {
       if (running) return
@@ -291,6 +303,20 @@ export function ConversationCard({
     },
     [running, runAsk],
   )
+
+  // Picking a follow-up suggestion only DROPS it into the composer (it does not
+  // auto-submit) so the user can edit or confirm before sending. Focus + caret
+  // to end so they can tweak it or just press Enter.
+  const pickSuggestion = useCallback((q: string) => {
+    setQuestion(q)
+    requestAnimationFrame(() => {
+      const el = composerRef.current
+      if (el) {
+        el.focus()
+        el.setSelectionRange(el.value.length, el.value.length)
+      }
+    })
+  }, [])
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -324,6 +350,15 @@ export function ConversationCard({
 
   const collapsibleCount = turns.filter(t => t.status === 'answer').length
 
+  // Export the WHOLE session as a Markdown log (prompts, clarifications, times,
+  // answers, tokens, steps/backend code, prompt breakdown).
+  const exportSession = useCallback(() => {
+    if (turns.length === 0) return
+    const md = buildSessionMarkdown(turns, model)
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+    downloadFile(md, `session-${stamp}.md`)
+  }, [turns, model])
+
   const lastTurn = turns[turns.length - 1]
   const latestSuggestions =
     lastTurn?.status === 'answer' ? (lastTurn.answer?.suggested_questions ?? []) : []
@@ -338,6 +373,17 @@ export function ConversationCard({
           Conversation
         </h2>
         <div className="flex items-center gap-2">
+          {/* Session-level export — a full Markdown log of the conversation. */}
+          {turns.length > 0 && (
+            <button
+              type="button"
+              onClick={exportSession}
+              title="Download the whole conversation as a Markdown log"
+              className="rounded border border-gray-200 bg-white px-2 py-0.5 text-[11px] font-medium text-gray-500 hover:bg-gray-50 hover:text-gray-700"
+            >
+              Export session
+            </button>
+          )}
           {/* C32 bulk collapse/expand controls. */}
           {collapsibleCount > 1 && (
             <div className="flex items-center gap-1.5 text-[11px]">
@@ -413,10 +459,10 @@ export function ConversationCard({
         />
       )}
 
-      {/* Suggestion chips from the latest answer */}
+      {/* Suggestion chips from the latest answer — click drops into the composer */}
       <SuggestionChips
         suggestions={latestSuggestions}
-        onPick={q => submitQuestion(q)}
+        onPick={pickSuggestion}
         disabled={running}
       />
 
@@ -427,6 +473,7 @@ export function ConversationCard({
         </label>
         <textarea
           id={questionId}
+          ref={composerRef}
           rows={3}
           value={question}
           onChange={e => setQuestion(e.target.value)}
@@ -507,8 +554,8 @@ function TurnView({
               answer={turn.answer}
               collapsible={collapsible}
               onCollapse={collapsible ? onToggle : undefined}
-              question={turn.question}
               answeredAt={turn.answeredAt}
+              durationMs={turn.durationMs}
             />
           )
         ) : null}
@@ -542,15 +589,16 @@ function AnswerView({
   answer,
   collapsible,
   onCollapse,
-  question,
   answeredAt,
+  durationMs,
 }: {
   answer: AskResponse
   collapsible: boolean
   onCollapse?: () => void
-  question: string
   /** Epoch ms the answer landed (live) or its persisted time (history). */
   answeredAt?: number
+  /** Response time in ms, shown next to the timestamp when known. */
+  durationMs?: number
 }) {
   const markdown = answer.answer_markdown ?? ''
   const steps: AskStep[] = answer.steps ?? []
@@ -569,13 +617,6 @@ function AnswerView({
           )}
         </div>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => exportMarkdown(markdown, question)}
-            className="shrink-0 text-[11px] font-medium text-gray-400 hover:text-gray-700"
-          >
-            Export MD
-          </button>
           {collapsible && onCollapse && (
             <button
               type="button"
@@ -608,6 +649,12 @@ function AnswerView({
         {askedAt && (
           <>
             <span>Asked at {askedAt}</span>
+            <span aria-hidden="true">·</span>
+          </>
+        )}
+        {durationMs !== undefined && (
+          <>
+            <span className="tabular-nums">took {formatDuration(durationMs)}</span>
             <span aria-hidden="true">·</span>
           </>
         )}
@@ -654,16 +701,88 @@ function AnswerView({
   )
 }
 
-/** Download the answer as a Markdown file. */
-function exportMarkdown(markdown: string, question: string) {
-  const slug = question.slice(0, 40).replace(/[^a-z0-9]+/gi, '-').toLowerCase()
-  const blob = new Blob([markdown], { type: 'text/markdown' })
+/** Human-readable response time: "850ms", "3.4s", or "1m 5s". */
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
+  const m = Math.floor(ms / 60_000)
+  const s = Math.round((ms % 60_000) / 1000)
+  return `${m}m ${s}s`
+}
+
+/** Trigger a client-side download of `content` as a file. */
+function downloadFile(content: string, filename: string) {
+  const blob = new Blob([content], { type: 'text/markdown' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `answer-${slug || 'export'}.md`
+  a.download = filename
   a.click()
   URL.revokeObjectURL(url)
+}
+
+/**
+ * Build a full Markdown log of the whole session — every prompt, any
+ * clarification, submit time + response time, the answer, tokens, status,
+ * iterations, datasets used, the backend code steps (action + output), and the
+ * prompt breakdown — so the user can keep a complete record of the conversation.
+ */
+function buildSessionMarkdown(turns: Turn[], model?: string): string {
+  const answered = turns.filter(t => t.status === 'answer')
+  const totalIn = answered.reduce((s, t) => s + (t.answer?.tokens_input ?? 0), 0)
+  const totalOut = answered.reduce((s, t) => s + (t.answer?.tokens_output ?? 0), 0)
+  const lines: string[] = []
+
+  lines.push('# Conversation session', '')
+  lines.push(`- **Exported:** ${new Date().toLocaleString()}`)
+  lines.push(`- **Model:** ${model || 'unknown'}`)
+  lines.push(`- **Turns:** ${turns.length}`)
+  lines.push(`- **Total tokens:** ${totalIn} in / ${totalOut} out`)
+  lines.push('', '---', '')
+
+  turns.forEach((turn, i) => {
+    const a = turn.answer
+    lines.push(`## Turn ${i + 1} — ${turn.status}`, '')
+    lines.push('**Prompt**', '', `> ${turn.question.replace(/\n/g, '\n> ')}`, '')
+
+    if (turn.status === 'clarification' && turn.clarificationQuestion) {
+      lines.push('**Clarification requested**', '', `> ${turn.clarificationQuestion}`, '')
+      lines.push('_Re-submitted with clarification skipped._', '')
+    } else if (turn.status === 'error') {
+      lines.push(`**Error:** ${turn.error ?? 'The question failed to run.'}`, '')
+    } else if (a) {
+      const meta: string[] = []
+      if (turn.answeredAt !== undefined) meta.push(`Asked at ${new Date(turn.answeredAt).toLocaleTimeString()}`)
+      if (turn.durationMs !== undefined) meta.push(`Response time ${formatDuration(turn.durationMs)}`)
+      meta.push(`Status ${a.status ?? 'completed'}`)
+      meta.push(`Iterations ${a.iteration_count ?? 0}`)
+      meta.push(`Tokens ${a.tokens_input ?? 0} in / ${a.tokens_output ?? 0} out`)
+      lines.push(`- ${meta.join('  ·  ')}`)
+      if (a.datasets_used && a.datasets_used.length > 0) {
+        lines.push(`- Datasets used: ${a.datasets_used.join(', ')}`)
+      }
+      lines.push('', '**Answer**', '', a.answer_markdown ?? '', '')
+
+      const steps = a.steps ?? []
+      if (steps.length > 0) {
+        lines.push(`**Backend code (${steps.length} step${steps.length === 1 ? '' : 's'})**`, '')
+        steps.forEach((step, si) => {
+          lines.push(`Step ${si + 1} — ${step.is_error ? 'error' : 'ok'}`, '')
+          lines.push('```python', step.action ?? '', '```', '')
+          const out = (step.result ?? '').slice(0, 1500)
+          if (out.trim()) lines.push('Output:', '', '```', out, '```', '')
+        })
+      }
+
+      if (a.prompt_breakdown && Object.keys(a.prompt_breakdown).length > 0) {
+        const parts = Object.entries(a.prompt_breakdown).map(([k, v]) => `${k}: ${v}`)
+        lines.push(`**Prompt breakdown (tokens):** ${parts.join(', ')}`, '')
+      }
+    }
+    lines.push('---', '')
+  })
+
+  return lines.join('\n')
 }
 
 /** First line / sentence of the answer, trimmed for a collapsed preview. */

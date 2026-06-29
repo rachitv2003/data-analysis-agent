@@ -124,6 +124,7 @@ export function AppShell() {
           {tab === 'analyse' && (
             <AnalyseTab
               provider={provider}
+              model={model}
               onOpenMemory={() => setMemoryOpen(true)}
               onSettingsSaved={refreshHealth}
             />

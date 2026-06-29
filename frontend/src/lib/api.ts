@@ -250,6 +250,8 @@ export interface AskResponse {
   prompt_breakdown?: Record<string, unknown>
   /** Inline Plotly figures captured during analysis, each a JSON string (C4). */
   charts?: string[]
+  /** Wall-clock response time of the run in milliseconds (answer path). */
+  duration_ms?: number
   // Clarification variant (type === "clarification"):
   clarification_question?: string
 }
@@ -325,6 +327,8 @@ export interface TurnView {
   /** Inline Plotly figures (JSON strings) captured for this turn (C4). */
   charts?: string[]
   created_at?: string | null
+  /** Approximate response time (ms) derived from the run's lifespan. */
+  duration_ms?: number
   [key: string]: unknown
 }
 

@@ -4,9 +4,9 @@
  * Follow-up suggestion chips (Phase 3 — C22).
  *
  * Renders the latest answer's `suggested_questions` as clickable chips. Clicking
- * a chip submits it as the next question in the SAME session (the parent owns
- * that submission). Renders nothing when there are no suggestions, so an empty
- * list never leaves a dangling label.
+ * a chip hands it to the parent via `onPick` — which drops it into the composer
+ * for the user to edit or confirm (it does NOT auto-submit). Renders nothing when
+ * there are no suggestions, so an empty list never leaves a dangling label.
  */
 export function SuggestionChips({
   suggestions,

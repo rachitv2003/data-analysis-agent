@@ -92,6 +92,14 @@ def _turn_payload(run: QueryRunRow) -> dict:
         # Per-turn timestamp so the UI can show "Asked at {time}" on hydrated
         # history turns (live turns stamp their own arrival time client-side).
         "created_at": run.created_at.isoformat() if run.created_at else None,
+        # Approximate response time from the row's lifespan (created → last
+        # write ≈ finalize). Live turns get an exact wall-clock from /ask; this
+        # lets resumed history show a response time too.
+        "duration_ms": (
+            int((run.updated_at - run.created_at).total_seconds() * 1000)
+            if run.updated_at and run.created_at
+            else None
+        ),
     }
 
 
