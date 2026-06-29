@@ -109,6 +109,7 @@ def make_save_dataset(
     run_id: str | None,
     parent_ids: list[str],
     on_registered=None,
+    on_saved=None,
 ):
     """Build a run-aware `save_dataset(df, name, desc)` for a single run.
 
@@ -116,8 +117,10 @@ def make_save_dataset(
     desc="")` but closes over the producing `run_id` and parent `dataset_ids` and
     captures the current action expression as `derivation_code` (C25). On success
     it registers a real DERIVED dataset, invokes `on_registered(new_id)` (so the
-    node can collect created ids), and returns a confirmation string. A disk/db
-    failure is CAUGHT and returned as an error string — it never crashes the run.
+    node can collect created ids) and `on_saved(name, df)` (so the node can make
+    the saved frame available as a `<name>` variable in subsequent steps), and
+    returns a confirmation string. A disk/db failure is CAUGHT and returned as an
+    error string — it never crashes the run.
 
     `derivation_code` is bound per-action via the mutable `_code` cell so the node
     can set it to the exact expression that produced `df` just before eval.
@@ -145,11 +148,21 @@ def make_save_dataset(
                     on_registered(new_id)
                 except Exception:  # noqa: BLE001 — collection is best-effort
                     pass
+            # Make the saved frame referenceable as `<name>` in later steps (and,
+            # via the node, later turns of this session).
+            if on_saved is not None:
+                try:
+                    on_saved(name, df)
+                except Exception:  # noqa: BLE001 — best-effort namespace inject
+                    pass
             rows = int(getattr(df, "shape", (0, 0))[0])
             cols = int(getattr(df, "shape", (0, 0))[1])
+            alias = _safe_alias(name) or name
             return (
                 f"save_dataset('{name}'): registered derived dataset {new_id} "
-                f"({rows} rows x {cols} cols)."
+                f"({rows} rows x {cols} cols). Now available as the variable "
+                f"`{alias}` for the rest of this analysis and later turns of this "
+                f"conversation."
             )
         except Exception as exc:  # noqa: BLE001 — recorded as a step error
             logger.warning("save_dataset_failed", run_id=run_id, error=str(exc))

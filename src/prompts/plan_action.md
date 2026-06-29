@@ -62,7 +62,16 @@ combined = df.merge(df2, on='NOC', how='left')
 save_dataset(combined, 'athlete_events_with_regions', 'athlete_events left-joined to noc_regions on NOC')
 ```
 
-Then on your next turn give a `FINAL ANSWER:` that states the new table was created (its name and row × column count). Only call `save_dataset` when the user actually wants to KEEP a new table — not for ordinary intermediate analysis steps.
+### Reusing a saved table across steps and turns
+
+**IMPORTANT — variable lifetime:** ordinary variables you assign (e.g. `combined = df.merge(...)`) do **NOT** carry over to your next step — each step starts fresh with only the loaded tables. The way to keep a result and use it later is `save_dataset`: a saved table becomes a **variable named after it** (its `snake_case` name) that IS available in every following step AND in later turns of this conversation.
+
+So a multi-step build looks like:
+
+- Step 1: `base = df.merge(df2, on='id'); save_dataset(base, 'customer_base', 'merged customers + orders')`
+- Step 2 (or a later turn): reference it directly — `customer_base.groupby('state').size()` — it is already in scope; do NOT re-merge, and do NOT `pd.read_csv('customer_base.csv')`.
+
+Then give a `FINAL ANSWER:` that states the new table(s) created (name + row × column count). Only `save_dataset` what is worth keeping or reusing — not every throwaway intermediate.
 
 ## Example loop
 

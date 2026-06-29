@@ -25,6 +25,8 @@ Lets the agent autonomously materialize a new dataset via `save_dataset(df, name
 ## Business Rules
 - `save_dataset(df, name, desc)` is documented to the model in `src/prompts/plan_action.md` (call it to create/persist a derived table); the sandbox extracts the **df-producing first-argument expression** (not the wrapping `save_dataset(...)` call) as the stored `derivation_code`, and `eval_expression` runs the save call EXACTLY ONCE so a derived dataset is registered a single time.
 - `save_dataset` records `derivation_code`, `derived_from_dataset_ids`, `derived_from_run_id`, returns a confirmation string.
+- **A saved table is immediately referenceable as a variable named after it** (`<name>`, normalised to a safe identifier). `save_dataset` appends the frame to the run's `_dataframes[run_id]` frames and injects it into the current namespace, so the SAME and SUBSEQUENT steps can use `<name>` directly (ordinary, un-saved variables do NOT persist between steps — each step rebuilds the namespace). The confirmation string names the variable.
+- **Saved tables carry across turns of a session:** the ids the agent created this turn (`derived_dataset_ids`) are appended to the session's `dataset_ids_json` in `POST /ask`, so a follow-up turn loads them and the model can reference `<name>` again — enabling "save a base table this turn, analyse/cluster it next turn" without re-deriving or `read_csv`.
 - A derived dataset is **stale** when a parent changed after derivation; `/re-derive` re-runs the code vs current parents and clears stale (400 `not_derived` / 404 `parent_not_found` / 400 `re_derive_error`).
 - Deleting a parent recursively deletes derived children (see [dataset-deletion-cascade.md](dataset-deletion-cascade.md)).
 

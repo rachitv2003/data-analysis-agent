@@ -25,7 +25,7 @@ from db.session import create_db_session
 from graph.cancellation import is_cancelled  # cooperative Stop
 from graph.compress import extract_facts  # C31: distil notes -> compact facts
 from graph.memory import get_memory_block  # owned by slice-3c; 3b only imports it
-from graph.sandbox import build_namespace, eval_expression, make_save_dataset
+from graph.sandbox import _safe_alias, build_namespace, eval_expression, make_save_dataset
 from graph.state import AgentState
 from llm.client import LLMClient
 from observability.events import get_logger
@@ -426,8 +426,29 @@ def execute_action(state: AgentState) -> AgentState:
     def _on_registered(new_id: str) -> None:
         _derived_created.setdefault(run_id, []).append(new_id)
 
+    def _on_saved(name: str, df: pd.DataFrame) -> None:
+        # Make a save_dataset'd frame referenceable as `<name>` (v0.5 parity):
+        # append it to THIS run's frames so the NEXT step's build_namespace aliases
+        # it, and inject it into the CURRENT action's namespace so a later
+        # statement in the same action can use it. A re-save of the same name
+        # replaces the prior frame (latest wins).
+        alias = _safe_alias(name) or name
+        b = _dataframes.get(run_id)
+        if b is not None:
+            fn = f"{name}.csv"
+            try:
+                i = b["filenames"].index(fn)
+                b["frames"][i] = df
+            except ValueError:
+                b["frames"].append(df)
+                b["filenames"].append(fn)
+        namespace[alias] = df
+
     namespace["save_dataset"] = make_save_dataset(
-        run_id=run_id, parent_ids=parent_ids, on_registered=_on_registered
+        run_id=run_id,
+        parent_ids=parent_ids,
+        on_registered=_on_registered,
+        on_saved=_on_saved,
     )
 
     result_str, new_charts, is_error, error_str = eval_expression(expr, namespace)

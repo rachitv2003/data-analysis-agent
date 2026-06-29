@@ -207,6 +207,16 @@ def ask(req: AskRequest, session: Session = Depends(get_session)) -> dict:
     session_row = session.get(ConversationSessionRow, session_id)
     if session_row is not None:
         session_row.updated_at = _now()
+        # Carry datasets the agent CREATED this turn (save_dataset) into the
+        # session's dataset set, so a follow-up turn loads them and can reference
+        # them by name — e.g. "save customer_clusters_base" then "now cluster it".
+        new_derived = result.get("derived_dataset_ids") or []
+        if new_derived:
+            current = list(session_row.dataset_ids_json or [])
+            for did in new_derived:
+                if did and did not in current:
+                    current.append(did)
+            session_row.dataset_ids_json = current
 
     # --- Clarification short-circuit (C26) --------------------------------
     if result.get("type") == "clarification":
