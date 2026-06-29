@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Data, Layout } from 'plotly.js'
 
 /**
@@ -64,9 +64,18 @@ function parseFigures(charts?: string[]): Figure[] {
   return out
 }
 
+type PlotlyApi = typeof import('plotly.js-dist-min')
+
+function resolvePlotly(mod: unknown): PlotlyApi {
+  return (mod as { default?: PlotlyApi }).default ?? (mod as PlotlyApi)
+}
+
 /** A single figure drawn into a responsive div via Plotly's imperative API. */
 function PlotlyFigure({ figure, index }: { figure: Figure; index: number }) {
   const ref = useRef<HTMLDivElement>(null)
+  // Captured once the figure is plotted, so the toolbar can export it.
+  const plotlyRef = useRef<PlotlyApi | null>(null)
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     const el = ref.current
@@ -77,8 +86,8 @@ function PlotlyFigure({ figure, index }: { figure: Figure; index: number }) {
     import('plotly.js-dist-min')
       .then(mod => {
         if (cancelled || !ref.current) return
-        const Plotly = (mod as { default?: typeof import('plotly.js-dist-min') }).default ??
-          (mod as unknown as typeof import('plotly.js-dist-min'))
+        const Plotly = resolvePlotly(mod)
+        plotlyRef.current = Plotly
         const layout: Partial<Layout> = {
           autosize: true,
           margin: { l: 48, r: 16, t: 32, b: 40 },
@@ -98,20 +107,99 @@ function PlotlyFigure({ figure, index }: { figure: Figure; index: number }) {
       // Best-effort purge; ignore if Plotly never attached.
       import('plotly.js-dist-min')
         .then(mod => {
-          const Plotly = (mod as { default?: typeof import('plotly.js-dist-min') }).default ??
-            (mod as unknown as typeof import('plotly.js-dist-min'))
+          const Plotly = resolvePlotly(mod)
           if (el) Plotly.purge(el)
         })
         .catch(() => {})
     }
   }, [figure])
 
+  // Export size — the rendered chart's pixel box (with sane minimums).
+  const dims = () => {
+    const el = ref.current
+    return {
+      width: Math.max(el?.clientWidth ?? 0, 640),
+      height: Math.max(el?.clientHeight ?? 0, 360),
+    }
+  }
+
+  const downloadImage = async (format: 'png' | 'jpeg') => {
+    const Plotly = plotlyRef.current
+    const gd = ref.current
+    if (!Plotly || !gd) return
+    try {
+      // toImage (not downloadImage) so we can render at 2× for a crisp export.
+      const url = await Plotly.toImage(gd, { format, scale: 2, ...dims() })
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `chart-${index + 1}.${format === 'jpeg' ? 'jpg' : 'png'}`
+      a.click()
+    } catch {
+      /* export failed — no-op */
+    }
+  }
+
+  const copyPng = async () => {
+    const Plotly = plotlyRef.current
+    const gd = ref.current
+    if (!Plotly || !gd) return
+    try {
+      const url = await Plotly.toImage(gd, { format: 'png', scale: 2, ...dims() })
+      const blob = await (await fetch(url)).blob()
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // Clipboard-image unsupported (or blocked) — fall back to a PNG download.
+      void downloadImage('png')
+    }
+  }
+
+  const downloadPdf = async () => {
+    const Plotly = plotlyRef.current
+    const gd = ref.current
+    if (!Plotly || !gd) return
+    try {
+      const { width, height } = dims()
+      const url = await Plotly.toImage(gd, { format: 'png', scale: 2, width, height })
+      const { jsPDF } = await import('jspdf')
+      const pdf = new jsPDF({
+        orientation: width >= height ? 'landscape' : 'portrait',
+        unit: 'pt',
+        format: [width, height],
+      })
+      pdf.addImage(url, 'PNG', 0, 0, width, height)
+      pdf.save(`chart-${index + 1}.pdf`)
+    } catch {
+      /* export failed — no-op */
+    }
+  }
+
+  const btn =
+    'rounded border border-gray-200 bg-white px-2 py-0.5 text-[11px] font-medium text-gray-500 hover:bg-gray-50 hover:text-gray-700'
+
   return (
-    <div
-      ref={ref}
-      role="img"
-      aria-label={`Chart ${index + 1}`}
-      className="min-h-[18rem] w-full overflow-hidden rounded-md border border-gray-200 bg-white"
-    />
+    <div>
+      <div className="mb-1 flex justify-end gap-1.5">
+        <button type="button" onClick={() => void copyPng()} className={btn}>
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+        <button type="button" onClick={() => void downloadImage('png')} className={btn}>
+          PNG
+        </button>
+        <button type="button" onClick={() => void downloadImage('jpeg')} className={btn}>
+          JPEG
+        </button>
+        <button type="button" onClick={() => void downloadPdf()} className={btn}>
+          PDF
+        </button>
+      </div>
+      <div
+        ref={ref}
+        role="img"
+        aria-label={`Chart ${index + 1}`}
+        className="min-h-[18rem] w-full overflow-hidden rounded-md border border-gray-200 bg-white"
+      />
+    </div>
   )
 }

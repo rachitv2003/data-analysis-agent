@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "jspdf": "^4.2.1",
     "next": "15.3.0",
     "plotly.js-dist-min": "^2.35.2",
     "react": "^19.0.0",

@@ -1,7 +1,16 @@
 'use client'
 
+import { useRef, useState, type ComponentPropsWithoutRef } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import {
+  copyText,
+  downloadBlob,
+  extractTableRows,
+  fileStamp,
+  rowsToCsv,
+  rowsToTsv,
+} from '@/lib/exporters'
 
 /**
  * Markdown renderer for agent answers (C6).
@@ -65,11 +74,7 @@ export function Markdown({ children }: { children: string }) {
             )
           },
           pre: props => <pre className="my-2" {...props} />,
-          table: props => (
-            <div className="my-2 overflow-x-auto">
-              <table className="w-full border-collapse text-xs" {...props} />
-            </div>
-          ),
+          table: props => <MarkdownTable {...props} />,
           thead: props => <thead className="bg-gray-50" {...props} />,
           th: props => (
             <th
@@ -82,6 +87,59 @@ export function Markdown({ children }: { children: string }) {
       >
         {children}
       </ReactMarkdown>
+    </div>
+  )
+}
+
+/**
+ * A rendered Markdown table with a small Copy / CSV toolbar. "Copy" puts the
+ * table on the clipboard as TSV (pastes straight into Sheets/Excel); "CSV"
+ * downloads it. Cell text is read from the real rendered DOM, so it matches
+ * exactly what the user sees.
+ */
+function MarkdownTable(props: ComponentPropsWithoutRef<'table'>) {
+  const ref = useRef<HTMLTableElement>(null)
+  const [copied, setCopied] = useState(false)
+
+  const rows = () => (ref.current ? extractTableRows(ref.current) : [])
+
+  const onCopy = async () => {
+    const data = rows()
+    if (data.length === 0) return
+    if (await copyText(rowsToTsv(data))) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    }
+  }
+
+  const onCsv = () => {
+    const data = rows()
+    if (data.length === 0) return
+    downloadBlob(rowsToCsv(data), `table-${fileStamp()}.csv`, 'text/csv;charset=utf-8')
+  }
+
+  return (
+    <div className="my-2">
+      <div className="mb-1 flex justify-end gap-1.5">
+        <button
+          type="button"
+          onClick={() => void onCopy()}
+          className="rounded border border-gray-200 bg-white px-2 py-0.5 text-[11px] font-medium text-gray-500 hover:bg-gray-50 hover:text-gray-700"
+        >
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+        <button
+          type="button"
+          onClick={onCsv}
+          title="Download this table as CSV"
+          className="rounded border border-gray-200 bg-white px-2 py-0.5 text-[11px] font-medium text-gray-500 hover:bg-gray-50 hover:text-gray-700"
+        >
+          CSV
+        </button>
+      </div>
+      <div className="overflow-x-auto">
+        <table ref={ref} className="w-full border-collapse text-xs" {...props} />
+      </div>
     </div>
   )
 }
