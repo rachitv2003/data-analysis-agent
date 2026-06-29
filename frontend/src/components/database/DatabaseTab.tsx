@@ -24,6 +24,9 @@ export function DatabaseTab() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Right-hand description panel can be collapsed to give the diagram the full
+  // width; the toggle lives in the diagram's header (passed to ERDiagramPanel).
+  const [descOpen, setDescOpen] = useState(true)
 
   const [confirmClear, setConfirmClear] = useState(false)
   const [clearing, setClearing] = useState(false)
@@ -172,28 +175,38 @@ export function DatabaseTab() {
       ) : (
         // Schema pane flexes to fill; the description panel is a FIXED width so
         // the diagram's width never changes when a different table is selected.
-        // `min-w-0` lets each column's overflow (the SVG diagram, the wide data
-        // preview) scroll inside its track instead of stretching it.
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_24rem]">
+        // Collapsing the description (the "Details" toggle in the diagram header)
+        // drops the second track so the diagram spans the full row. `min-w-0`
+        // lets each column's overflow (the SVG diagram, the wide data preview)
+        // scroll inside its track instead of stretching it.
+        <div
+          className={`grid grid-cols-1 gap-4 ${
+            descOpen ? 'lg:grid-cols-[minmax(0,1fr)_24rem]' : 'lg:grid-cols-1'
+          }`}
+        >
           <div className="min-w-0">
             <ERDiagramPanel
               datasets={erDatasets}
               selectedId={selectedId}
               onSelect={setSelectedId}
+              detailsOpen={descOpen}
+              onToggleDetails={() => setDescOpen(o => !o)}
             />
           </div>
-          <div className="min-w-0">
-            <TableDescriptionPanel
-              datasetId={selectedId}
-              allDatasets={erDatasets}
-              onChanged={refresh}
-              onDeleted={id => {
-                setDatasets(prev => prev.filter(d => d.id !== id))
-                if (selectedId === id) setSelectedId(null)
-                refresh()
-              }}
-            />
-          </div>
+          {descOpen && (
+            <div className="min-w-0">
+              <TableDescriptionPanel
+                datasetId={selectedId}
+                allDatasets={erDatasets}
+                onChanged={refresh}
+                onDeleted={id => {
+                  setDatasets(prev => prev.filter(d => d.id !== id))
+                  if (selectedId === id) setSelectedId(null)
+                  refresh()
+                }}
+              />
+            </div>
+          )}
         </div>
       )}
     </div>

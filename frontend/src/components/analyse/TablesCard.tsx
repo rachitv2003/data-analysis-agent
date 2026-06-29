@@ -16,9 +16,10 @@ import { CleanModal } from '@/components/database/CleanModal'
  * derived datasets). Each row shows filename + rows×cols + format + origin/stale
  * badges, a checkbox to include the dataset in the next question, a "cols"
  * toggle that lazily fetches GET /datasets/{id} for the column schema, a
- * **Clean** action (uploaded rows → the C24 clean modal), a **Re-derive** action
- * (stale derived rows → POST /datasets/{id}/re-derive), and a delete action with
- * an inline confirm → DELETE /datasets/{id}.
+ * **Clean** action (uploaded rows → the C24 clean modal) and a **Re-derive**
+ * action (stale derived rows → POST /datasets/{id}/re-derive). Deletion is a
+ * bulk action in the selection bar: check rows, then **Delete selected** with an
+ * inline confirm → DELETE /datasets/{id} for each checked dataset.
  *
  * The filter tabs (All|Uploaded|Derived|This session) are REAL client-side
  * filters by `origin` / current selection.
@@ -55,9 +56,9 @@ export function TablesCard({
 
   // Per-row "cols" expansion state, keyed by dataset id.
   const [colsById, setColsById] = useState<Record<string, ColsState>>({})
-  // Which row is awaiting delete confirmation.
-  const [confirmingId, setConfirmingId] = useState<string | null>(null)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
+  // Bulk-delete inline-confirm + in-flight state for the selection bar.
+  const [confirmBulk, setConfirmBulk] = useState(false)
+  const [deletingBulk, setDeletingBulk] = useState(false)
   // Which derived row is currently re-deriving.
   const [rederivingId, setRederivingId] = useState<string | null>(null)
   // The dataset the Clean modal is open for (uploaded rows only).
@@ -113,23 +114,40 @@ export function TablesCard({
     [colsById],
   )
 
-  const confirmDelete = useCallback(
-    async (id: string) => {
-      setDeletingId(id)
-      try {
-        await api.deleteDataset(id)
-        setConfirmingId(null)
-        onDeleted(id)
-        // Optimistic local removal in case the parent refresh lags.
-        setDatasets(prev => prev.filter(d => d.id !== id))
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to delete dataset.')
-      } finally {
-        setDeletingId(null)
+  // Bulk-delete every checked dataset (C19). Settles all deletions, drops the
+  // ones that succeeded from the selection + local list, and surfaces the first
+  // failure (if any) via the shared error banner.
+  const deleteSelected = useCallback(async () => {
+    const ids = [...selectedDatasetIds]
+    if (ids.length === 0) return
+    setDeletingBulk(true)
+    setError(null)
+    try {
+      const results = await Promise.allSettled(ids.map(id => api.deleteDataset(id)))
+      const succeeded: string[] = []
+      let firstError: string | null = null
+      results.forEach((result, i) => {
+        const id = ids[i]
+        if (result.status === 'fulfilled') {
+          succeeded.push(id)
+          onDeleted(id)
+        } else if (!firstError) {
+          firstError =
+            result.reason instanceof Error
+              ? result.reason.message
+              : 'Failed to delete dataset.'
+        }
+      })
+      // Optimistic local removal in case the parent refresh lags.
+      if (succeeded.length > 0) {
+        setDatasets(prev => prev.filter(d => !succeeded.includes(d.id)))
       }
-    },
-    [onDeleted],
-  )
+      if (firstError) setError(firstError)
+      setConfirmBulk(false)
+    } finally {
+      setDeletingBulk(false)
+    }
+  }, [selectedDatasetIds, onDeleted])
 
   // Re-derive a stale derived dataset (C25), then refresh to clear the badge.
   const reDerive = useCallback(
@@ -191,13 +209,13 @@ export function TablesCard({
       {/* Selection mode: explicit datasets vs. let the agent pick (C19). */}
       {datasets.length > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-xs">
-          <span className="font-medium text-gray-700">
-            {selectedDatasetIds.length === 0
-              ? 'Let the agent pick the dataset(s)'
-              : `${selectedDatasetIds.length} dataset${
-                  selectedDatasetIds.length === 1 ? '' : 's'
-                } selected`}
-          </span>
+          {selectedDatasetIds.length > 0 && (
+            <span className="font-medium text-gray-700">
+              {`${selectedDatasetIds.length} dataset${
+                selectedDatasetIds.length === 1 ? '' : 's'
+              } selected`}
+            </span>
+          )}
           {selectedDatasetIds.length < datasets.length && (
             <button
               type="button"
@@ -216,6 +234,39 @@ export function TablesCard({
               Clear (let agent pick)
             </button>
           )}
+          {selectedDatasetIds.length > 0 &&
+            (confirmBulk ? (
+              <span className="flex items-center gap-1">
+                <span className="text-gray-600">
+                  Delete {selectedDatasetIds.length} dataset
+                  {selectedDatasetIds.length === 1 ? '' : 's'}?
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void deleteSelected()}
+                  disabled={deletingBulk}
+                  className="rounded border border-red-300 bg-red-50 px-2 py-0.5 font-medium text-red-700 hover:bg-red-100 disabled:opacity-60"
+                >
+                  {deletingBulk ? 'Deleting…' : 'Yes, delete'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmBulk(false)}
+                  disabled={deletingBulk}
+                  className="rounded border border-gray-300 bg-white px-2 py-0.5 font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmBulk(true)}
+                className="rounded border border-red-300 bg-red-50 px-2 py-0.5 font-medium text-red-700 hover:bg-red-100"
+              >
+                Delete selected ({selectedDatasetIds.length})
+              </button>
+            ))}
         </div>
       )}
 
@@ -272,7 +323,7 @@ export function TablesCard({
           No {filter.toLowerCase()} datasets.
         </div>
       ) : (
-        <ul role="list" className="space-y-2">
+        <ul role="list" className="space-y-1.5">
           {visibleDatasets.map(ds => {
             const cols = colsById[ds.id]
             const selected = selectedDatasetIds.includes(ds.id)
@@ -281,7 +332,7 @@ export function TablesCard({
             return (
               <li
                 key={ds.id}
-                className={`rounded-md border px-3 py-2 ${
+                className={`rounded-md border px-3 py-1.5 ${
                   selected ? 'border-blue-300 bg-blue-50' : 'border-gray-200'
                 }`}
               >
@@ -352,36 +403,6 @@ export function TablesCard({
                       className="shrink-0 rounded border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-60"
                     >
                       {rederivingId === ds.id ? 'Re-deriving…' : 'Re-derive'}
-                    </button>
-                  )}
-
-                  {confirmingId === ds.id ? (
-                    <span className="flex shrink-0 items-center gap-1">
-                      <span className="text-xs text-gray-600">Delete?</span>
-                      <button
-                        type="button"
-                        onClick={() => void confirmDelete(ds.id)}
-                        disabled={deletingId === ds.id}
-                        className="rounded border border-red-300 bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 hover:bg-red-100 disabled:opacity-60"
-                      >
-                        {deletingId === ds.id ? 'Deleting…' : 'Yes'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setConfirmingId(null)}
-                        className="rounded border border-gray-300 bg-white px-2 py-0.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
-                      >
-                        No
-                      </button>
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setConfirmingId(ds.id)}
-                      aria-label={`Delete ${ds.filename}`}
-                      className="shrink-0 rounded border border-gray-200 bg-white px-2 py-0.5 text-xs font-medium text-red-600 hover:bg-red-50"
-                    >
-                      Delete
                     </button>
                   )}
                 </div>

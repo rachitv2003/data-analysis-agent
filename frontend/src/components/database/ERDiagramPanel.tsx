@@ -275,9 +275,12 @@ function cardHeight(cols: ColInfo[]): number {
 function layoutCards(
   datasets: ErDataset[],
   view?: { w: number; h: number },
+  opts?: { stretchMax?: number; ringGap?: number },
 ): { cards: CardLayout[]; width: number; height: number } {
   const n = datasets.length
   if (n === 0) return { cards: [], width: 0, height: 0 }
+  const stretchMax = opts?.stretchMax ?? STRETCH_MAX
+  const ringGap = opts?.ringGap ?? RING_GAP
 
   const meta = datasets.map(ds => {
     const cols = datasetColumns(ds)
@@ -307,7 +310,7 @@ function layoutCards(
   }
 
   const C: Record<string, { x: number; y: number }> = {}
-  const ringStep = Math.max(maxH + RING_GAP, CARD_W * 0.95)
+  const ringStep = Math.max(maxH + ringGap, CARD_W * 0.95)
 
   if (maxDeg >= 3) {
     // ── Radial tree from the hub ─────────────────────────────────────────────
@@ -396,7 +399,7 @@ function layoutCards(
 
   // Mild x-stretch to use the wide pane without distorting the shape much.
   const paneAspect = view && view.w > 40 && view.h > 40 ? view.w / view.h : 1.5
-  const sx = Math.min(Math.max(paneAspect, 1), STRETCH_MAX)
+  const sx = Math.min(Math.max(paneAspect, 1), stretchMax)
   for (const id of ids) C[id].x *= sx
 
   // Safety: nudge apart any cards that still overlap (rare with radial sectors).
@@ -471,10 +474,15 @@ export function ERDiagramPanel({
   datasets,
   selectedId,
   onSelect,
+  detailsOpen,
+  onToggleDetails,
 }: {
   datasets: ErDataset[]
   selectedId: string | null
   onSelect: (id: string) => void
+  /** Whether the sibling Table-description panel is shown (for the toggle). */
+  detailsOpen?: boolean
+  onToggleDetails?: () => void
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [zoom, setZoom] = useState(1)
@@ -486,12 +494,15 @@ export function ERDiagramPanel({
   const [viewSize, setViewSize] = useState({ w: 600, h: 360 })
   // The pan/zoom transform group — we measure its REAL rendered bbox for Fit.
   const gRef = useRef<SVGGElement>(null)
+  // Live layout-tuning knobs (sliders in the header).
+  const [stretchMax, setStretchMax] = useState(STRETCH_MAX)
+  const [ringGap, setRingGap] = useState(RING_GAP)
 
-  // Layout depends on the viewport so the horizontal-fill stretch matches the
-  // pane's aspect; recomputes on resize and when the dataset set changes.
+  // Layout depends on the viewport (x-stretch matches the pane) and the tuning
+  // knobs; recomputes on resize, dataset change, or a slider move.
   const { cards } = useMemo(
-    () => layoutCards(datasets, viewSize),
-    [datasets, viewSize.w, viewSize.h],
+    () => layoutCards(datasets, viewSize, { stretchMax, ringGap }),
+    [datasets, viewSize.w, viewSize.h, stretchMax, ringGap],
   )
   const links = useMemo(() => _erFkLinks(datasets), [datasets])
 
@@ -625,38 +636,93 @@ export function ERDiagramPanel({
       aria-labelledby="schema-heading"
       className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm"
     >
-      <div className="mb-3 flex items-center justify-between gap-2">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
         <h2 id="schema-heading" className="text-sm font-semibold text-gray-800">
           Schema
         </h2>
-        <div className="flex gap-1.5">
-          <button
-            type="button"
-            onClick={fit}
-            disabled={isEmpty}
-            aria-label="Fit diagram to view"
-            className="rounded-md border border-gray-200 bg-white px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:text-gray-300"
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          {/* Live layout-tuning sliders — fine-tune the radial layout in place. */}
+          <label
+            className="flex items-center gap-1.5 text-[11px] font-medium text-gray-500"
+            title="Horizontal stretch — widens the layout to fill the pane"
           >
-            Fit
-          </button>
-          <button
-            type="button"
-            onClick={() => zoomBy(1.2)}
-            disabled={isEmpty}
-            aria-label="Zoom in"
-            className="rounded-md border border-gray-200 bg-white px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:text-gray-300"
+            <span className="whitespace-nowrap">Stretch</span>
+            <input
+              type="range"
+              min={1}
+              max={2.5}
+              step={0.1}
+              value={stretchMax}
+              onChange={e => setStretchMax(Number(e.target.value))}
+              disabled={isEmpty}
+              aria-label="Horizontal stretch"
+              className="h-1 w-16 cursor-pointer accent-blue-600 disabled:cursor-not-allowed"
+            />
+            <span className="w-5 text-right tabular-nums text-gray-400">{stretchMax.toFixed(1)}</span>
+          </label>
+          <label
+            className="flex items-center gap-1.5 text-[11px] font-medium text-gray-500"
+            title="Ring gap — spacing between the concentric rings of tables"
           >
-            +
-          </button>
-          <button
-            type="button"
-            onClick={() => zoomBy(1 / 1.2)}
-            disabled={isEmpty}
-            aria-label="Zoom out"
-            className="rounded-md border border-gray-200 bg-white px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:text-gray-300"
-          >
-            −
-          </button>
+            <span className="whitespace-nowrap">Ring gap</span>
+            <input
+              type="range"
+              min={0}
+              max={200}
+              step={10}
+              value={ringGap}
+              onChange={e => setRingGap(Number(e.target.value))}
+              disabled={isEmpty}
+              aria-label="Ring gap"
+              className="h-1 w-16 cursor-pointer accent-blue-600 disabled:cursor-not-allowed"
+            />
+            <span className="w-6 text-right tabular-nums text-gray-400">{ringGap}</span>
+          </label>
+          <div className="flex gap-1.5">
+            <button
+              type="button"
+              onClick={fit}
+              disabled={isEmpty}
+              aria-label="Fit diagram to view"
+              className="rounded-md border border-gray-200 bg-white px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:text-gray-300"
+            >
+              Fit
+            </button>
+            <button
+              type="button"
+              onClick={() => zoomBy(1.2)}
+              disabled={isEmpty}
+              aria-label="Zoom in"
+              className="rounded-md border border-gray-200 bg-white px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:text-gray-300"
+            >
+              +
+            </button>
+            <button
+              type="button"
+              onClick={() => zoomBy(1 / 1.2)}
+              disabled={isEmpty}
+              aria-label="Zoom out"
+              className="rounded-md border border-gray-200 bg-white px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:text-gray-300"
+            >
+              −
+            </button>
+            {onToggleDetails && (
+              <button
+                type="button"
+                onClick={onToggleDetails}
+                aria-pressed={detailsOpen ?? false}
+                aria-label={detailsOpen ? 'Hide description panel' : 'Show description panel'}
+                title={detailsOpen ? 'Hide description panel' : 'Show description panel'}
+                className={`rounded-md border px-3 py-1 text-xs font-medium ${
+                  detailsOpen
+                    ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                    : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                Details
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
