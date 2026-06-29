@@ -581,21 +581,12 @@ export function ERDiagramPanel({
   // list, so this is the expensive part; keep it out of the hover path. Hover
   // state (highlight/dim/label) is applied cheaply at render time below.
   const routedEdges = useMemo(() => {
-    // Horizontal centre of the whole diagram — stacked-card connectors loop out
-    // toward the nearer side of this, keeping their channels in the margin.
-    let minX = Infinity
-    let maxX = -Infinity
-    for (const c of cards) {
-      if (c.x < minX) minX = c.x
-      if (c.x + c.w > maxX) maxX = c.x + c.w
-    }
-    const canvasCenterX = cards.length ? (minX + maxX) / 2 : 0
     return links
       .map(l => {
         const a = cardById.get(l.fromId)
         const b = cardById.get(l.toId)
         if (!a || !b) return null
-        return { link: l, geom: routeEdge(a, b, l, cards, canvasCenterX) }
+        return { link: l, geom: routeEdge(a, b, l, cards) }
       })
       .filter((e): e is { link: ErLink; geom: EdgeGeometry } => e !== null)
   }, [links, cards, cardById])
@@ -863,7 +854,6 @@ function routeEdge(
   b: CardLayout,
   link: ErLink,
   cards: CardLayout[],
-  canvasCenterX: number,
 ): EdgeGeometry {
   const ay = colRowY(a, link.column)
   const by = colRowY(b, link.column)
@@ -871,61 +861,40 @@ function routeEdge(
   const aR = a.x + a.w
   const bL = b.x
   const bR = b.x + b.w
-  const aCx = a.x + a.w / 2
-  const bCx = b.x + b.w / 2
 
-  // Two regimes for a clean, predictable connector:
-  //  • Side-by-side cards (x-ranges DON'T overlap) → connect on the FACING edges
-  //    so each stub points at the other card and the vertical channel sits in
-  //    the gap between them.
-  //  • Vertically-stacked cards (x-ranges overlap) → connect BOTH on the OUTWARD
-  //    side (toward the nearer canvas edge) and run the channel in the open
-  //    margin, so the connector loops cleanly in empty space instead of cutting
-  //    back across the cards or wrapping the long way around.
-  const overlap = !(aR < bL - 6 || bR < aL - 6)
-  let aSide: 1 | -1
-  let bSide: 1 | -1
-  let ax: number
-  let bx: number
-  if (!overlap) {
-    if (bCx >= aCx) {
-      aSide = 1
-      ax = aR
-      bSide = -1
-      bx = bL
-    } else {
-      aSide = -1
-      ax = aL
-      bSide = 1
-      bx = bR
+  // Try all four side combinations (a-left/right × b-left/right). For each, build
+  // the dodged orthogonal route and measure its length; keep the SHORTEST. This
+  // is general and self-correcting — no per-geometry heuristic to get wrong:
+  //  • Side-by-side cards win with FACING sides (the gap-channel route is short).
+  //  • Stacked/overlapping cards win with a SAME-side margin loop (the facing
+  //    channel would fall inside a card, get dodged far out, and lose on length).
+  // So the connector always leaves toward its target and never detours the long
+  // way around.
+  const build = (aSide: 1 | -1, bSide: 1 | -1) => {
+    const ax = aSide === 1 ? aR : aL
+    const bx = bSide === 1 ? bR : bL
+    const m1x = ax + aSide * STUB
+    const m2x = bx + bSide * STUB
+    let midX = (m1x + m2x) / 2
+    midX = dodgeX(midX, Math.min(ay, by), Math.max(ay, by), [a.ds.id, b.ds.id], cards)
+    const pts: Pt[] = [
+      [ax, ay],
+      [m1x, ay],
+      [midX, ay],
+      [midX, by],
+      [m2x, by],
+      [bx, by],
+    ]
+    let len = 0
+    for (let i = 1; i < pts.length; i++) {
+      len += Math.abs(pts[i][0] - pts[i - 1][0]) + Math.abs(pts[i][1] - pts[i - 1][1])
     }
-  } else {
-    const outwardLeft = (aCx + bCx) / 2 <= canvasCenterX
-    aSide = outwardLeft ? -1 : 1
-    bSide = aSide
-    ax = outwardLeft ? aL : aR
-    bx = outwardLeft ? bL : bR
+    return { aSide, bSide, ax, bx, midX, pts, len }
   }
-
-  // Stub straight out from each card, then bend to a shared vertical channel.
-  const m1x = ax + aSide * STUB
-  const m2x = bx + bSide * STUB
-  let midX = overlap
-    ? // Outside both cards, in the margin on the chosen side.
-      aSide === -1
-      ? Math.min(aL, bL) - STUB - 14
-      : Math.max(aR, bR) + STUB + 14
-    : (m1x + m2x) / 2 // in the gap between side-by-side cards
-  midX = dodgeX(midX, Math.min(ay, by), Math.max(ay, by), [a.ds.id, b.ds.id], cards)
-
-  const pts: Pt[] = [
-    [ax, ay],
-    [m1x, ay],
-    [midX, ay],
-    [midX, by],
-    [m2x, by],
-    [bx, by],
-  ]
+  const best = [build(1, -1), build(-1, 1), build(-1, -1), build(1, 1)].reduce((p, c) =>
+    c.len < p.len ? c : p,
+  )
+  const { aSide, bSide, ax, bx, midX, pts } = best
 
   // Crow's-foot ("many") at the child/FK end b.
   const apexX = bx + bSide * 11
