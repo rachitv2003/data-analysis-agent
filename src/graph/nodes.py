@@ -13,6 +13,7 @@ for a run live in the module-level `_dataframes` registry, keyed by `run_id`
 from __future__ import annotations
 
 import json
+import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -302,8 +303,9 @@ def _assemble_plan_prompt(state: AgentState, wrap_up: bool) -> str:
         )
 
     parts.append(
-        "Now reply with EITHER a single bare pandas expression to run next, "
-        "OR `FINAL ANSWER:` with your answer."
+        "Now reply with EITHER a single pandas expression to run next — just the "
+        "raw code, with NO backticks, NO ```python fence, and NO surrounding prose "
+        "— OR `FINAL ANSWER:` followed by your answer."
     )
     return "\n\n".join(parts)
 
@@ -345,15 +347,61 @@ def plan_action(state: AgentState) -> AgentState:
     }
 
 
+# A ```python … ``` (or bare ``` … ```) fenced code block. Some models wrap the
+# action in a fence — often after a few lines of reasoning prose — instead of the
+# bare expression the prompt asks for.
+_CODE_FENCE_RE = re.compile(r"```[ \t]*(?:python|py)?[ \t]*\r?\n?(.*?)```", re.DOTALL | re.IGNORECASE)
+
+
+def _extract_code(text: str) -> str:
+    """Pull the runnable pandas code out of a planner reply.
+
+    The plan prompt asks for a single BARE expression, and capable models comply
+    (so the reply IS the code). But some models (e.g. gemini-2.5-flash-lite) add
+    reasoning prose and wrap the code in a ```python fence. Passing that prose to
+    eval() raises spurious SyntaxErrors — an apostrophe in "turn's" reads as an
+    unterminated string literal — so the model's actual code never runs.
+
+    When the reply contains fenced block(s) we return the LAST non-empty one (the
+    step's intended action); otherwise the stripped reply is used as-is. This keeps
+    the executor model-agnostic without constraining well-behaved models.
+    """
+    if not text:
+        return ""
+    blocks = _CODE_FENCE_RE.findall(text)
+    for block in reversed(blocks):
+        if block.strip():
+            return _strip_inline_ticks(block.strip())
+    return _strip_inline_ticks(text.strip())
+
+
+def _strip_inline_ticks(s: str) -> str:
+    """Strip inline-code backticks a model wrapped a bare expression in (`expr`).
+
+    Some models emit the action as inline code — e.g. `` `df.columns.tolist()` `` —
+    which is not valid Python. When the whole (single-line) reply is fenced in
+    backticks we peel them off; multi-line text is left alone (a real code block,
+    handled by the fence regex, or genuine content).
+    """
+    s = s.strip()
+    if "\n" not in s and s.startswith("`") and s.endswith("`"):
+        return s.strip("`").strip()
+    return s
+
+
 def execute_action(state: AgentState) -> AgentState:
     """Eval the model's pandas expression in the sandbox; record the step.
 
     On exception: mark `is_error=true`, record the error, route back to plan_action
     (recoverable). Charts are captured into `charts`. `iteration_count` is written
     to the DB each step for live polling.
+
+    The planner reply is run through `_extract_code` first, so a model that wraps
+    its action in a ```python fence (with reasoning prose around it) still has its
+    REAL code executed instead of eval() choking on the prose.
     """
     run_id = state.get("run_id", "")
-    expr = state.get("llm_response", "")
+    expr = _extract_code(state.get("llm_response", ""))
     action_history = list(state.get("action_history") or [])
     charts = list(state.get("charts") or [])
 
