@@ -170,22 +170,30 @@ export function DatabaseTab() {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.4fr_1fr]">
-          <ERDiagramPanel
-            datasets={erDatasets}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-          />
-          <TableDescriptionPanel
-            datasetId={selectedId}
-            allDatasets={erDatasets}
-            onChanged={refresh}
-            onDeleted={id => {
-              setDatasets(prev => prev.filter(d => d.id !== id))
-              if (selectedId === id) setSelectedId(null)
-              refresh()
-            }}
-          />
+        // Schema pane flexes to fill; the description panel is a FIXED width so
+        // the diagram's width never changes when a different table is selected.
+        // `min-w-0` lets each column's overflow (the SVG diagram, the wide data
+        // preview) scroll inside its track instead of stretching it.
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_24rem]">
+          <div className="min-w-0">
+            <ERDiagramPanel
+              datasets={erDatasets}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+            />
+          </div>
+          <div className="min-w-0">
+            <TableDescriptionPanel
+              datasetId={selectedId}
+              allDatasets={erDatasets}
+              onChanged={refresh}
+              onDeleted={id => {
+                setDatasets(prev => prev.filter(d => d.id !== id))
+                if (selectedId === id) setSelectedId(null)
+                refresh()
+              }}
+            />
+          </div>
         </div>
       )}
     </div>
