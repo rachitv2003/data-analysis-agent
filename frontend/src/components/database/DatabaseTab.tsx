@@ -199,6 +199,7 @@ export function DatabaseTab() {
                 datasetId={selectedId}
                 allDatasets={erDatasets}
                 onChanged={refresh}
+                onCollapse={() => setDescOpen(false)}
                 onDeleted={id => {
                   setDatasets(prev => prev.filter(d => d.id !== id))
                   if (selectedId === id) setSelectedId(null)

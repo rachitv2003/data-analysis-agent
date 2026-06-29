@@ -47,8 +47,9 @@ interface ModelPrice {
 
 const PRICING_USD_PER_MILLION_TOKENS: Record<string, ModelPrice | null> = {
   'gemini-3.5-flash': { inputPerMillion: 1.5, outputPerMillion: 9.0 },
-  'gemini-3.1-pro': { inputPerMillion: 2.0, outputPerMillion: 12.0 },
+  'gemini-3.1-pro-preview': { inputPerMillion: 2.0, outputPerMillion: 12.0 },
   'gemini-3.1-flash-lite': { inputPerMillion: 0.25, outputPerMillion: 1.5 },
+  'gemini-3-pro-preview': { inputPerMillion: 2.0, outputPerMillion: 12.0 },
   'gemini-2.5-pro': { inputPerMillion: 1.25, outputPerMillion: 10.0 },
   'gemini-2.5-flash': { inputPerMillion: 0.3, outputPerMillion: 2.5 },
   'gemini-2.5-flash-lite': { inputPerMillion: 0.1, outputPerMillion: 0.4 },

@@ -206,25 +206,20 @@ export function TablesCard({
         </button>
       </div>
 
-      {/* Selection mode: explicit datasets vs. let the agent pick (C19). */}
+      {/* Selection mode: explicit datasets vs. let the agent pick (C19).
+          Action buttons are left-anchored (Select all is always present —
+          disabled when everything is selected — so the cluster never shifts);
+          the "N selected" count floats to the far right via ml-auto. */}
       {datasets.length > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-xs">
-          {selectedDatasetIds.length > 0 && (
-            <span className="font-medium text-gray-700">
-              {`${selectedDatasetIds.length} dataset${
-                selectedDatasetIds.length === 1 ? '' : 's'
-              } selected`}
-            </span>
-          )}
-          {selectedDatasetIds.length < datasets.length && (
-            <button
-              type="button"
-              onClick={() => onSelectAll(datasets.map(d => d.id))}
-              className="rounded border border-gray-300 bg-white px-2 py-0.5 font-medium text-gray-600 hover:bg-gray-50"
-            >
-              Select all
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => onSelectAll(datasets.map(d => d.id))}
+            disabled={selectedDatasetIds.length >= datasets.length}
+            className="rounded border border-gray-300 bg-white px-2 py-0.5 font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-50 disabled:text-gray-300"
+          >
+            Select all
+          </button>
           {selectedDatasetIds.length > 0 && (
             <button
               type="button"
@@ -267,6 +262,13 @@ export function TablesCard({
                 Delete selected ({selectedDatasetIds.length})
               </button>
             ))}
+          {selectedDatasetIds.length > 0 && (
+            <span className="ml-auto font-medium text-gray-700">
+              {`${selectedDatasetIds.length} dataset${
+                selectedDatasetIds.length === 1 ? '' : 's'
+              } selected`}
+            </span>
+          )}
         </div>
       )}
 

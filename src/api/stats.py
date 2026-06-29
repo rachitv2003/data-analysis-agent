@@ -25,15 +25,14 @@ _DEFAULT_MODEL = "gemini-3.1-flash-lite"
 _CONTEXT_LIMITS = {
     # Gemini (the Settings dropdown options)
     "gemini-3.5-flash": 1_000_000,
-    "gemini-3.1-pro": 1_000_000,
+    "gemini-3.1-pro-preview": 1_000_000,
     "gemini-3.1-flash-lite": 1_000_000,
+    "gemini-3-pro-preview": 1_000_000,
     "gemini-2.5-pro": 2_000_000,
     "gemini-2.5-flash": 1_000_000,
     "gemini-2.5-flash-lite": 1_000_000,
     "gemini-2.0-flash": 1_000_000,
     "gemini-2.0-flash-lite": 1_000_000,
-    "gemini-1.5-flash": 1_000_000,
-    "gemini-1.5-pro": 2_000_000,
     # Claude
     "claude-opus-4-8": 200_000,
     "claude-sonnet-4-6": 200_000,

@@ -31,6 +31,7 @@ export function TableDescriptionPanel({
   allDatasets,
   onChanged,
   onDeleted,
+  onCollapse,
 }: {
   datasetId: string | null
   allDatasets: ErDataset[]
@@ -38,6 +39,8 @@ export function TableDescriptionPanel({
   onChanged: () => void
   /** Called after a successful delete with the deleted id. */
   onDeleted: (id: string) => void
+  /** Collapse this panel (hide it, giving the diagram full width). */
+  onCollapse?: () => void
 }) {
   const [detail, setDetail] = useState<DatasetDetail | null>(null)
   const [preview, setPreview] = useState<PreviewResponse | null>(null)
@@ -235,18 +238,31 @@ export function TableDescriptionPanel({
         <h2 id="description-heading" className="text-sm font-semibold text-gray-800">
           Table description
         </h2>
-        {derived && (
-          <span className="inline-flex items-center gap-1.5">
-            <span className="rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-[11px] font-medium text-green-700">
-              derived
-            </span>
-            {stale && (
-              <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
-                stale
+        <div className="flex items-center gap-1.5">
+          {derived && (
+            <span className="inline-flex items-center gap-1.5">
+              <span className="rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-[11px] font-medium text-green-700">
+                derived
               </span>
-            )}
-          </span>
-        )}
+              {stale && (
+                <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+                  stale
+                </span>
+              )}
+            </span>
+          )}
+          {onCollapse && (
+            <button
+              type="button"
+              onClick={onCollapse}
+              aria-label="Collapse description panel"
+              title="Collapse panel — give the diagram the full width"
+              className="rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-500 hover:bg-gray-50"
+            >
+              Hide ›
+            </button>
+          )}
+        </div>
       </div>
 
       {!datasetId ? (

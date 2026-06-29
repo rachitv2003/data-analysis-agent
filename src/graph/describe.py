@@ -15,6 +15,7 @@ All LLM calls go through `LLMClient` (never a provider SDK directly).
 from __future__ import annotations
 
 import threading
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -32,6 +33,20 @@ _SAMPLE_ROWS = 50
 
 # Hard cap on the stored notes (spec/data.md: context <= 4000 chars).
 _CONTEXT_MAX = 4000
+
+# Notes generation is retried a few times with backoff — a transient provider
+# error (rate limit / timeout) is the usual cause of a spurious "failed", and a
+# single-shot call had no recovery. The waits sit comfortably inside the UI's
+# ~80s poll budget.
+_LLM_MAX_ATTEMPTS = 3
+_LLM_BACKOFF_S = (2.0, 5.0)
+
+# Serialize the describe LLM call across datasets so concurrent upload-time
+# describes (one daemon thread per uploaded file) don't all hit the provider at
+# once and trip its concurrency / rate limit. Only the API call holds the lock;
+# the backoff sleeps happen outside it. This guards describe-vs-describe only —
+# the agent query path is unaffected.
+_DESCRIBE_LLM_LOCK = threading.Lock()
 
 _PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 _DESCRIBE_PROMPT_PATH = _PROMPTS_DIR / "describe.md"
@@ -131,18 +146,40 @@ def generate_dataset_notes(dataset_id: str) -> str:
         _set_status(dataset_id, "failed")
         return ""
 
-    # 2) One LLM call for the notes.
+    # 2) Assemble the prompt, then make the LLM call — retried with backoff and
+    #    serialized across datasets (see _DESCRIBE_LLM_LOCK) so a transient
+    #    provider error or a concurrent-upload rate-limit self-heals instead of
+    #    leaving a spurious "failed".
     try:
         system = _DESCRIBE_PROMPT_PATH.read_text(encoding="utf-8").strip()
         prompt = _build_describe_prompt(row_snapshot, df)
-        notes = (LLMClient().call_model(prompt, system=system) or "").strip()
-    except Exception as exc:  # noqa: BLE001 — LLM failure -> failed status
-        logger.warning("describe_llm_failed", dataset_id=dataset_id, error=str(exc))
+    except Exception as exc:  # noqa: BLE001 — prompt assembly failure -> failed
+        logger.warning("describe_prompt_failed", dataset_id=dataset_id, error=str(exc))
         _set_status(dataset_id, "failed")
         return ""
 
+    notes = ""
+    last_error: str | None = None
+    for attempt in range(1, _LLM_MAX_ATTEMPTS + 1):
+        try:
+            with _DESCRIBE_LLM_LOCK:
+                notes = (LLMClient().call_model(prompt, system=system) or "").strip()
+            if notes:
+                break
+            last_error = "empty response"
+        except Exception as exc:  # noqa: BLE001 — transient; retry then fail
+            last_error = str(exc)
+        logger.warning(
+            "describe_llm_attempt_failed",
+            dataset_id=dataset_id,
+            attempt=attempt,
+            error=last_error,
+        )
+        if attempt < _LLM_MAX_ATTEMPTS:
+            time.sleep(_LLM_BACKOFF_S[min(attempt - 1, len(_LLM_BACKOFF_S) - 1)])
+
     if not notes:
-        logger.warning("describe_empty_notes", dataset_id=dataset_id)
+        logger.warning("describe_llm_failed", dataset_id=dataset_id, error=last_error)
         _set_status(dataset_id, "failed")
         return ""
 

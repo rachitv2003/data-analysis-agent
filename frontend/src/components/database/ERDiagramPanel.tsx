@@ -311,8 +311,12 @@ function layoutCards(
 
   const C: Record<string, { x: number; y: number }> = {}
   const ringStep = Math.max(maxH + ringGap, CARD_W * 0.95)
+  // Pane aspect drives both the radial x-stretch and the grid's column count, so
+  // the diagram fills a (landscape) Schema pane instead of growing tall.
+  const paneAspect = view && view.w > 40 && view.h > 40 ? view.w / view.h : 1.6
 
-  if (maxDeg >= 3) {
+  const radial = maxDeg >= 3
+  if (radial) {
     // ── Radial tree from the hub ─────────────────────────────────────────────
     const level = new Map<string, number>([[hub, 0]])
     const children = new Map<string, string[]>(datasets.map(d => [d.id, []]))
@@ -373,7 +377,11 @@ function layoutCards(
       C[id] = { x: Math.cos(ang) * r, y: Math.sin(ang) * r }
     })
   } else {
-    // ── Circle fallback (no dominant hub) ────────────────────────────────────
+    // ── Horizontal grid fallback (no dominant hub) ───────────────────────────
+    // Few / loosely-linked tables (e.g. a 2-table schema) read best laid out
+    // left-to-right — screens are landscape — so we place them in a serpentine
+    // grid biased wider than tall, NOT on a circle (which would stack a pair
+    // vertically). BFS order keeps FK-linked tables adjacent in reading order.
     const order: string[] = []
     const seen = new Set<string>()
     for (const start of ids) {
@@ -390,17 +398,32 @@ function layoutCards(
           }
       }
     }
-    const r = Math.max((n * (CARD_W + CARD_GAP)) / (2 * Math.PI), ringStep)
+    const cellW = CARD_W + CARD_GAP
+    const cellH = maxH + Math.max(ringGap, 40)
+    // Columns chosen so the grid fills width before height: cols grows with the
+    // pane aspect and the (wide) cell ratio, but stays ≥ √n so it never gets
+    // absurdly wide. A pair → 2 cols × 1 row (side by side).
+    const aspect = Math.min(Math.max(paneAspect, 1.3), 2.4)
+    let cols = Math.round(Math.sqrt(n * aspect * (cellH / cellW)))
+    cols = Math.max(1, Math.min(n, cols))
+    const rows = Math.ceil(n / cols)
     order.forEach((id, i) => {
-      const ang = -Math.PI / 2 + (i * 2 * Math.PI) / n
-      C[id] = { x: Math.cos(ang) * r, y: Math.sin(ang) * r }
+      const rr = Math.floor(i / cols)
+      let cc = i % cols
+      if (rr % 2 === 1) cc = cols - 1 - cc // serpentine → short inter-row edges
+      C[id] = {
+        x: (cc - (cols - 1) / 2) * cellW,
+        y: (rr - (rows - 1) / 2) * cellH,
+      }
     })
   }
 
-  // Mild x-stretch to use the wide pane without distorting the shape much.
-  const paneAspect = view && view.w > 40 && view.h > 40 ? view.w / view.h : 1.5
-  const sx = Math.min(Math.max(paneAspect, 1), stretchMax)
-  for (const id of ids) C[id].x *= sx
+  // Mild x-stretch to fill the wide pane — only the radial layout needs it; the
+  // grid is already laid out landscape, so its tight spacing is left untouched.
+  if (radial) {
+    const sx = Math.min(Math.max(paneAspect, 1), stretchMax)
+    for (const id of ids) C[id].x *= sx
+  }
 
   // Safety: nudge apart any cards that still overlap (rare with radial sectors).
   for (let pass = 0; pass < 40; pass++) {
@@ -710,7 +733,7 @@ export function ERDiagramPanel({
               <button
                 type="button"
                 onClick={onToggleDetails}
-                aria-pressed={detailsOpen ?? false}
+                aria-pressed={detailsOpen ? 'true' : 'false'}
                 aria-label={detailsOpen ? 'Hide description panel' : 'Show description panel'}
                 title={detailsOpen ? 'Hide description panel' : 'Show description panel'}
                 className={`rounded-md border px-3 py-1 text-xs font-medium ${

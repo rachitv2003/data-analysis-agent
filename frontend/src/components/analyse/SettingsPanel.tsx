@@ -23,16 +23,14 @@ interface ModelEntry {
 const LLM_MODELS: ModelEntry[] = [
   // ── Gemini (newest first; 3.1 Flash Lite is the app default) ─────────────
   { value: 'gemini-3.5-flash',         label: 'Gemini 3.5 Flash',         input: 1.50,  output: 9.00  },
-  { value: 'gemini-3.1-pro',           label: 'Gemini 3.1 Pro',           input: 2.00,  output: 12.00 },
+  { value: 'gemini-3.1-pro-preview',   label: 'Gemini 3.1 Pro',           input: 2.00,  output: 12.00 },
   { value: 'gemini-3.1-flash-lite',    label: 'Gemini 3.1 Flash Lite (default)', input: 0.25, output: 1.50 },
+  { value: 'gemini-3-pro-preview',     label: 'Gemini 3 Pro',             input: 2.00,  output: 12.00 },
   { value: 'gemini-2.5-pro',           label: 'Gemini 2.5 Pro',           input: 1.25,  output: 10.00 },
   { value: 'gemini-2.5-flash',         label: 'Gemini 2.5 Flash',         input: 0.30,  output: 2.50  },
   { value: 'gemini-2.5-flash-lite',    label: 'Gemini 2.5 Flash Lite',    input: 0.10,  output: 0.40  },
   { value: 'gemini-2.0-flash',         label: 'Gemini 2.0 Flash (legacy)', input: 0.10, output: 0.40  },
   { value: 'gemini-2.0-flash-lite',    label: 'Gemini 2.0 Flash Lite (legacy)', input: 0.075, output: 0.30 },
-  { value: 'gemini-1.5-pro',           label: 'Gemini 1.5 Pro (legacy)',  input: 1.25,  output: 5.00  },
-  { value: 'gemini-1.5-flash',         label: 'Gemini 1.5 Flash (legacy)', input: 0.075, output: 0.30 },
-  { value: 'gemini-1.5-flash-8b',      label: 'Gemini 1.5 Flash 8B (legacy)', input: 0.0375, output: 0.15 },
   // ── Claude (Anthropic provider) ─────────────────────────────────────────
   { value: 'claude-opus-4-8',           label: 'Claude Opus 4.8',          input: 15.00, output: 75.00 },
   { value: 'claude-sonnet-4-6',         label: 'Claude Sonnet 4.6',        input: 3.00,  output: 15.00 },
