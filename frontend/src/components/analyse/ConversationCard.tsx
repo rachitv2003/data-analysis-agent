@@ -57,6 +57,13 @@ interface Turn {
   /** The original question to re-send on a clarification "answer anyway". */
   originalQuestion?: string
   error?: string
+  /**
+   * Epoch ms the answer landed, for the "Asked at {time}" meta line. Live
+   * answers capture `Date.now()` when the response arrives; hydrated history
+   * turns reuse the persisted `created_at` when present, else stay undefined
+   * (the "Asked at" prefix is then omitted gracefully).
+   */
+  answeredAt?: number
 }
 
 let turnSeq = 0
@@ -128,11 +135,16 @@ function turnFromView(v: TurnView): Turn {
     prompt_breakdown: v.prompt_breakdown,
     charts: v.charts ?? [],
   }
+  // Persisted turns may carry a `created_at` ISO string; use it for the
+  // "Asked at" meta when present (parse to epoch ms), else leave it undefined so
+  // the prefix is omitted gracefully for history that predates per-turn times.
+  const createdMs = v.created_at ? Date.parse(v.created_at) : NaN
   return {
     id: v.run_id || nextTurnId(),
     question: v.question,
     status: 'answer',
     answer,
+    answeredAt: Number.isNaN(createdMs) ? undefined : createdMs,
   }
 }
 
@@ -245,7 +257,9 @@ export function ConversationCard({
             originalQuestion: q,
           })
         } else {
-          updateTurn(turnId, { status: 'answer', answer: res })
+          // Capture the moment the answer landed for the "Asked at" meta (the
+          // /ask payload carries no timestamp). Not read at module top-level.
+          updateTurn(turnId, { status: 'answer', answer: res, answeredAt: Date.now() })
           onAnswered({ input: res.tokens_input ?? 0, output: res.tokens_output ?? 0 })
         }
       } catch (err) {
@@ -494,6 +508,7 @@ function TurnView({
               collapsible={collapsible}
               onCollapse={collapsible ? onToggle : undefined}
               question={turn.question}
+              answeredAt={turn.answeredAt}
             />
           )
         ) : null}
@@ -528,14 +543,21 @@ function AnswerView({
   collapsible,
   onCollapse,
   question,
+  answeredAt,
 }: {
   answer: AskResponse
   collapsible: boolean
   onCollapse?: () => void
   question: string
+  /** Epoch ms the answer landed (live) or its persisted time (history). */
+  answeredAt?: number
 }) {
   const markdown = answer.answer_markdown ?? ''
   const steps: AskStep[] = answer.steps ?? []
+  // Local clock time for the "Asked at" prefix; omitted when no timestamp.
+  const askedAt =
+    answeredAt !== undefined ? new Date(answeredAt).toLocaleTimeString() : null
+  const stepCount = steps.length
   return (
     <div>
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -581,8 +603,14 @@ function AnswerView({
         </p>
       )}
 
-      {/* Meta: iterations + token counts */}
+      {/* Meta: asked-at time + iterations + token counts */}
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-gray-100 pt-2 text-[11px] text-gray-500">
+        {askedAt && (
+          <>
+            <span>Asked at {askedAt}</span>
+            <span aria-hidden="true">·</span>
+          </>
+        )}
         <span className="tabular-nums">
           {answer.iteration_count ?? 0} iteration
           {(answer.iteration_count ?? 0) === 1 ? '' : 's'}
@@ -600,6 +628,15 @@ function AnswerView({
       </div>
 
       <StepsInspector steps={steps} />
+
+      {/* Provenance: how many pandas execution steps backed this answer (C4).
+          Zero steps ⇒ the agent answered from schema/metadata without running
+          code; ≥1 ⇒ that many code steps ran. */}
+      <p className="mt-2 text-[11px] text-gray-400">
+        {stepCount === 0
+          ? '0 code steps — answered from schema'
+          : `${stepCount} code step${stepCount === 1 ? '' : 's'}`}
+      </p>
 
       {answer.prompt_breakdown && Object.keys(answer.prompt_breakdown).length > 0 && (
         <PromptBreakdown

@@ -131,16 +131,10 @@ export function AnalyseTab({
         onSaved={() => setSettingsVersion(v => v + 1)}
       />
 
-      {/* Sidebar */}
-      <aside className="flex flex-col gap-4">
-        <button
-          type="button"
-          onClick={() => setSettingsOpen(true)}
-          className="flex w-full items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 shadow-sm hover:bg-gray-50"
-          aria-label="Open settings"
-        >
-          <span aria-hidden="true">⚙</span> Settings
-        </button>
+      {/* Sidebar — Settings sits at the bottom-left, below sessions + usage.
+          Sticky on large screens so it stays in view while the main column
+          scrolls; scrolls internally if it's taller than the viewport. */}
+      <aside className="flex flex-col gap-4 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:self-start lg:overflow-y-auto">
         <SessionSidebar
           activeSessionId={sessionId}
           refreshToken={sessionsVersion}
@@ -150,19 +144,34 @@ export function AnalyseTab({
           onAllDeleted={handleAllSessionsDeleted}
           onOpenMemory={onOpenMemory}
         />
-        <TokenWidget provider={provider} lastTokens={lastTokens} settingsVersion={settingsVersion} />
+        <TokenWidget
+          provider={provider}
+          lastTokens={lastTokens}
+          settingsVersion={settingsVersion}
+          datasetsVersion={datasetsVersion}
+        />
+        <button
+          type="button"
+          onClick={() => setSettingsOpen(true)}
+          className="flex w-full items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 shadow-sm hover:bg-gray-50"
+          aria-label="Open settings"
+        >
+          <span aria-hidden="true">⚙</span> Settings
+        </button>
       </aside>
 
-      {/* Main column */}
+      {/* Main column — Tables and Upload side by side, conversation below. */}
       <div className="flex flex-col gap-4">
-        <TablesCard
-          datasetsVersion={datasetsVersion}
-          selectedDatasetIds={selectedDatasetIds}
-          onToggleSelect={toggleSelect}
-          onClearSelection={clearSelection}
-          onDeleted={handleDatasetDeleted}
-        />
-        <UploadCard onUploaded={refreshDatasets} />
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <TablesCard
+            datasetsVersion={datasetsVersion}
+            selectedDatasetIds={selectedDatasetIds}
+            onToggleSelect={toggleSelect}
+            onClearSelection={clearSelection}
+            onDeleted={handleDatasetDeleted}
+          />
+          <UploadCard onUploaded={refreshDatasets} />
+        </div>
         <ConversationCard
           handleRef={conversationRef}
           selectedDatasetIds={selectedDatasetIds}

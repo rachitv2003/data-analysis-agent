@@ -12,9 +12,11 @@ type Tab = 'analyse' | 'database'
 /**
  * AppShell — the shell for the Data Analysis Agent.
  *
- * Header (app name + tagline + a labelled "Project notes" stub + the
- * conditional yellow stub-mode banner), a two-tab switcher [Analyse] (default)
- * / [Database], and the responsive panel layout for the active tab.
+ * A single blue header bar holds the app name + thin tagline, the Analyse
+ * (default) / Database tabs as inline pill buttons (active = filled white,
+ * inactive = translucent), and the Live badge + "Project notes" button on the
+ * right; the conditional yellow stub-mode banner sits above it. Below the bar is
+ * the responsive panel layout for the active tab.
  *
  * Health is fetched once on mount: its `provider` drives the stub banner (shown
  * only in stub mode) and a subtle "live" indicator when a real provider is set.
@@ -24,6 +26,8 @@ export function AppShell() {
   const [tab, setTab] = useState<Tab>('analyse')
   // undefined = still loading health; string = resolved provider.
   const [provider, setProvider] = useState<string | undefined>(undefined)
+  // The model the provider will actually call (drives the header badge).
+  const [model, setModel] = useState<string | undefined>(undefined)
   // Global-memory ("Project notes") modal — REAL in Phase 3.
   const [memoryOpen, setMemoryOpen] = useState(false)
 
@@ -32,7 +36,9 @@ export function AppShell() {
     api
       .health()
       .then(h => {
-        if (!cancelled) setProvider(h.provider)
+        if (cancelled) return
+        setProvider(h.provider)
+        setModel(h.model || undefined)
       })
       .catch(() => {
         // Health failed (e.g. server not reachable yet) — leave provider
@@ -51,59 +57,63 @@ export function AppShell() {
       {/* Stub-mode banner — shown only when the backend runs without an LLM key. */}
       <StubBanner provider={provider} />
 
-      {/* Header */}
-      <header className="border-b border-gray-200 bg-white">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-4">
-          <div>
-            <h1 className="text-xl font-bold tracking-tight text-gray-900">
-              Data Analysis Agent
-            </h1>
-            <p className="text-sm text-gray-500">
-              Upload data, ask questions in plain English, get explainable answers.
-            </p>
+      {/* Header — a single blue bar: title (left), pill tabs (inline), and the
+          Live badge + Project notes button (right). */}
+      <header className="bg-blue-700 text-white shadow-sm">
+        <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-x-6 gap-y-3 px-4 py-3">
+          {/* Left: title + thin tagline + inline pill tabs */}
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <div>
+              <h1 className="text-lg font-bold leading-tight tracking-tight">
+                Data Analysis Agent
+              </h1>
+              <p className="text-xs text-blue-100">
+                Ask questions in plain English, get explainable answers.
+              </p>
+            </div>
+
+            {/* Tab switcher (local UI state — allowed in Phase 1) */}
+            <div role="tablist" aria-label="Views" className="flex gap-1.5">
+              <TabButton
+                id="tab-analyse"
+                label="Analyse"
+                active={tab === 'analyse'}
+                onClick={() => setTab('analyse')}
+              />
+              <TabButton
+                id="tab-database"
+                label="Database"
+                active={tab === 'database'}
+                onClick={() => setTab('database')}
+              />
+            </div>
           </div>
+
+          {/* Right: live badge + Project notes */}
           <div className="flex items-center gap-3">
             {isLive && (
               <span
-                className="inline-flex items-center gap-1.5 rounded-full border border-green-200 bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700"
-                title={`Live provider: ${provider}`}
+                className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-xs font-medium text-white"
+                title={`Live — provider: ${provider}${model ? `, model: ${model}` : ''}`}
               >
-                <span aria-hidden="true" className="h-2 w-2 rounded-full bg-green-500" />
-                Live · {provider}
+                <span aria-hidden="true" className="h-2 w-2 rounded-full bg-green-300" />
+                Live · {model ?? provider}
               </span>
             )}
             <button
               type="button"
               onClick={() => setMemoryOpen(true)}
               title="Edit the agent's global project notes (memory)"
-              className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              className="rounded-md bg-white/10 px-3 py-1.5 text-sm font-medium text-white hover:bg-white/20"
             >
               Project notes
             </button>
           </div>
         </div>
-
-        {/* Tab switcher (local UI state — allowed in Phase 1) */}
-        <div className="mx-auto max-w-6xl px-4">
-          <div role="tablist" aria-label="Views" className="flex gap-1">
-            <TabButton
-              id="tab-analyse"
-              label="Analyse"
-              active={tab === 'analyse'}
-              onClick={() => setTab('analyse')}
-            />
-            <TabButton
-              id="tab-database"
-              label="Database"
-              active={tab === 'database'}
-              onClick={() => setTab('database')}
-            />
-          </div>
-        </div>
       </header>
 
       {/* Active tab */}
-      <main className="mx-auto max-w-6xl px-4 py-6">
+      <main className="mx-auto max-w-[1600px] px-4 py-6">
         <div
           role="tabpanel"
           id="panel-analyse"
@@ -149,10 +159,10 @@ function TabButton({
       aria-selected={active}
       aria-controls={`panel-${label.toLowerCase()}`}
       onClick={onClick}
-      className={`-mb-px rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+      className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
         active
-          ? 'border-blue-600 text-blue-700'
-          : 'border-transparent text-gray-500 hover:text-gray-700'
+          ? 'bg-white text-blue-700 shadow-sm'
+          : 'bg-white/10 text-white hover:bg-white/20'
       }`}
     >
       {label}

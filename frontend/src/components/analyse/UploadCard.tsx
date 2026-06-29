@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { api, ApiError, type UploadResponse } from '@/lib/api'
 
 /**
@@ -12,10 +12,14 @@ import { api, ApiError, type UploadResponse } from '@/lib/api'
  *
  * C13 — Multi-file / folder drop:
  *   Drag-dropping a folder reads all files via FileSystemEntry API. If the
- *   folder contains a notes file (name matches _notes / context / readme /
- *   notes, case-insensitive, any extension), its text is applied as the
- *   folder-wide notes for every data file. Per-file `<stem>.notes.txt` files
- *   attach as that file's individual notes. Only data files are enqueued;
+ *   folder contains a folder-level README/notes file (name matches _notes /
+ *   context / readme / notes, case-insensitive, any extension), its text is
+ *   routed to the GLOBAL Project notes (the agent's memory) — best-effort,
+ *   never blocking the upload — and a dismissible green banner confirms it.
+ *   It is NOT pre-filled into each file's per-file notes textarea (it now lives
+ *   in Project notes, which the agent already consults on every question;
+ *   duplicating it per-file would be noise). Per-file `<stem>.notes.txt` files
+ *   still attach as that file's individual notes. Only data files are enqueued;
  *   notes files and hidden files (starting with `.`) are filtered out.
  *
  * C17 — Staged upload queue:
@@ -101,6 +105,17 @@ function inferType(name: string): string {
   return map[ext] ?? 'File'
 }
 
+/**
+ * Format a byte count as a compact human-readable size (1 decimal place):
+ * ≥1 MB → "8.6 MB", ≥1 KB → "12.4 KB", else "843 B". Used for the staged-row
+ * size hint shown next to the type badge.
+ */
+function formatFileSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${bytes} B`
+}
+
 function readFileAsText(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -155,6 +170,9 @@ export function UploadCard({ onUploaded }: { onUploaded: () => void }) {
   const [queue, setQueue] = useState<StagedFile[]>([])
   const [uploading, setUploading] = useState(false)
   const [dragActive, setDragActive] = useState(false)
+  // C13 — green confirmation shown after a dropped folder's README/notes file
+  // is routed to the global Project notes. Null = hidden.
+  const [readmeBanner, setReadmeBanner] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const headingId = useId()
 
@@ -169,6 +187,36 @@ export function UploadCard({ onUploaded }: { onUploaded: () => void }) {
   const removeEntry = useCallback((id: string) => {
     setQueue(prev => prev.filter(e => e.id !== id))
   }, [])
+
+  /**
+   * Route a dropped folder's README/notes text into the global Project notes
+   * (the agent's memory). Appends under a labelled separator when notes already
+   * exist, else sets them. Best-effort: any failure (network, API) is swallowed
+   * so it never blocks the staging/upload of the data files. On success the
+   * green confirmation banner is shown.
+   */
+  const saveFolderReadmeToMemory = useCallback(
+    async (folderName: string, readmeText: string) => {
+      const text = readmeText.trim()
+      if (!text) return
+      try {
+        const current = (await api.getMemory()).global_memory?.trim() ?? ''
+        const header = `--- From folder: ${folderName} ---`
+        const next = current ? `${current}\n\n${header}\n${text}` : text
+        await api.patchMemory(next)
+        setReadmeBanner('📁 Folder README saved to Project notes')
+      } catch {
+        // Non-critical — never block the upload on a memory write.
+      }
+    },
+    [],
+  )
+
+  // The folder-README confirmation belongs to the active staging session — once
+  // the queue empties (all files uploaded/removed) it has served its purpose.
+  useEffect(() => {
+    if (queue.length === 0 && readmeBanner) setReadmeBanner(null)
+  }, [queue.length, readmeBanner])
 
   // ---------------------------------------------------------------------------
   // Stage helpers — build StagedFile entries
@@ -188,7 +236,13 @@ export function UploadCard({ onUploaded }: { onUploaded: () => void }) {
    * Handles folders (via FileSystemDirectoryEntry) and plain files.
    */
   const resolveDroppedItems = useCallback(async (items: DataTransferItemList) => {
+    // A fresh drop clears any prior folder-README confirmation.
+    setReadmeBanner(null)
+
     const newEntries: StagedFile[] = []
+    // Folder README text to route to Project notes after staging (best-effort),
+    // keyed to the folder it came from. Only the first README found wins.
+    let folderReadme: { folderName: string; text: string } | null = null
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i]
@@ -209,7 +263,6 @@ export function UploadCard({ onUploaded }: { onUploaded: () => void }) {
         const fileEntries = await readDirectoryEntries(dir)
 
         // Separate notes files from data files
-        let folderNotes = ''
         const perFileNotesMap = new Map<string, string>() // stem → notes text
         const dataFileEntries: FileSystemFileEntry[] = []
 
@@ -218,11 +271,13 @@ export function UploadCard({ onUploaded }: { onUploaded: () => void }) {
           if (name.startsWith('.')) continue
 
           if (isFolderNotesFile(name)) {
-            // Read folder-level notes (only the first match wins)
-            if (!folderNotes) {
+            // Folder-level README/notes → routed to global Project notes below,
+            // NOT pre-filled into each file's notes (only the first match wins).
+            if (!folderReadme) {
               try {
                 const f = await fileEntryToFile(fe)
-                folderNotes = await readFileAsText(f)
+                const text = await readFileAsText(f)
+                folderReadme = { folderName: dir.name || name, text }
               } catch {
                 // Non-critical — skip bad notes files
               }
@@ -242,13 +297,14 @@ export function UploadCard({ onUploaded }: { onUploaded: () => void }) {
           }
         }
 
-        // Build staged entries for each data file
+        // Build staged entries for each data file. Per-file `<stem>.notes.txt`
+        // attaches as that file's notes; the folder README does NOT pre-fill
+        // here (it goes to Project notes instead).
         for (const fe of dataFileEntries) {
           try {
             const file = await fileEntryToFile(fe)
-            // Per-file notes override folder notes if present
             const fileStem = stemOf(file.name)
-            const notes = perFileNotesMap.get(fileStem) ?? folderNotes
+            const notes = perFileNotesMap.get(fileStem) ?? ''
             newEntries.push(makeEntry(file, notes))
           } catch {
             // Skip unreadable files
@@ -271,7 +327,12 @@ export function UploadCard({ onUploaded }: { onUploaded: () => void }) {
     if (newEntries.length > 0) {
       setQueue(prev => [...prev, ...newEntries])
     }
-  }, [])
+
+    // Route a folder README to global Project notes (best-effort, non-blocking).
+    if (folderReadme) {
+      void saveFolderReadmeToMemory(folderReadme.folderName, folderReadme.text)
+    }
+  }, [saveFolderReadmeToMemory])
 
   /**
    * Stage plain File objects (from <input type="file"> click path).
@@ -397,6 +458,28 @@ export function UploadCard({ onUploaded }: { onUploaded: () => void }) {
         </h2>
       </div>
 
+      {/* Folder-README → Project notes confirmation (C13). Dismissible; also
+          auto-clears on a new drop or when the staged queue empties. */}
+      {readmeBanner && (
+        <div
+          role="status"
+          className="mb-3 flex items-start justify-between gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800"
+        >
+          <span className="flex items-start gap-1.5">
+            <span aria-hidden="true">📁</span>
+            <span>Folder README saved to Project notes</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => setReadmeBanner(null)}
+            aria-label="Dismiss folder README confirmation"
+            className="shrink-0 rounded p-0.5 text-green-600 hover:bg-green-100 hover:text-green-800"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Drop zone — drag target only; keyboard path is the "Choose files" button below */}
       <div
         aria-label="File drop zone"
@@ -504,6 +587,24 @@ function StagedRow({
   onDismissDuplicate,
 }: StagedRowProps) {
   const notesId = useId()
+  const notesFileRef = useRef<HTMLInputElement>(null)
+
+  // Attach a separate .txt/.md file as this row's notes (replaces the textarea
+  // content). Best-effort read; reuses the existing onNotesChange callback.
+  const onNotesFileChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0]
+      e.target.value = '' // allow re-selecting the same file later
+      if (!file) return
+      try {
+        const text = await readFileAsText(file)
+        onNotesChange(text)
+      } catch {
+        // Non-critical — leave the existing notes untouched on read failure.
+      }
+    },
+    [onNotesChange],
+  )
 
   return (
     <li
@@ -518,6 +619,13 @@ function StagedRow({
           </span>
           <span className="shrink-0 rounded bg-blue-100 px-1.5 py-0.5 font-mono text-blue-700">
             {inferType(entry.file.name)}
+          </span>
+          {/* File size hint (C17) — muted, accessible. */}
+          <span
+            className="shrink-0 text-gray-400"
+            aria-label={`Size: ${formatFileSize(entry.file.size)}`}
+          >
+            {formatFileSize(entry.file.size)}
           </span>
         </div>
 
@@ -584,9 +692,27 @@ function StagedRow({
         entry.status === 'error' ||
         entry.status === 'duplicate') && (
         <div className="mt-2">
-          <label htmlFor={notesId} className="mb-1 block text-gray-500">
-            Notes (optional) — describe this file for the agent
-          </label>
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <label htmlFor={notesId} className="block text-gray-500">
+              Notes (optional) — describe this file for the agent
+            </label>
+            {/* Attach a separate .txt/.md as this file's notes. */}
+            <input
+              ref={notesFileRef}
+              type="file"
+              accept=".txt,.md"
+              onChange={e => void onNotesFileChange(e)}
+              className="sr-only"
+              aria-label={`Attach a notes file for ${entry.file.name}`}
+            />
+            <button
+              type="button"
+              onClick={() => notesFileRef.current?.click()}
+              className="shrink-0 rounded border border-gray-200 bg-white px-2 py-0.5 font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-800"
+            >
+              Notes file
+            </button>
+          </div>
           <textarea
             id={notesId}
             rows={2}

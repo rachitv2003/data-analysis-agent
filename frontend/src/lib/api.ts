@@ -121,6 +121,8 @@ async function delJson<T>(path: string, payload: unknown): Promise<T> {
 export interface HealthResponse {
   status: string
   provider: string
+  /** The model id the active provider will actually call (may be "" in stub). */
+  model?: string
 }
 
 export interface UploadResponse {
@@ -280,6 +282,8 @@ export interface DailyStats {
   tokens_output: number
   query_count: number
   context_limit: number
+  /** Input tokens of the most recent run today — the last query's prompt size. */
+  last_prompt_tokens?: number
 }
 
 // ---------------------------------------------------------------------------
