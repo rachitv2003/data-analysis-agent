@@ -852,15 +852,38 @@ function routeEdge(
   link: ErLink,
   cards: CardLayout[],
 ): EdgeGeometry {
-  const aCenter = a.x + a.w / 2
-  const bCenter = b.x + b.w / 2
-  // Anchor on whichever side faces the other card, at the join column's row.
-  const aSide: 1 | -1 = bCenter >= aCenter ? 1 : -1 // 1 = right edge, -1 = left
-  const bSide: 1 | -1 = aCenter >= bCenter ? 1 : -1
-  const ax = aSide === 1 ? a.x + a.w : a.x
   const ay = colRowY(a, link.column)
-  const bx = bSide === 1 ? b.x + b.w : b.x
   const by = colRowY(b, link.column)
+  // Pick the card edge (left/right) for each endpoint that MINIMISES the
+  // horizontal gap between the two anchors. For side-by-side cards this gives
+  // facing sides (a's right ↔ b's left); for vertically stacked cards (similar
+  // x) it gives the SAME near side — a short C-route — instead of wrapping the
+  // long way around with the crow's-foot pointing into empty space.
+  const aEdges: Array<{ s: 1 | -1; x: number }> = [
+    { s: -1, x: a.x },
+    { s: 1, x: a.x + a.w },
+  ]
+  const bEdges: Array<{ s: 1 | -1; x: number }> = [
+    { s: -1, x: b.x },
+    { s: 1, x: b.x + b.w },
+  ]
+  let aSide: 1 | -1 = 1
+  let bSide: 1 | -1 = -1
+  let ax = a.x + a.w
+  let bx = b.x
+  let bestGap = Infinity
+  for (const ae of aEdges) {
+    for (const be of bEdges) {
+      const gap = Math.abs(ae.x - be.x)
+      if (gap < bestGap) {
+        bestGap = gap
+        aSide = ae.s
+        bSide = be.s
+        ax = ae.x
+        bx = be.x
+      }
+    }
+  }
 
   // Stub out of each card, meet on a dodged vertical channel midway between.
   const m1x = ax + aSide * STUB
