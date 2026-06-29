@@ -235,13 +235,11 @@ const HEADER_H = 34
 const ROW_H = 20
 const MAX_ROWS = 8
 
-// Force-directed layout constants (ported from the reference vanilla-JS build).
-const REPEL = 9000 // repulsion strength (1/dist² law) — compact for a narrow pane
-const SPRING = 0.06 // pull-only spring stiffness
-const IDEAL = CARD_W + 100 // edge rest length — only attract beyond this
-const ITERS = 200 // simulation iterations
-const SEP = 25 // minimum gap enforced by overlap resolution
-const STRETCH_MAX = 2.4 // cap on the horizontal-fill stretch factor (fills wide panes)
+// Hybrid-radial layout tuning.
+const RING_GAP = 60 // extra radial gap (beyond a card height) between rings
+const CARD_GAP = 70 // minimum gap between cards along a ring
+const SEP = 24 // overlap-resolution safety gap
+const STRETCH_MAX = 1.5 // cap on the mild x-stretch that fills the wide pane
 
 interface CardLayout {
   ds: ErDataset
@@ -260,23 +258,19 @@ function cardHeight(cols: ColInfo[]): number {
 }
 
 /**
- * Force-directed ER layout (ported from the reference build).
+ * Hybrid ER layout (deterministic — no Math.random/Date.now).
  *
- * 1. Deterministic circular init — datasets are sorted by `ds.id` to break
- *    symmetry (NO Math.random / Date.now, so the layout is stable across
- *    renders).
- * 2. Repulsion (1/dist²) keeps distant nodes spread without blowing apart;
- *    pull-only springs along edges attract only past the IDEAL rest length, so
- *    related tables drift together without compressing onto each other.
- * 3. An AABB overlap-resolution pass then guarantees no two cards intersect.
- * 4. Positions are normalised to a (20,20) origin.
- * 5. Horizontal-fill stretch: the Schema pane is wide, so a too-tall layout is
- *    widened (x-positions only — cards keep fixed size, so this can only open
- *    horizontal gaps, never create overlaps) to fill the space. This is THE fix
- *    for "Fit zooms out too far / leaves whitespace".
+ * If the schema has a dominant HUB (a table with FK-degree ≥ 3, e.g. an orders
+ * fact table) it's laid out as a RADIAL TREE: hub at the centre, its neighbours
+ * on ring 1, theirs on ring 2, … Each parent's children take an angular SECTOR
+ * proportional to their subtree's leaf count, which keeps spokes clean and
+ * avoids crossings; ring radii come from card size + count, so spacing is even
+ * by construction. With no clear hub (flat/path-like schemas) it falls back to a
+ * single CIRCLE, ordered by a BFS walk so connected tables sit adjacent.
  *
- * Returns the post-stretch content bounds as {width,height} so the caller's
- * fit() fills the pane.
+ * Centres are mildly x-stretched to use the wide Schema pane, an overlap pass
+ * guarantees no two cards touch, then centres become top-left rects normalised
+ * to a (20,20) origin. Returns the content bounds so the caller's fit() frames it.
  */
 function layoutCards(
   datasets: ErDataset[],
@@ -285,94 +279,137 @@ function layoutCards(
   const n = datasets.length
   if (n === 0) return { cards: [], width: 0, height: 0 }
 
-  // The Schema pane is wide; capture its aspect ratio so the layout can fill it.
-  const paneAspect =
-    view && view.w > 40 && view.h > 40 ? view.w / view.h : 1.7
-
-  // Per-card metadata; each card's height depends only on its own columns.
   const meta = datasets.map(ds => {
     const cols = datasetColumns(ds)
     return { ds, cols, h: cardHeight(cols) }
   })
-  const metaById = new Map(meta.map(m => [m.ds.id, m]))
-  const heightOf = (id: string) => metaById.get(id)?.h ?? HEADER_H
+  const hById = new Map(meta.map(m => [m.ds.id, m.h]))
+  const heightOf = (id: string) => hById.get(id) ?? HEADER_H
+  const maxH = Math.max(...meta.map(m => m.h))
 
-  // All edges drive the spring simulation. We only need FK links here (derived
-  // lineage shares the same endpoints in this build), inferred once.
-  const links = _erFkLinks(datasets)
-  const edges = links.map(l => ({ a: l.fromId, b: l.toId }))
+  // Undirected adjacency from the inferred FK links.
+  const adj = new Map<string, Set<string>>(datasets.map(d => [d.id, new Set<string>()]))
+  for (const l of _erFkLinks(datasets)) {
+    adj.get(l.fromId)?.add(l.toId)
+    adj.get(l.toId)?.add(l.fromId)
+  }
+  const ids = datasets.map(d => d.id).sort() // deterministic
 
-  // ── 1. Deterministic circular init (sorted by id to break symmetry) ───────
-  const pos: Record<string, { x: number; y: number }> = {}
-  const sorted = [...datasets].sort((x, y) => x.id.localeCompare(y.id))
-  const R = Math.max(160, n * 32)
-  sorted.forEach((d, i) => {
-    const angle = (2 * Math.PI * i) / n - Math.PI / 2
-    pos[d.id] = { x: R + Math.cos(angle) * R, y: R + Math.sin(angle) * R }
-  })
-
-  // ── 2. Force simulation ───────────────────────────────────────────────────
-  for (let iter = 0; iter < ITERS; iter++) {
-    const cool = 1 - iter / ITERS
-    const fx: Record<string, number> = {}
-    const fy: Record<string, number> = {}
-    for (const d of datasets) {
-      fx[d.id] = 0
-      fy[d.id] = 0
-    }
-    // Repulsion 1/dist² — keeps distant nodes spread without blowing them apart.
-    for (let i = 0; i < datasets.length; i++) {
-      for (let j = i + 1; j < datasets.length; j++) {
-        const a = datasets[i].id
-        const b = datasets[j].id
-        const dx = pos[b].x - pos[a].x
-        const dy = pos[b].y - pos[a].y
-        const dist2 = Math.max(dx * dx + dy * dy, 1)
-        const dist = Math.sqrt(dist2)
-        const f = REPEL / dist2
-        fx[a] -= (f * dx) / dist
-        fy[a] -= (f * dy) / dist
-        fx[b] += (f * dx) / dist
-        fy[b] += (f * dy) / dist
-      }
-    }
-    // Spring — pull-only: attract when farther than IDEAL, never compress closer.
-    for (const { a, b } of edges) {
-      if (!pos[a] || !pos[b]) continue
-      const dx = pos[b].x - pos[a].x
-      const dy = pos[b].y - pos[a].y
-      const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 1)
-      if (dist <= IDEAL) continue
-      const f = SPRING * (dist - IDEAL)
-      fx[a] += (f * dx) / dist
-      fy[a] += (f * dy) / dist
-      fx[b] -= (f * dx) / dist
-      fy[b] -= (f * dy) / dist
-    }
-    // Apply with cooling.
-    for (const d of datasets) {
-      pos[d.id].x += fx[d.id] * cool * 0.5
-      pos[d.id].y += fy[d.id] * cool * 0.5
+  // Hub = highest FK-degree table (id-tiebroken for stability).
+  let hub = ids[0]
+  let maxDeg = -1
+  for (const id of ids) {
+    const dg = adj.get(id)!.size
+    if (dg > maxDeg) {
+      maxDeg = dg
+      hub = id
     }
   }
 
-  // ── 3. Overlap resolution: guarantee no two cards intersect ───────────────
-  for (let pass = 0; pass < 30; pass++) {
+  const C: Record<string, { x: number; y: number }> = {}
+  const ringStep = Math.max(maxH + RING_GAP, CARD_W * 0.95)
+
+  if (maxDeg >= 3) {
+    // ── Radial tree from the hub ─────────────────────────────────────────────
+    const level = new Map<string, number>([[hub, 0]])
+    const children = new Map<string, string[]>(datasets.map(d => [d.id, []]))
+    const seen = new Set([hub])
+    const queue = [hub]
+    while (queue.length) {
+      const u = queue.shift()!
+      for (const v of [...adj.get(u)!].sort()) {
+        if (seen.has(v)) continue
+        seen.add(v)
+        level.set(v, level.get(u)! + 1)
+        children.get(u)!.push(v)
+        queue.push(v)
+      }
+    }
+    const leaves = new Map<string, number>()
+    const countLeaves = (u: string): number => {
+      const ch = children.get(u)!
+      if (ch.length === 0) {
+        leaves.set(u, 1)
+        return 1
+      }
+      let s = 0
+      for (const c of ch) s += countLeaves(c)
+      leaves.set(u, s)
+      return s
+    }
+    const totalLeaves = countLeaves(hub)
+    const maxLevel = Math.max(0, ...level.values())
+
+    // Outer radius must give each leaf enough arc for a card; inner rings are
+    // spaced evenly out to it but never tighter than ringStep.
+    const minLeafArc = (2 * Math.PI) / Math.max(totalLeaves, 1)
+    const outerR = Math.max(maxLevel * ringStep, (CARD_W + CARD_GAP) / Math.max(minLeafArc, 1e-4))
+    const radiusAt = (lv: number) => (maxLevel === 0 ? 0 : (outerR * lv) / maxLevel)
+
+    const assign = (u: string, a0: number, a1: number) => {
+      const ang = (a0 + a1) / 2
+      const r = radiusAt(level.get(u)!)
+      C[u] = { x: Math.cos(ang) * r, y: Math.sin(ang) * r }
+      const ch = children.get(u)!
+      if (!ch.length) return
+      const total = leaves.get(u)!
+      let a = a0
+      for (const c of ch) {
+        const frac = leaves.get(c)! / total
+        assign(c, a, a + (a1 - a0) * frac)
+        a += (a1 - a0) * frac
+      }
+    }
+    assign(hub, -Math.PI / 2, -Math.PI / 2 + 2 * Math.PI)
+
+    // Tables with no FK links → an extra outer ring so they stay visible.
+    const loose = ids.filter(id => !seen.has(id))
+    loose.forEach((id, i) => {
+      const ang = -Math.PI / 2 + (i * 2 * Math.PI) / loose.length
+      const r = outerR + ringStep
+      C[id] = { x: Math.cos(ang) * r, y: Math.sin(ang) * r }
+    })
+  } else {
+    // ── Circle fallback (no dominant hub) ────────────────────────────────────
+    const order: string[] = []
+    const seen = new Set<string>()
+    for (const start of ids) {
+      if (seen.has(start)) continue
+      seen.add(start)
+      const q = [start]
+      while (q.length) {
+        const u = q.shift()!
+        order.push(u)
+        for (const v of [...adj.get(u)!].sort())
+          if (!seen.has(v)) {
+            seen.add(v)
+            q.push(v)
+          }
+      }
+    }
+    const r = Math.max((n * (CARD_W + CARD_GAP)) / (2 * Math.PI), ringStep)
+    order.forEach((id, i) => {
+      const ang = -Math.PI / 2 + (i * 2 * Math.PI) / n
+      C[id] = { x: Math.cos(ang) * r, y: Math.sin(ang) * r }
+    })
+  }
+
+  // Mild x-stretch to use the wide pane without distorting the shape much.
+  const paneAspect = view && view.w > 40 && view.h > 40 ? view.w / view.h : 1.5
+  const sx = Math.min(Math.max(paneAspect, 1), STRETCH_MAX)
+  for (const id of ids) C[id].x *= sx
+
+  // Safety: nudge apart any cards that still overlap (rare with radial sectors).
+  for (let pass = 0; pass < 40; pass++) {
     let moved = false
-    for (let i = 0; i < datasets.length; i++) {
-      for (let j = i + 1; j < datasets.length; j++) {
-        const a = datasets[i].id
-        const b = datasets[j].id
-        const pa = pos[a]
-        const pb = pos[b]
-        const ha = heightOf(a)
-        const hb = heightOf(b)
-        // AABB overlap amounts.
-        const ox = Math.min(pa.x + CARD_W + SEP - pb.x, pb.x + CARD_W + SEP - pa.x)
-        const oy = Math.min(pa.y + ha + SEP - pb.y, pb.y + hb + SEP - pa.y)
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        const pa = C[ids[i]]
+        const pb = C[ids[j]]
+        const ox = CARD_W + SEP - Math.abs(pa.x - pb.x)
+        const oy = (heightOf(ids[i]) + heightOf(ids[j])) / 2 + SEP - Math.abs(pa.y - pb.y)
         if (ox <= 0 || oy <= 0) continue
         moved = true
-        // Push apart along the axis of smaller penetration.
         if (ox < oy) {
           const dir = pb.x >= pa.x ? 1 : -1
           pa.x -= (dir * ox) / 2
@@ -387,41 +424,21 @@ function layoutCards(
     if (!moved) break
   }
 
-  // ── 4. Normalise to a (20,20) origin ──────────────────────────────────────
-  const xs = datasets.map(d => pos[d.id].x)
-  const ys = datasets.map(d => pos[d.id].y)
-  const minX = Math.min(...xs)
-  const minY = Math.min(...ys)
-  for (const d of datasets) {
-    pos[d.id].x = Math.round(pos[d.id].x - minX + 20)
-    pos[d.id].y = Math.round(pos[d.id].y - minY + 20)
-  }
-
-  // ── 5. Horizontal fill (THE whitespace fix) ───────────────────────────────
-  // Stretching x-positions (cards keep fixed size) only widens horizontal gaps,
-  // so it can never introduce overlaps.
-  {
-    const cW = Math.max(...datasets.map(d => pos[d.id].x + CARD_W))
-    const cH = Math.max(...datasets.map(d => pos[d.id].y + heightOf(d.id)))
-    const contentAspect = cW / Math.max(cH, 1)
-    if (paneAspect > contentAspect * 1.05) {
-      const sx = Math.min(paneAspect / contentAspect, STRETCH_MAX)
-      for (const d of datasets) {
-        pos[d.id].x = Math.round(20 + (pos[d.id].x - 20) * sx)
-      }
-    }
-  }
-
+  // Centres → top-left card rects, normalised to (20,20).
   const cards: CardLayout[] = meta.map(m => ({
     ds: m.ds,
     cols: m.cols,
-    x: pos[m.ds.id].x,
-    y: pos[m.ds.id].y,
+    x: C[m.ds.id].x - CARD_W / 2,
+    y: C[m.ds.id].y - m.h / 2,
     w: CARD_W,
     h: m.h,
   }))
-
-  // Post-stretch content bounds (+20 margin) so the caller's fit() fills the pane.
+  const minX = Math.min(...cards.map(c => c.x))
+  const minY = Math.min(...cards.map(c => c.y))
+  for (const c of cards) {
+    c.x = Math.round(c.x - minX + 20)
+    c.y = Math.round(c.y - minY + 20)
+  }
   const width = Math.max(...cards.map(c => c.x + c.w)) + 20
   const height = Math.max(...cards.map(c => c.y + c.h)) + 20
   return { cards, width, height }
