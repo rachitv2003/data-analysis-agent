@@ -295,7 +295,7 @@ export function SessionSidebar({
           No sessions yet. Ask a question to start one.
         </div>
       ) : (
-        <ul role="list" className="space-y-2">
+        <ul role="list" className="max-h-[20rem] space-y-1.5 overflow-y-auto pr-1">
           {sessions.map(s => {
             const active = activeSessionId === s.id
             const label = s.name?.trim() || s.first_question?.trim() || 'Untitled session'
@@ -303,7 +303,7 @@ export function SessionSidebar({
             return (
               <li
                 key={s.id}
-                className={`rounded-md border px-2.5 py-2 ${
+                className={`rounded-md border px-2.5 py-1.5 ${
                   active ? 'border-blue-300 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'
                 }`}
               >
@@ -338,8 +338,8 @@ export function SessionSidebar({
                   </div>
                 ) : (
                   <div>
-                    {/* Row: checkbox + session button */}
-                    <div className="flex items-start gap-2">
+                    {/* Row 1: checkbox + label (click to resume) */}
+                    <div className="flex items-center gap-2">
                       {/* Checkbox — stops propagation so row-click (resume) is not triggered */}
                       <input
                         type="checkbox"
@@ -347,46 +347,48 @@ export function SessionSidebar({
                         aria-label={`Select session ${label}`}
                         onChange={() => toggleSelect(s.id)}
                         onClick={e => e.stopPropagation()}
-                        className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 cursor-pointer rounded border-gray-300 accent-blue-600"
+                        className="h-3.5 w-3.5 flex-shrink-0 cursor-pointer rounded border-gray-300 accent-blue-600"
                       />
                       <button
                         type="button"
                         onClick={() => onResume(s.id)}
-                        className="block min-w-0 flex-1 text-left"
+                        className="block min-w-0 flex-1 truncate text-left text-sm font-medium text-gray-800"
                       >
-                        <span className="block truncate text-sm font-medium text-gray-800">
-                          {label}
-                        </span>
-                        <span className="text-[11px] text-gray-500">
-                          {s.turn_count} turn{s.turn_count === 1 ? '' : 's'}
-                          {active ? ' · active' : ''}
-                        </span>
+                        {label}
                       </button>
                     </div>
 
-                    <div className="mt-1.5 flex items-center gap-2 pl-5">
+                    {/* Row 2: meta + actions, all on one compact line */}
+                    <div className="mt-0.5 flex items-center gap-2 pl-[1.375rem] text-[11px]">
+                      <span className="whitespace-nowrap text-gray-500">
+                        {s.turn_count} turn{s.turn_count === 1 ? '' : 's'}
+                        {active ? ' · active' : ''}
+                      </span>
+                      <span aria-hidden="true" className="text-gray-300">
+                        ·
+                      </span>
                       <button
                         type="button"
                         onClick={() => startRename(s)}
-                        className="text-[11px] font-medium text-gray-500 hover:text-gray-800"
+                        className="font-medium text-gray-500 hover:text-gray-800"
                       >
                         Rename
                       </button>
                       {confirmingId === s.id ? (
                         <span className="inline-flex items-center gap-1">
-                          <span className="text-[11px] text-gray-600">Delete?</span>
+                          <span className="text-gray-600">Delete?</span>
                           <button
                             type="button"
                             onClick={() => void doDelete(s.id)}
                             disabled={busyId === s.id}
-                            className="text-[11px] font-medium text-red-600 hover:text-red-800 disabled:opacity-60"
+                            className="font-medium text-red-600 hover:text-red-800 disabled:opacity-60"
                           >
                             {busyId === s.id ? 'Deleting…' : 'Yes'}
                           </button>
                           <button
                             type="button"
                             onClick={() => setConfirmingId(null)}
-                            className="text-[11px] font-medium text-gray-500 hover:text-gray-800"
+                            className="font-medium text-gray-500 hover:text-gray-800"
                           >
                             No
                           </button>
@@ -395,7 +397,7 @@ export function SessionSidebar({
                         <button
                           type="button"
                           onClick={() => setConfirmingId(s.id)}
-                          className="text-[11px] font-medium text-red-600 hover:text-red-800"
+                          className="font-medium text-red-600 hover:text-red-800"
                         >
                           Delete
                         </button>

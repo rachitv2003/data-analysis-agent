@@ -62,46 +62,67 @@ def _safe_alias(stem: str) -> str | None:
 def _extract_derivation_expr(code: str) -> str:
     """Recover the DataFrame-producing expression from the recorded action.
 
-    The model usually emits the whole call, e.g.
-    `save_dataset(df.dropna(), 'cleaned', 'desc')`. For a re-derivable
-    `derivation_code` we want the FIRST argument expression (`df.dropna()`), not
-    the wrapping `save_dataset(...)` call (which would create another dataset). If
-    the code is not a recognisable `save_dataset(...)` call, return it unchanged.
+    For a re-runnable `derivation_code` we want the expression that PRODUCES the
+    saved DataFrame, not the wrapping `save_dataset(...)` call. Two shapes:
+
+      - inlined:   `save_dataset(df.dropna(), 'x', '')`            -> `df.dropna()`
+      - assigned:  `merged = df.merge(df2, on='id')`               -> `df.merge(df2, on='id')`
+                   `save_dataset(merged, 'x', '')`
+
+    In the assigned case the first argument is a bare variable, so we resolve it
+    back to its assignment's right-hand side within the action — otherwise the
+    stored derivation code would just be a variable name (e.g. `merged_df`), which
+    is neither informative nor re-derivable. Falls back to the raw code when it
+    can't be parsed or has no `save_dataset(...)` call.
     """
     code = (code or "").strip()
-    marker = "save_dataset("
-    idx = code.find(marker)
-    if idx == -1:
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
         return code
-    start = idx + len(marker)
-    depth = 1
-    arg_chars: list[str] = []
-    in_str: str | None = None
-    i = start
-    while i < len(code):
-        ch = code[i]
-        if in_str is not None:
-            arg_chars.append(ch)
-            if ch == in_str and code[i - 1] != "\\":
-                in_str = None
-        elif ch in ("'", '"'):
-            in_str = ch
-            arg_chars.append(ch)
-        elif ch in "([{":
-            depth += 1
-            arg_chars.append(ch)
-        elif ch in ")]}":
-            depth -= 1
-            if depth == 0:
-                break  # end of save_dataset(...) args
-            arg_chars.append(ch)
-        elif ch == "," and depth == 1:
-            break  # end of the FIRST argument (the df expression)
-        else:
-            arg_chars.append(ch)
-        i += 1
-    first_arg = "".join(arg_chars).strip()
-    return first_arg or code
+
+    # Locate the save_dataset(...) call and its first positional argument.
+    first_arg: ast.expr | None = None
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "save_dataset"
+            and node.args
+        ):
+            first_arg = node.args[0]
+            break
+    if first_arg is None:
+        return code
+
+    # A bare variable -> resolve to the LAST assignment of that name in the block.
+    if isinstance(first_arg, ast.Name):
+        target = first_arg.id
+        rhs: ast.expr | None = None
+        for stmt in tree.body:
+            if isinstance(stmt, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == target for t in stmt.targets
+            ):
+                rhs = stmt.value
+            elif (
+                isinstance(stmt, ast.AnnAssign)
+                and isinstance(stmt.target, ast.Name)
+                and stmt.target.id == target
+                and stmt.value is not None
+            ):
+                rhs = stmt.value
+        if rhs is not None:
+            try:
+                return ast.unparse(rhs).strip()
+            except Exception:  # noqa: BLE001 — unparse failure -> name fallback
+                pass
+        return target
+
+    # Inlined expression argument.
+    try:
+        return ast.unparse(first_arg).strip()
+    except Exception:  # noqa: BLE001
+        return code
 
 
 def make_save_dataset(

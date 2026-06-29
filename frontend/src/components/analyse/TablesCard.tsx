@@ -325,7 +325,7 @@ export function TablesCard({
           No {filter.toLowerCase()} datasets.
         </div>
       ) : (
-        <ul role="list" className="space-y-1.5">
+        <ul role="list" className="max-h-[24rem] space-y-1.5 overflow-y-auto pr-1">
           {visibleDatasets.map(ds => {
             const cols = colsById[ds.id]
             const selected = selectedDatasetIds.includes(ds.id)
