@@ -577,16 +577,15 @@ export function ERDiagramPanel({
 
   const cardById = useMemo(() => new Map(cards.map(c => [c.ds.id, c])), [cards])
 
-  // Route every edge once (per layout) — routing calls dodgeX over the full card
-  // list, so this is the expensive part; keep it out of the hover path. Hover
-  // state (highlight/dim/label) is applied cheaply at render time below.
+  // Route every edge once (per layout); hover state (highlight/dim/label) is
+  // applied cheaply at render time below.
   const routedEdges = useMemo(() => {
     return links
       .map(l => {
         const a = cardById.get(l.fromId)
         const b = cardById.get(l.toId)
         if (!a || !b) return null
-        return { link: l, geom: routeEdge(a, b, l, cards) }
+        return { link: l, geom: routeEdge(a, b, l) }
       })
       .filter((e): e is { link: ErLink; geom: EdgeGeometry } => e !== null)
   }, [links, cards, cardById])
@@ -764,77 +763,18 @@ function colRowY(card: CardLayout, column: string): number {
 }
 
 // ---------------------------------------------------------------------------
-// Edge routing — ported from the reference build (orthogonal, obstacle-aware,
-// rounded). Computed in the parent (where the full card list is in scope) so
-// the vertical run can dodge around any card it would otherwise cross.
+// Edge routing — smooth cubic-bezier connectors. Each end anchors at its FK/PK
+// column row and the curve leaves/arrives HORIZONTALLY, sweeping through open
+// space (there is no right-angle channel that could drop through a card). Edges
+// are painted BEHIND the cards, so a curve that overlaps a card passes behind it.
 // ---------------------------------------------------------------------------
 
-const STUB = 16 // length of the horizontal stub leaving each card edge
-const CORNER = 6 // corner radius for the rounded path
 const FK_COLOR = '#94a3b8'
 const FK_HI = '#2563eb'
 const DRV_COLOR = '#22c55e'
 const DRV_HI = '#16a34a'
 
 type Pt = [number, number]
-
-/** A vertical run at `x` is nudged out of any card it would cross (endpoints
- * excluded), snapping to whichever side of the obstacle is nearer. */
-function dodgeX(
-  x: number,
-  yTop: number,
-  yBot: number,
-  exclude: string[],
-  cards: CardLayout[],
-): number {
-  for (let pass = 0; pass < 5; pass++) {
-    let hit: { x: number; w: number } | null = null
-    for (const c of cards) {
-      if (exclude.includes(c.ds.id)) continue
-      if (x > c.x - 8 && x < c.x + c.w + 8 && yBot > c.y - 8 && yTop < c.y + c.h + 8) {
-        hit = { x: c.x, w: c.w }
-        break
-      }
-    }
-    if (!hit) break
-    const leftX = hit.x - STUB
-    const rightX = hit.x + hit.w + STUB
-    x = Math.abs(x - leftX) <= Math.abs(x - rightX) ? leftX : rightX
-  }
-  return x
-}
-
-/** Build an SVG path string with quadratic-smoothed corners through `pts`. */
-function roundedPath(pts: Pt[]): string {
-  const P: Pt[] = []
-  for (const p of pts) {
-    const last = P[P.length - 1]
-    if (!last || Math.abs(last[0] - p[0]) > 0.5 || Math.abs(last[1] - p[1]) > 0.5) P.push(p)
-  }
-  if (P.length < 3) {
-    return `M${P[0][0]},${P[0][1]} L${P[P.length - 1][0]},${P[P.length - 1][1]}`
-  }
-  let s = `M${P[0][0].toFixed(1)},${P[0][1].toFixed(1)}`
-  for (let i = 1; i < P.length - 1; i++) {
-    const a = P[i - 1]
-    const b = P[i]
-    const c = P[i + 1]
-    const v1x = b[0] - a[0]
-    const v1y = b[1] - a[1]
-    const l1 = Math.hypot(v1x, v1y) || 1
-    const v2x = c[0] - b[0]
-    const v2y = c[1] - b[1]
-    const l2 = Math.hypot(v2x, v2y) || 1
-    const r1 = Math.min(CORNER, l1 / 2)
-    const r2 = Math.min(CORNER, l2 / 2)
-    s +=
-      ` L${(b[0] - (v1x / l1) * r1).toFixed(1)},${(b[1] - (v1y / l1) * r1).toFixed(1)}` +
-      ` Q${b[0].toFixed(1)},${b[1].toFixed(1)} ${(b[0] + (v2x / l2) * r2).toFixed(1)},${(b[1] + (v2y / l2) * r2).toFixed(1)}`
-  }
-  const L = P[P.length - 1]
-  s += ` L${L[0].toFixed(1)},${L[1].toFixed(1)}`
-  return s
-}
 
 interface EdgeGeometry {
   d: string // rounded path
@@ -844,74 +784,70 @@ interface EdgeGeometry {
 }
 
 /**
- * Route a column-anchored orthogonal connector from the PK ("one") card `a` to
- * the FK ("many") card `b`. The vertical channel sits at the midpoint of the two
- * stubs and is dodged out of any intervening card. Returns the rounded path plus
- * the crow's-foot/tick geometry and the join-column label position.
+ * Build a smooth cubic-bezier connector from the PK ("one") card `a` to the FK
+ * ("many") card `b`, anchored at the join column's row on each card. Each end is
+ * anchored on the card edge that minimises the horizontal gap between the two
+ * anchors — facing sides for side-by-side cards, the same near side for
+ * stacked/overlapping cards. The curve leaves and arrives HORIZONTALLY, so it
+ * sweeps through open space and (since edges paint behind the cards) any overlap
+ * passes behind a card rather than through it. Crow's-foot at the FK end, tick
+ * at the PK end, both flush to the horizontal tangent.
  */
-function routeEdge(
-  a: CardLayout,
-  b: CardLayout,
-  link: ErLink,
-  cards: CardLayout[],
-): EdgeGeometry {
+function routeEdge(a: CardLayout, b: CardLayout, link: ErLink): EdgeGeometry {
   const ay = colRowY(a, link.column)
   const by = colRowY(b, link.column)
-  const aL = a.x
-  const aR = a.x + a.w
-  const bL = b.x
-  const bR = b.x + b.w
-
-  // Try all four side combinations (a-left/right × b-left/right). For each, build
-  // the dodged orthogonal route and measure its length; keep the SHORTEST. This
-  // is general and self-correcting — no per-geometry heuristic to get wrong:
-  //  • Side-by-side cards win with FACING sides (the gap-channel route is short).
-  //  • Stacked/overlapping cards win with a SAME-side margin loop (the facing
-  //    channel would fall inside a card, get dodged far out, and lose on length).
-  // So the connector always leaves toward its target and never detours the long
-  // way around.
-  const build = (aSide: 1 | -1, bSide: 1 | -1) => {
-    const ax = aSide === 1 ? aR : aL
-    const bx = bSide === 1 ? bR : bL
-    const m1x = ax + aSide * STUB
-    const m2x = bx + bSide * STUB
-    let midX = (m1x + m2x) / 2
-    midX = dodgeX(midX, Math.min(ay, by), Math.max(ay, by), [a.ds.id, b.ds.id], cards)
-    const pts: Pt[] = [
-      [ax, ay],
-      [m1x, ay],
-      [midX, ay],
-      [midX, by],
-      [m2x, by],
-      [bx, by],
-    ]
-    let len = 0
-    for (let i = 1; i < pts.length; i++) {
-      len += Math.abs(pts[i][0] - pts[i - 1][0]) + Math.abs(pts[i][1] - pts[i - 1][1])
+  const aEdges: Array<{ s: 1 | -1; x: number }> = [
+    { s: -1, x: a.x },
+    { s: 1, x: a.x + a.w },
+  ]
+  const bEdges: Array<{ s: 1 | -1; x: number }> = [
+    { s: -1, x: b.x },
+    { s: 1, x: b.x + b.w },
+  ]
+  let aSide: 1 | -1 = 1
+  let bSide: 1 | -1 = -1
+  let ax = a.x + a.w
+  let bx = b.x
+  let bestGap = Infinity
+  for (const ae of aEdges) {
+    for (const be of bEdges) {
+      const gap = Math.abs(ae.x - be.x)
+      if (gap < bestGap) {
+        bestGap = gap
+        aSide = ae.s
+        bSide = be.s
+        ax = ae.x
+        bx = be.x
+      }
     }
-    return { aSide, bSide, ax, bx, midX, pts, len }
   }
-  const best = [build(1, -1), build(-1, 1), build(-1, -1), build(1, 1)].reduce((p, c) =>
-    c.len < p.len ? c : p,
-  )
-  const { aSide, bSide, ax, bx, midX, pts } = best
 
-  // Crow's-foot ("many") at the child/FK end b.
+  // Horizontal control handles. K is how far the curve pulls straight out before
+  // sweeping; the floor keeps same-side loops visibly curved.
+  const K = Math.max(48, Math.abs(bx - ax) * 0.5)
+  const c1x = ax + aSide * K
+  const c2x = bx + bSide * K
+  const d =
+    `M${ax.toFixed(1)},${ay.toFixed(1)} ` +
+    `C${c1x.toFixed(1)},${ay.toFixed(1)} ${c2x.toFixed(1)},${by.toFixed(1)} ` +
+    `${bx.toFixed(1)},${by.toFixed(1)}`
+
   const apexX = bx + bSide * 11
   const crow = {
     apex: [apexX, by] as Pt,
     t1: [bx, by - 5] as Pt,
     t2: [bx, by + 5] as Pt,
   }
-  // Single tick ("one") at the parent/PK end a.
   const tickX = ax + aSide * 7
   const tick = { x: tickX, y1: ay - 4, y2: ay + 4 }
 
+  // Label at the curve midpoint (cubic bezier at t = 0.5).
+  const lx = 0.125 * ax + 0.375 * c1x + 0.375 * c2x + 0.125 * bx
   return {
-    d: roundedPath(pts),
+    d,
     crow,
     tick,
-    label: { x: midX, y: (ay + by) / 2, text: link.column },
+    label: { x: lx, y: (ay + by) / 2, text: link.column },
   }
 }
 
